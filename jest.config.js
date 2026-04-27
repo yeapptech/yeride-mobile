@@ -1,0 +1,55 @@
+/** @type {import('jest').Config} */
+// Under RN 0.83 (Expo SDK 55's recommended pair), the jest preset is still
+// bundled inside `react-native`, so `jest-expo` works normally. RN 0.85
+// extracted it into `@react-native/jest-preset`; if we later upgrade RN past
+// the SDK 55 line we'll need to switch presets.
+module.exports = {
+  preset: 'jest-expo',
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  testMatch: [
+    '<rootDir>/src/**/__tests__/**/*.test.ts',
+    '<rootDir>/src/**/__tests__/**/*.test.tsx',
+  ],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/ios/',
+    '/android/',
+    '/.expo/',
+    '/dist/',
+  ],
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^@domain/(.*)$': '<rootDir>/src/domain/$1',
+    '^@app/(.*)$': '<rootDir>/src/app/$1',
+    '^@data/(.*)$': '<rootDir>/src/data/$1',
+    '^@presentation/(.*)$': '<rootDir>/src/presentation/$1',
+    '^@shared/(.*)$': '<rootDir>/src/shared/$1',
+  },
+  transformIgnorePatterns: [
+    // Allow Babel to transform any expo-*, @expo/*, RN, and JSX-shipping
+    // packages whose source is shipped as .ts. expo-modules-core in
+    // particular ships .ts polyfills loaded by the jest-expo preset.
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo|expo-[\\w-]+|@expo/.*|@expo-google-fonts/.*|react-clone-referenced-element|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|nativewind|react-native-css-interop)/)',
+  ],
+  collectCoverageFrom: [
+    'src/**/*.{ts,tsx}',
+    '!src/**/*.d.ts',
+    '!src/**/__tests__/**',
+    '!src/**/index.ts',
+  ],
+  coverageThreshold: {
+    global: {
+      branches: 0,
+      functions: 0,
+      lines: 0,
+      statements: 0,
+    },
+    'src/domain/**/*.ts': {
+      branches: 90,
+      functions: 100,
+      lines: 95,
+      statements: 95,
+    },
+  },
+  clearMocks: true,
+};

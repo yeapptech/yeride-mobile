@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * "Honey and the Bee" design system — see REFACTOR_PLAN.md (carry-forward from
+ * the legacy yeride app's docs/DESIGN_SYSTEM.md).
+ *
+ * Tokens are stored as RGB channel triplets (no leading #) so Tailwind's
+ * `<alpha-value>` substitution works for opacity modifiers like `bg-success/10`.
+ * tailwind.config.js wraps each one as `rgb(var(--token) / <alpha-value>)`.
+ */
+:root {
+  --background: 255 255 255; /* #ffffff */
+  --foreground: 0 0 0; /* #000000 */
+  --primary: 249 201 1; /* #f9c901 honey gold */
+  --primary-foreground: 0 0 0; /* #000000 — black on gold meets WCAG AA-large with headroom */
+  --brand-deep: 107 71 1; /* #6b4701 */
+  --brand-warm: 152 91 16; /* #985b10 */
+  --brand-muted: 137 104 0; /* #896800 */
+  --success: 21 128 61; /* #15803d — darkened from #16a34a for AA-normal on white */
+  --warning: 180 83 9; /* #b45309 — darkened from #d97706 for AA-normal on white */
+  --error: 220 38 38; /* #dc2626 */
+  --info: 3 105 161; /* #0369a1 — darkened from #0284c7 for AA-normal on white */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 0 0 0; /* #000000 */
+    --foreground: 255 255 255; /* #ffffff */
+    --primary: 246 224 0; /* #f6e000 — more luminous on black */
+    /* --primary-foreground stays #000000 (inherited) */
+    /* brown brand tokens intentionally inherit — dark enough for both modes */
+    --success: 34 197 94; /* #22c55e */
+    --warning: 251 191 36; /* #fbbf24 */
+    --error: 248 113 113; /* #f87171 */
+    --info: 56 189 248; /* #38bdf8 */
+  }
+}
