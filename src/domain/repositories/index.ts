@@ -3,5 +3,6 @@ export type {
   AuthRepository,
   RegisterUserCredentials,
 } from './AuthRepository';
+export type { RideRepository } from './RideRepository';
 export type { ServiceAreaRepository } from './ServiceAreaRepository';
 export type { UserRepository } from './UserRepository';

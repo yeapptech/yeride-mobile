@@ -1,0 +1,427 @@
+import { CancellationReason } from '@domain/entities/CancellationReason';
+import { Coordinates } from '@domain/entities/Coordinates';
+import {
+  DriverSnapshot,
+  VehicleSnapshot,
+} from '@domain/entities/DriverSnapshot';
+import { Email } from '@domain/entities/Email';
+import { Endpoint } from '@domain/entities/Endpoint';
+import { Money } from '@domain/entities/Money';
+import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import { PersonName } from '@domain/entities/PersonName';
+import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { Ride } from '@domain/entities/Ride';
+import { RideId } from '@domain/entities/RideId';
+import { RideServiceId } from '@domain/entities/RideServiceId';
+import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
+import { Route } from '@domain/entities/Route';
+import { UserId } from '@domain/entities/UserId';
+import { NetworkError } from '@domain/errors';
+
+import { InMemoryRideRepository } from '../InMemoryRideRepository';
+
+function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
+  if (!r.ok) throw r.error;
+  return r.value;
+}
+
+function usd(m: number) {
+  return unwrap(Money.fromMajor(m, 'USD'));
+}
+
+const MIAMI = unwrap(Coordinates.create(25.7617, -80.1918));
+const FORT_LAUDERDALE = unwrap(Coordinates.create(26.1224, -80.1373));
+const BAY_AREA = unwrap(Coordinates.create(37.7749, -122.4194));
+
+const PASSENGER = unwrap(
+  PassengerSnapshot.create({
+    id: unwrap(UserId.create('aaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
+    name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+    email: unwrap(Email.create('ada@yeapp.tech')),
+    phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
+    pushToken: null,
+    avatarUrl: null,
+    defaultPaymentMethod: null,
+  }),
+);
+
+const DRIVER = unwrap(
+  DriverSnapshot.create({
+    id: unwrap(UserId.create('bbbbbbbbbbbbbbbbbbbbbbbbbbbb')),
+    name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+    email: unwrap(Email.create('grace@yeapp.tech')),
+    phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+    stripeAccountId: 'acct_abc',
+    pushToken: null,
+    avatarUrl: null,
+    vehicle: unwrap(
+      VehicleSnapshot.create({
+        make: 'Toyota',
+        model: 'Camry',
+        year: 2024,
+        color: 'White',
+        licensePlate: 'ABC1234',
+        stockPhoto: null,
+        photos: [],
+      }),
+    ),
+  }),
+);
+
+const ECONOMY = unwrap(
+  RideServiceSnapshot.create({
+    id: unwrap(RideServiceId.create('economy')),
+    name: 'Economy',
+    baseFare: usd(2.5),
+    minimumFare: usd(5),
+    cancelationFee: usd(2),
+    costPerKm: usd(1.25),
+    costPerMinute: usd(0.2),
+    seatCapacity: 4,
+  }),
+);
+
+const PREMIUM = unwrap(
+  RideServiceSnapshot.create({
+    id: unwrap(RideServiceId.create('premium')),
+    name: 'Premium',
+    baseFare: usd(5),
+    minimumFare: usd(10),
+    cancelationFee: usd(5),
+    costPerKm: usd(2.5),
+    costPerMinute: usd(0.5),
+    seatCapacity: 4,
+  }),
+);
+
+function makeRide(args: {
+  id: string;
+  pickup: Coordinates;
+  service?: RideServiceSnapshot;
+  passenger?: PassengerSnapshot;
+  createdAt?: Date;
+}): Ride {
+  return unwrap(
+    Ride.create({
+      id: unwrap(RideId.create(args.id)),
+      passenger: args.passenger ?? PASSENGER,
+      rideService: args.service ?? ECONOMY,
+      pickup: unwrap(
+        Endpoint.create({
+          location: args.pickup,
+          address: 'pickup',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      dropoff: unwrap(
+        Endpoint.create({
+          location: FORT_LAUDERDALE,
+          address: 'dropoff',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      createdAt: args.createdAt ?? new Date(),
+    }),
+  );
+}
+
+function makeRoute(): Route {
+  return unwrap(
+    Route.create({
+      distanceMeters: 5_000,
+      durationSeconds: 600,
+      distanceText: '3.1 mi',
+      durationText: '10 mins',
+      encodedPolyline: '_p~iF',
+      startLocation: MIAMI,
+      endLocation: FORT_LAUDERDALE,
+      routeLabels: [],
+      tollPrice: null,
+      routeToken: 'tk',
+      description: '',
+    }),
+  );
+}
+
+describe('InMemoryRideRepository.create', () => {
+  it('stores a new ride and emits to observers', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+
+    const observed: (Ride | null)[] = [];
+    repo.observeById(ride.id, (r) => {
+      observed.push(r);
+    });
+    expect(observed).toEqual([null]); // initial null
+
+    const r = await repo.create(ride);
+    expect(r.ok).toBe(true);
+    expect(observed).toHaveLength(2);
+    expect(observed[1]?.status).toBe('awaiting_driver');
+    expect(repo.spies.create).toBe(1);
+  });
+
+  it('refuses to overwrite an existing ride', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    await repo.create(ride);
+    const r = await repo.create(ride);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('conflict');
+  });
+});
+
+describe('InMemoryRideRepository.update', () => {
+  it('replaces the existing ride and notifies observers', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    await repo.create(ride);
+
+    const observed: (Ride | null)[] = [];
+    repo.observeById(ride.id, (r) => {
+      observed.push(r);
+    });
+    const dispatched = unwrap(
+      ride.dispatch({
+        driver: DRIVER,
+        pickupDirections: makeRoute(),
+        at: new Date(),
+      }),
+    );
+    const r = await repo.update(dispatched);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.status).toBe('dispatched');
+    // observed: initial awaiting_driver, then dispatched
+    expect(observed[observed.length - 1]?.status).toBe('dispatched');
+  });
+
+  it('errors when updating a missing ride', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    const r = await repo.update(ride);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('not_found');
+  });
+});
+
+describe('InMemoryRideRepository.subscribeAvailableRides', () => {
+  it('matches awaiting_driver rides within radius and matching service', async () => {
+    const repo = new InMemoryRideRepository();
+    const inRange = makeRide({ id: 'tripInRange1234567890ab', pickup: MIAMI });
+    await repo.create(inRange);
+
+    const distant = makeRide({
+      id: 'tripDistant9876543210xy',
+      pickup: BAY_AREA,
+    });
+    await repo.create(distant);
+
+    const wrongService = makeRide({
+      id: 'tripWrongService123456ab',
+      pickup: MIAMI,
+      service: PREMIUM,
+    });
+    await repo.create(wrongService);
+
+    const calls: readonly Ride[][] = [];
+    const driverId = unwrap(UserId.create('cccccccccccccccccccccccccccc'));
+    const driverInMiami = unwrap(Coordinates.create(25.78, -80.19));
+    repo.subscribeAvailableRides({
+      driverId,
+      services: [unwrap(RideServiceId.create('economy'))],
+      driverLocation: driverInMiami,
+      callback: (rides) => {
+        (calls as Ride[][]).push([...rides]);
+      },
+    });
+
+    const initial = calls[0]!;
+    const ids = initial.map((r) => String(r.id));
+    expect(ids).toContain('tripInRange1234567890ab');
+    expect(ids).not.toContain('tripDistant9876543210xy');
+    expect(ids).not.toContain('tripWrongService123456ab');
+  });
+
+  it('re-emits when a new matching ride is created', async () => {
+    const repo = new InMemoryRideRepository();
+    const driverId = unwrap(UserId.create('cccccccccccccccccccccccccccc'));
+    const calls: readonly Ride[][] = [];
+    repo.subscribeAvailableRides({
+      driverId,
+      services: [unwrap(RideServiceId.create('economy'))],
+      driverLocation: MIAMI,
+      callback: (rides) => {
+        (calls as Ride[][]).push([...rides]);
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual([]); // no rides yet
+
+    await repo.create(
+      makeRide({ id: 'tripIdNew1234567890abcd', pickup: MIAMI }),
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toHaveLength(1);
+  });
+
+  it('drops a ride from the available list once it dispatches', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    await repo.create(ride);
+    const driverId = unwrap(UserId.create('cccccccccccccccccccccccccccc'));
+    const calls: readonly Ride[][] = [];
+    repo.subscribeAvailableRides({
+      driverId,
+      services: [unwrap(RideServiceId.create('economy'))],
+      driverLocation: MIAMI,
+      callback: (rides) => {
+        (calls as Ride[][]).push([...rides]);
+      },
+    });
+    expect(calls[0]).toHaveLength(1); // initial: ride is available
+
+    const dispatched = unwrap(
+      ride.dispatch({
+        driver: DRIVER,
+        pickupDirections: makeRoute(),
+        at: new Date(),
+      }),
+    );
+    await repo.update(dispatched);
+    expect(calls[calls.length - 1]).toHaveLength(0); // no longer available
+  });
+});
+
+describe('InMemoryRideRepository.cancel', () => {
+  it('updates status and captures spy args', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    await repo.create(ride);
+
+    const reason = unwrap(
+      CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+    );
+    const r = await repo.cancel({
+      rideId: ride.id,
+      by: 'rider',
+      reason,
+      odometerMeters: 0,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.status).toBe('cancelled');
+    expect(repo.spies.cancel).toBe(1);
+    expect(repo.spies.lastCancelArgs?.by).toBe('rider');
+  });
+
+  it('forwards the mocked cancel error', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    await repo.create(ride);
+    repo.mockCancelResult(
+      new NetworkError({
+        code: 'cancel_request_failed',
+        message: 'simulated',
+      }),
+    );
+    const r = await repo.cancel({
+      rideId: ride.id,
+      by: 'rider',
+      reason: unwrap(
+        CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+      ),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('network');
+  });
+});
+
+describe('InMemoryRideRepository.subscribeEvents/Payments', () => {
+  it('emits seeded events on subscribe', () => {
+    const repo = new InMemoryRideRepository();
+    const id = unwrap(RideId.create('tripIdAbcDef1234567890'));
+    repo.seedEvents(id, [
+      {
+        id: '2026-04-27T00:00:00.000Z',
+        type: 'create',
+        event: 'Trip created',
+        extras: {},
+        createdAt: new Date('2026-04-27T00:00:00Z'),
+      },
+    ]);
+    let received: readonly { id: string }[] = [];
+    repo.subscribeEvents({
+      rideId: id,
+      callback: (events) => {
+        received = events;
+      },
+    });
+    expect(received).toHaveLength(1);
+  });
+
+  it('emits seeded payments newest-first on subscribe', () => {
+    const repo = new InMemoryRideRepository();
+    const id = unwrap(RideId.create('tripIdAbcDef1234567890'));
+    repo.seedPayments(id, [
+      {
+        id: 'old',
+        type: 'fare',
+        amount: usd(10),
+        status: 'succeeded',
+        createdAt: new Date('2026-04-27T00:00:00Z'),
+      },
+      {
+        id: 'new',
+        type: 'tip',
+        amount: usd(2),
+        status: 'succeeded',
+        createdAt: new Date('2026-04-27T00:05:00Z'),
+      },
+    ]);
+    let received: readonly { id: string }[] = [];
+    repo.subscribePayments({
+      rideId: id,
+      callback: (payments) => {
+        received = payments;
+      },
+    });
+    expect(received.map((p) => p.id)).toEqual(['new', 'old']);
+  });
+});
+
+describe('InMemoryRideRepository.listByPassenger', () => {
+  it('filters by passenger and returns most-recent first', async () => {
+    const repo = new InMemoryRideRepository();
+    const a = makeRide({
+      id: 'tripA12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T10:00:00Z'),
+    });
+    const b = makeRide({
+      id: 'tripB12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T11:00:00Z'),
+    });
+    await repo.create(a);
+    await repo.create(b);
+    const r = await repo.listByPassenger({ passengerId: PASSENGER.id });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value).toHaveLength(2);
+      expect(String(r.value[0]!.id)).toBe('tripB12345678901234567890');
+    }
+  });
+
+  it('honours the statuses filter', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
+    await repo.create(ride);
+    const r = await repo.listByPassenger({
+      passengerId: PASSENGER.id,
+      statuses: ['completed'],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toEqual([]);
+  });
+});
