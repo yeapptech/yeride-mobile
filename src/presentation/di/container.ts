@@ -27,6 +27,7 @@ import { ObserveTripEvents } from '@app/usecases/ride/ObserveTripEvents';
 import { RequestPayment } from '@app/usecases/ride/RequestPayment';
 import { StartRide } from '@app/usecases/ride/StartRide';
 import { ComputeRoutes } from '@app/usecases/route/ComputeRoutes';
+import { EstimateFare } from '@app/usecases/route/EstimateFare';
 import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
 import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
 import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
@@ -116,6 +117,9 @@ export interface UseCases {
   // Google Routes API (Phase 2 turn 2)
   computeRoutes: ComputeRoutes;
 
+  // Pre-trip fare estimate (Phase 3 turn 2)
+  estimateFare: EstimateFare;
+
   // Ride lifecycle (Phase 2 turn 3)
   createRide: CreateRide;
   observeRide: ObserveRide;
@@ -178,6 +182,7 @@ export function makeUseCases(args: {
     resolveActiveServiceArea: new ResolveActiveServiceArea(args.serviceAreas),
     listRideServices: new ListRideServices(args.serviceAreas),
     computeRoutes: new ComputeRoutes(args.routes),
+    estimateFare: new EstimateFare(),
     createRide: new CreateRide(args.rides),
     observeRide: new ObserveRide(args.rides),
     listAvailableRides: new ListAvailableRides(args.rides),

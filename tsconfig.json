@@ -27,7 +27,8 @@
       "@app/*": ["./src/app/*"],
       "@data/*": ["./src/data/*"],
       "@presentation/*": ["./src/presentation/*"],
-      "@shared/*": ["./src/shared/*"]
+      "@shared/*": ["./src/shared/*"],
+      "react-native-maps": ["./src/shared/types/react-native-maps.d.ts"]
     },
     "types": ["jest", "node"]
   },

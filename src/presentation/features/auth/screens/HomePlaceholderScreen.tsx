@@ -21,18 +21,29 @@ export function HomePlaceholderScreen({
           You're signed in
         </Text>
         <Text className="text-base text-muted-foreground mb-8 text-center">
-          Phase 1 placeholder home. Rider and driver flows land in Phase 3+.
+          Phase 3 placeholder home. Full RiderTabsNavigator + DriverNavigator
+          land in turn 3.3.
         </Text>
+
+        <Pressable
+          onPress={() => {
+            navigation.navigate('RouteSearch');
+          }}
+          className="bg-primary rounded-lg px-6 py-3 mb-3 active:opacity-70"
+          testID="open-route-search"
+        >
+          <Text className="text-primary-foreground font-semibold">
+            Plan a ride
+          </Text>
+        </Pressable>
 
         <Pressable
           onPress={() => {
             navigation.navigate('UserProfile');
           }}
-          className="bg-primary rounded-lg px-6 py-3 mb-4 active:opacity-70"
+          className="bg-muted rounded-lg px-6 py-3 mb-4 active:opacity-70"
         >
-          <Text className="text-primary-foreground font-semibold">
-            Edit profile
-          </Text>
+          <Text className="font-semibold text-foreground">Edit profile</Text>
         </Pressable>
 
         <Pressable

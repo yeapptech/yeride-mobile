@@ -38,6 +38,15 @@ export type MainStackParamList = {
   Home: undefined;
   /** Profile editor. Reachable from Home for now. */
   UserProfile: undefined;
+  /** Phase 3 turn 2: pickup + dropoff entry via Google Places autocomplete. */
+  RouteSearch: undefined;
+  /**
+   * Phase 3 turn 2: route alternatives + ride-service tier picker. Reads
+   * pickup/dropoff from `useTripDraftStore`; writes back the selected
+   * route index + ride-service id. The actual `CreateRide` call is wired
+   * in turn 3.3.
+   */
+  RouteSelect: undefined;
 };
 
 /**
