@@ -24,6 +24,7 @@ import { ListRidesByPassenger } from '@app/usecases/ride/ListRidesByPassenger';
 import { ObserveLatestMessage } from '@app/usecases/ride/ObserveLatestMessage';
 import { ObserveRide } from '@app/usecases/ride/ObserveRide';
 import { ObserveTripEvents } from '@app/usecases/ride/ObserveTripEvents';
+import { ObserveTripPayments } from '@app/usecases/ride/ObserveTripPayments';
 import { RequestPayment } from '@app/usecases/ride/RequestPayment';
 import { StartRide } from '@app/usecases/ride/StartRide';
 import { ComputeRoutes } from '@app/usecases/route/ComputeRoutes';
@@ -31,7 +32,6 @@ import { EstimateFare } from '@app/usecases/route/EstimateFare';
 import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
 import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
 import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
-import { GreetUser } from '@app/usecases/shared/GreetUser';
 import { EvaluateExitWarning } from '@app/usecases/trip-tracking/EvaluateExitWarning';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
 import type { FirestoreLocationRepository as FirestoreLocationRepositoryType } from '@data/repositories/FirestoreLocationRepository';
@@ -89,10 +89,6 @@ import type {
  */
 
 export interface UseCases {
-  // Phase 0 smoke artifact — kept dormant until next major version cleanup
-  // (the runtime nav no longer reaches HelloYeRideScreen).
-  greetUser: GreetUser;
-
   // Auth + identity
   registerUser: RegisterUser;
   logInUser: LogInUser;
@@ -135,6 +131,7 @@ export interface UseCases {
   listRidesByPassenger: ListRidesByPassenger;
   observeTripEvents: ObserveTripEvents;
   observeLatestMessage: ObserveLatestMessage;
+  observeTripPayments: ObserveTripPayments;
 
   // Trip-tracking domain logic (Phase 3 turn 1; full GPS lifecycle Phase 4)
   evaluateExitWarning: EvaluateExitWarning;
@@ -163,7 +160,6 @@ export function makeUseCases(args: {
 }): UseCases {
   const clock = args.clock ?? (() => new Date());
   return {
-    greetUser: new GreetUser(),
     registerUser: new RegisterUser(args.auth, args.users, clock),
     logInUser: new LogInUser(args.auth),
     logOutUser: new LogOutUser(args.auth),
@@ -195,6 +191,7 @@ export function makeUseCases(args: {
     listRidesByPassenger: new ListRidesByPassenger(args.rides),
     observeTripEvents: new ObserveTripEvents(args.rides),
     observeLatestMessage: new ObserveLatestMessage(),
+    observeTripPayments: new ObserveTripPayments(args.rides),
     evaluateExitWarning: new EvaluateExitWarning(),
     updateUserLocation: new UpdateUserLocation(args.locations),
     subscribeToUserLocation: new SubscribeToUserLocation(args.locations),
