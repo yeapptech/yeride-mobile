@@ -81,6 +81,21 @@ export interface RideRepository {
   }): Promise<Result<readonly Ride[], NetworkError>>;
 
   /**
+   * Trips for the given driver, optionally filtered to a status set.
+   * Used by the driver's history + in-progress (DriverHome resumption).
+   *
+   * Rides with no driver yet (`driver === null`, the awaiting_driver
+   * state) are excluded — this method is "rides this driver has accepted
+   * or completed", not "rides this driver could accept" (that's
+   * `subscribeAvailableRides`).
+   */
+  listByDriver(args: {
+    driverId: UserId;
+    statuses?: readonly Ride['status'][];
+    limit?: number;
+  }): Promise<Result<readonly Ride[], NetworkError>>;
+
+  /**
    * Live "rides near me" subscription for drivers. The adapter is
    * responsible for the Firestore `where status in ['awaiting_driver',
    * 'scheduled']` query, the `rideService.id in services` filter, and the

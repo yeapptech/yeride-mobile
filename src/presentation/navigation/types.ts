@@ -76,12 +76,40 @@ export type RiderStackParamList = {
 };
 
 /**
- * Driver shell. Phase 3 turn 3 ships only a placeholder informing the
- * driver that mode lands in Phase 4. Phase 4 replaces this stack with
- * DriverTabs + DriverDispatch / DriverMonitor / DriverNavigation modals.
+ * Bottom tabs inside the driver experience. Phase 4 turn 1 mounts:
+ *   - `DriverHome` — placeholder with online toggle (Turn 2 replaces with
+ *     the real map + ride-cards screen).
+ *   - `Activity` — placeholder, real ride-history view lands in Phase 5.
+ *   - `Earnings` — placeholder, Stripe Connect surface lands in Phase 6.
+ *   - `Profile` — reuses the same `UserProfileScreen` the rider tabs use.
+ */
+export type DriverTabsParamList = {
+  DriverHome: undefined;
+  Activity: undefined;
+  Earnings: undefined;
+  Profile: undefined;
+};
+
+/**
+ * Native-stack hosting the driver tabs + every modal / pushed screen on
+ * top. Phase 4 turn 2 adds the `DriverDispatch` route (placeholder
+ * screen — Turn 3 swaps it for the real accept/decline flow). Later
+ * turns push:
+ *   - `DriverMonitor`  — active-trip surface (Turns 4a / 4b).
  */
 export type DriverStackParamList = {
-  DriverPlaceholder: undefined;
+  DriverTabs: NavigatorScreenParams<DriverTabsParamList>;
+  /**
+   * Incoming-ride dispatch surface. The DriverHome ride-card tap pushes
+   * here with the rideId; Turn 3 wires the real accept/decline use cases.
+   */
+  DriverDispatch: { rideId: string };
+  /**
+   * Profile editor reachable as a modal from the Profile tab. Same screen
+   * that the Profile tab points at, but pushed instead of root-mounted, so
+   * the tab bar hides while editing — same pattern as the rider stack.
+   */
+  UserProfile: undefined;
 };
 
 /**
@@ -113,6 +141,12 @@ export type RiderTabsScreenProps<T extends keyof RiderTabsParamList> =
 export type DriverStackScreenProps<T extends keyof DriverStackParamList> =
   NativeStackScreenProps<DriverStackParamList, T>;
 
+export type DriverTabsScreenProps<T extends keyof DriverTabsParamList> =
+  CompositeScreenProps<
+    BottomTabScreenProps<DriverTabsParamList, T>,
+    NativeStackScreenProps<DriverStackParamList, 'DriverTabs'>
+  >;
+
 export type AuthStackNavigation = NativeStackNavigationProp<AuthStackParamList>;
 export type VerifyEmailStackNavigation =
   NativeStackNavigationProp<VerifyEmailStackParamList>;
@@ -121,6 +155,7 @@ export type RiderStackNavigation =
 export type RiderTabsNavigation = BottomTabNavigationProp<RiderTabsParamList>;
 export type DriverStackNavigation =
   NativeStackNavigationProp<DriverStackParamList>;
+export type DriverTabsNavigation = BottomTabNavigationProp<DriverTabsParamList>;
 
 /**
  * Composite screen props for screens nested deeper than the root stack.

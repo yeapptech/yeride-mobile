@@ -168,6 +168,25 @@ export class InMemoryRideRepository implements RideRepository {
     return Result.ok(sliced);
   }
 
+  async listByDriver(args: {
+    driverId: UserId;
+    statuses?: readonly RideStatus[];
+    limit?: number;
+  }): Promise<Result<readonly Ride[], NetworkError>> {
+    const matching: Ride[] = [];
+    for (const r of this.rides.values()) {
+      // Rides with no driver yet (awaiting_driver) are excluded — this is
+      // "rides this driver has accepted", not "rides this driver could
+      // accept" (which is `subscribeAvailableRides`).
+      if (!r.driver || r.driver.id !== args.driverId) continue;
+      if (args.statuses && !args.statuses.includes(r.status)) continue;
+      matching.push(r);
+    }
+    matching.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const sliced = args.limit ? matching.slice(0, args.limit) : matching;
+    return Result.ok(sliced);
+  }
+
   subscribeAvailableRides(args: {
     driverId: UserId;
     services: readonly RideServiceId[];

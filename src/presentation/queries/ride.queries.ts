@@ -8,8 +8,10 @@ import {
 
 import type { CreateRideInput } from '@app/usecases/ride/CreateRide';
 import type { CancellationReason } from '@domain/entities/CancellationReason';
+import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
+import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { UserId } from '@domain/entities/UserId';
 import type {
@@ -20,6 +22,7 @@ import type {
   ValidationError,
 } from '@domain/errors';
 import { useUseCases } from '@presentation/di';
+import { useUseCaseSubscription } from '@presentation/hooks';
 
 import { queryKeys } from './keys';
 
@@ -137,6 +140,119 @@ export function useInProgressRideQuery(
       return r.value[0] ?? null;
     },
     enabled: passengerId !== null,
+  });
+}
+
+/**
+ * Driver-side equivalent of `useInProgressRideQuery`. Used by DriverHome
+ * to redirect into DriverMonitor when the driver has a ride mid-flight
+ * (cold-launch resumption, accidental back-out, etc.).
+ *
+ * Driver-active statuses are a strict subset of `ACTIVE_STATUSES` — a
+ * driver can't be "assigned" to a ride that's still in `awaiting_driver`
+ * (no driver yet) or pure `scheduled` (also no driver yet). The driver's
+ * trip starts at `scheduled_driver_accepted` / `dispatched`.
+ */
+const DRIVER_ACTIVE_STATUSES: readonly RideStatus[] = [
+  'scheduled_driver_accepted',
+  'dispatched',
+  'started',
+  'payment_requested',
+  'payment_failed',
+];
+
+export function useInProgressDriverRideQuery(
+  driverId: UserId | null,
+): UseQueryResult<Ride | null, NetworkError> {
+  const useCases = useUseCases();
+  return useQuery({
+    queryKey: driverId
+      ? queryKeys.ride.listByDriver(driverId, DRIVER_ACTIVE_STATUSES)
+      : ['ride', 'listByDriver', null, 'active'],
+    queryFn: async (): Promise<Ride | null> => {
+      if (!driverId) return null;
+      const r = await useCases.listRidesByDriver.execute({
+        driverId,
+        statuses: DRIVER_ACTIVE_STATUSES,
+        limit: 1,
+      });
+      if (!r.ok) throw r.error;
+      return r.value[0] ?? null;
+    },
+    enabled: driverId !== null,
+  });
+}
+
+/**
+ * Live "rides waiting for a driver" subscription, scoped to the driver's
+ * service tiers and current location. Subscription-shaped — wraps the
+ * `ListAvailableRides` use case via `useUseCaseSubscription` (same
+ * pattern `useRideMonitorViewModel` uses for `ObserveRide`).
+ *
+ * The subscription is gated by `enabled`: when the driver is offline, or
+ * we don't yet have their location / services list, we DON'T subscribe.
+ * The hook still has to be called unconditionally (Rules of Hooks); the
+ * gate becomes a stable no-op subscriber.
+ *
+ * Returns `readonly Ride[]` directly. No TanStack Query cache — live
+ * subscriptions are a different access pattern (continuous push) and
+ * mixing them with TanStack creates two sources of truth. Callers that
+ * need the cache equivalent (terminal-state ride list) use
+ * `useRidesByPassengerQuery` / `useRidesByDriverQuery`.
+ */
+export function useAvailableRidesQuery(args: {
+  readonly driverId: UserId | null;
+  readonly services: readonly RideServiceId[];
+  readonly driverLocation: Coordinates | null;
+  readonly enabled: boolean;
+}): readonly Ride[] {
+  const useCases = useUseCases();
+  const { driverId, services, driverLocation, enabled } = args;
+  const canSubscribe =
+    enabled &&
+    driverId !== null &&
+    driverLocation !== null &&
+    services.length > 0;
+  return useUseCaseSubscription<
+    readonly Ride[],
+    {
+      driverId: UserId;
+      services: readonly RideServiceId[];
+      driverLocation: Coordinates;
+    }
+  >({
+    useCase: {
+      execute: (
+        execArgs: {
+          driverId: UserId;
+          services: readonly RideServiceId[];
+          driverLocation: Coordinates;
+        } & { callback: (rides: readonly Ride[]) => void },
+      ) => {
+        if (!canSubscribe) {
+          // No-op subscriber. Emits an empty array once and never again.
+          execArgs.callback([]);
+          return () => undefined;
+        }
+        return useCases.listAvailableRides.execute(execArgs);
+      },
+    },
+    args: {
+      // Safe casts: when canSubscribe is false the no-op branch above
+      // ignores these. When true, the gate guarantees they're non-null.
+      driverId: driverId as UserId,
+      services,
+      driverLocation: driverLocation as Coordinates,
+    },
+    deps: [
+      useCases,
+      canSubscribe,
+      driverId === null ? null : String(driverId),
+      services.map(String).sort().join(','),
+      driverLocation?.latitude ?? null,
+      driverLocation?.longitude ?? null,
+    ],
+    initialValue: [],
   });
 }
 

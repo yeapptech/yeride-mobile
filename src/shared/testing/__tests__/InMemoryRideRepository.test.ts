@@ -425,3 +425,79 @@ describe('InMemoryRideRepository.listByPassenger', () => {
     if (r.ok) expect(r.value).toEqual([]);
   });
 });
+
+describe('InMemoryRideRepository.listByDriver', () => {
+  it('returns rides this driver has accepted, most-recent first', async () => {
+    const repo = new InMemoryRideRepository();
+    const a = makeRide({
+      id: 'tripA12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T10:00:00Z'),
+    });
+    const b = makeRide({
+      id: 'tripB12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T11:00:00Z'),
+    });
+    await repo.create(a);
+    await repo.create(b);
+    // Dispatch both to the same driver. The repo's update path is what
+    // persists the new driver field — same as production flow.
+    await repo.update(
+      unwrap(
+        a.dispatch({
+          driver: DRIVER,
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+    await repo.update(
+      unwrap(
+        b.dispatch({
+          driver: DRIVER,
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+    const r = await repo.listByDriver({ driverId: DRIVER.id });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value).toHaveLength(2);
+      expect(String(r.value[0]!.id)).toBe('tripB12345678901234567890');
+    }
+  });
+
+  it('excludes rides with no driver yet (awaiting_driver)', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripUndispatchedAbc12', pickup: MIAMI });
+    await repo.create(ride);
+    const r = await repo.listByDriver({ driverId: DRIVER.id });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toEqual([]);
+  });
+
+  it('honours the statuses filter', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripStatusFilter1234', pickup: MIAMI });
+    await repo.create(ride);
+    await repo.update(
+      unwrap(
+        ride.dispatch({
+          driver: DRIVER,
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+    // The dispatched ride is in 'dispatched' status; filtering for
+    // 'completed' should return nothing.
+    const r = await repo.listByDriver({
+      driverId: DRIVER.id,
+      statuses: ['completed'],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toEqual([]);
+  });
+});

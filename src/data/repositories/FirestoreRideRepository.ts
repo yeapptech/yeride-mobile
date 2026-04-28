@@ -200,6 +200,43 @@ export class FirestoreRideRepository implements RideRepository {
     }
   }
 
+  async listByDriver(args: {
+    driverId: UserId;
+    statuses?: readonly RideStatus[];
+    limit?: number;
+  }): Promise<Result<readonly Ride[], NetworkError>> {
+    try {
+      // Mirrors listByPassenger: equality on `driver.id`, server-side
+      // ordering by createdDateTime desc. Optional status filter applied
+      // client-side to avoid a composite index requirement (legacy did
+      // the same — keeps the rewrite query-pattern-compatible).
+      const baseQ = query(
+        collection(this.firestore, TRIPS),
+        where('driver.id', '==', String(args.driverId)),
+        orderBy('createdDateTime', 'desc'),
+      );
+      const q = args.limit ? query(baseQ, fsLimit(args.limit)) : baseQ;
+      const snap = await getDocs(q);
+      const out: Ride[] = [];
+      snap.forEach((d) => {
+        const r = this.toDomainOrCorrupt(d.id, d.data());
+        if (!r.ok) return;
+        if (args.statuses && !args.statuses.includes(r.value.status)) return;
+        out.push(r.value);
+      });
+      return Result.ok(out);
+    } catch (e) {
+      logger.warn('listByDriver failed', { code: errCode(e) });
+      return Result.err(
+        new NetworkError({
+          code: 'ride_list_failed',
+          message: 'Could not load driver trips',
+          cause: e,
+        }),
+      );
+    }
+  }
+
   subscribeAvailableRides(args: {
     driverId: UserId;
     services: readonly RideServiceId[];

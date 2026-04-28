@@ -1,23 +1,46 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-import DriverPlaceholderScreen from '@presentation/features/driver/screens/DriverPlaceholderScreen';
+import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
+import DriverDispatchPlaceholderScreen from '@presentation/features/driver/screens/DriverDispatchPlaceholderScreen';
 
+import { DriverTabsNavigator } from './DriverTabsNavigator';
 import type { DriverStackParamList } from './types';
 
 /**
- * Phase 3 turn 3 driver shell — a single placeholder screen. Phase 4
- * replaces this with DriverTabs (Home / Activity / Earnings / Profile)
- * + DriverDispatch / DriverMonitor / DriverNavigation modals.
+ * Native-stack hosting the driver tabs + every modal / pushed screen on
+ * top. Phase 4 turn 1 mounts the tabs and the modal `UserProfile` only
+ * (mirrors the rider stack). Later turns push:
+ *   - `DriverDispatch` — incoming-ride accept/decline (Turn 3).
+ *   - `DriverMonitor`  — active-trip surface (Turns 4a / 4b).
+ *
+ * `headerBackButtonDisplayMode: 'minimal'` matches the convention used in
+ * `AuthNavigator` and `RiderNavigator` (legacy `headerBackTitleVisible:
+ * false` was removed in React Navigation 7).
  */
 const Stack = createNativeStackNavigator<DriverStackParamList>();
 
 export function DriverNavigator() {
   return (
-    <Stack.Navigator screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}>
+    <Stack.Navigator
+      initialRouteName="DriverTabs"
+      screenOptions={{
+        headerBackButtonDisplayMode: 'minimal',
+      }}
+    >
       <Stack.Screen
-        name="DriverPlaceholder"
-        component={DriverPlaceholderScreen}
-        options={{ title: 'YeRide Next' }}
+        name="DriverTabs"
+        component={DriverTabsNavigator}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="DriverDispatch"
+        component={DriverDispatchPlaceholderScreen}
+        options={{ title: 'Incoming ride' }}
+      />
+      <Stack.Screen
+        name="UserProfile"
+        component={UserProfileScreen}
+        options={{ title: 'Profile' }}
       />
     </Stack.Navigator>
   );

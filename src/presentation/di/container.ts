@@ -20,6 +20,7 @@ import { CreateRide } from '@app/usecases/ride/CreateRide';
 import { DispatchRide } from '@app/usecases/ride/DispatchRide';
 import { GetRideById } from '@app/usecases/ride/GetRideById';
 import { ListAvailableRides } from '@app/usecases/ride/ListAvailableRides';
+import { ListRidesByDriver } from '@app/usecases/ride/ListRidesByDriver';
 import { ListRidesByPassenger } from '@app/usecases/ride/ListRidesByPassenger';
 import { ObserveLatestMessage } from '@app/usecases/ride/ObserveLatestMessage';
 import { ObserveRide } from '@app/usecases/ride/ObserveRide';
@@ -126,9 +127,10 @@ export interface UseCases {
   cancelRideByRider: CancelRideByRider;
   cancelRideByDriver: CancelRideByDriver;
 
-  // Ride read paths (Phase 3 turn 1)
+  // Ride read paths (Phase 3 turn 1; ListRidesByDriver added Phase 4 turn 2)
   getRideById: GetRideById;
   listRidesByPassenger: ListRidesByPassenger;
+  listRidesByDriver: ListRidesByDriver;
   observeTripEvents: ObserveTripEvents;
   observeLatestMessage: ObserveLatestMessage;
   observeTripPayments: ObserveTripPayments;
@@ -189,6 +191,7 @@ export function makeUseCases(args: {
     cancelRideByDriver: new CancelRideByDriver(args.rides),
     getRideById: new GetRideById(args.rides),
     listRidesByPassenger: new ListRidesByPassenger(args.rides),
+    listRidesByDriver: new ListRidesByDriver(args.rides),
     observeTripEvents: new ObserveTripEvents(args.rides),
     observeLatestMessage: new ObserveLatestMessage(),
     observeTripPayments: new ObserveTripPayments(args.rides),

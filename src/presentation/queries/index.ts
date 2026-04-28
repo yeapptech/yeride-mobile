@@ -1,7 +1,9 @@
 export { queryKeys } from './keys';
 export {
+  useAvailableRidesQuery,
   useCancelRideAsRiderMutation,
   useCreateRideMutation,
+  useInProgressDriverRideQuery,
   useInProgressRideQuery,
   useRideQuery,
   useRidesByPassengerQuery,

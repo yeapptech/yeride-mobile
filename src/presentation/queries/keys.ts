@@ -75,6 +75,44 @@ export const queryKeys = {
     /** Convenience prefix for "any list keyed on this passenger". */
     listsForPassenger: (passengerId: UserId) =>
       ['ride', 'listByPassenger', String(passengerId)] as const,
+    /**
+     * Driver-scoped lists. Same shape as `listByPassenger` — the driver's
+     * accepted/in-flight rides, optionally narrowed by status. Used by
+     * DriverHome resumption + the future driver Activity tab.
+     */
+    listByDriver: (
+      driverId: UserId,
+      statuses: readonly RideStatus[] | undefined,
+    ) =>
+      [
+        'ride',
+        'listByDriver',
+        String(driverId),
+        statuses ? [...statuses].sort() : null,
+      ] as const,
+    /** Convenience prefix for "any list keyed on this driver". */
+    listsForDriver: (driverId: UserId) =>
+      ['ride', 'listByDriver', String(driverId)] as const,
+    /**
+     * Driver-side: the live "rides near me" subscription key. Includes the
+     * driver's coarsened position (5-decimal lat/lng) so a small move
+     * doesn't churn the cache, and the sorted services list so the cache
+     * separates per-tier subscriptions cleanly.
+     */
+    available: (args: {
+      readonly driverId: UserId;
+      readonly services: readonly string[];
+      readonly lat: number;
+      readonly lng: number;
+    }) =>
+      [
+        'ride',
+        'available',
+        String(args.driverId),
+        [...args.services].sort(),
+        round5(args.lat),
+        round5(args.lng),
+      ] as const,
     /** Audit-event subcollection. */
     events: (rideId: RideId) => ['ride', 'events', String(rideId)] as const,
     /** Receipt subcollection. */

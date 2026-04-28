@@ -37,3 +37,10 @@ export {
   useChatLastReadAt,
   useChatUiStore,
 } from './useChatUiStore';
+export {
+  useActiveVehicleId,
+  useDriverMode,
+  useDriverStatusStore,
+  useIsDriverOnline,
+  type DriverMode,
+} from './useDriverStatusStore';
