@@ -3,12 +3,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Endpoint } from '@domain/entities/Endpoint';
 import type { Money } from '@domain/entities/Money';
+import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import type { RideId } from '@domain/entities/RideId';
 import type { RideService } from '@domain/entities/RideService';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
+import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import type { Route } from '@domain/entities/Route';
 import type { DomainError } from '@domain/errors';
 import { useUseCases } from '@presentation/di';
-import type { MainStackNavigation } from '@presentation/navigation/types';
+import type { RiderStackNavigation } from '@presentation/navigation/types';
+import {
+  useCurrentUserQuery,
+  useCreateRideMutation,
+} from '@presentation/queries';
 import { useActiveServiceArea, useTripDraftStore } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
@@ -66,19 +73,25 @@ export interface UseRouteSelectViewModel {
   selectRideService: (id: RideServiceId) => void;
   setAvoidTolls: (avoid: boolean) => void;
   retry: () => void;
+  /** True while `confirm()` is in flight (CreateRide pending). */
+  readonly isSubmitting: boolean;
+  /** Last submission error, surfaced as a friendly string. */
+  readonly submitError: string | null;
   /**
-   * Phase 3 turn 2 stub: marks the draft as ready for `CreateRide`.
-   * Returns `true` if the selection was complete; the screen handles
-   * navigation. Turn 3.3 wires the real RiderHome → confirm flow.
+   * Build a Ride from the trip-draft state, mint an id via the repo, and
+   * persist via `useCreateRideMutation`. Resolves to the new RideId on
+   * success or `null` if the draft was incomplete / submission failed
+   * (the error is exposed via `submitError`). The screen navigates to
+   * RideMonitor on success.
    */
-  confirm: () => boolean;
+  confirm: () => Promise<RideId | null>;
 }
 
 const COMPUTE_DEBOUNCE_MS = 300;
 
 export function useRouteSelectViewModel(): UseRouteSelectViewModel {
   const useCases = useUseCases();
-  const navigation = useNavigation<MainStackNavigation>();
+  const navigation = useNavigation<RiderStackNavigation>();
 
   const pickup = useTripDraftStore((s) => s.pickup);
   const dropoff = useTripDraftStore((s) => s.dropoff);
@@ -241,17 +254,111 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
     })();
   }, [pickup, dropoff, avoidTolls, useCases, setRouteAlternatives]);
 
-  const confirm = useCallback((): boolean => {
-    if (!canConfirm) return false;
-    // Phase 3 turn 2 stops here. Turn 3.3 will navigate to RideMonitor
-    // after calling CreateRide; the trip-draft state is already where it
-    // needs to be for that to work.
-    logger.info('confirm: trip draft ready for CreateRide', {
-      selectedRouteIndex,
-      selectedRideServiceId: String(selectedRideServiceId),
+  const currentUserQuery = useCurrentUserQuery();
+  const createRideMutation = useCreateRideMutation();
+  const reset = useTripDraftStore((s) => s.reset);
+
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const confirm = useCallback(async (): Promise<RideId | null> => {
+    setSubmitError(null);
+    if (!canConfirm) return null;
+    if (!pickup || !dropoff || !selectedRoute || !selectedRideServiceId) {
+      // canConfirm narrows these but TS can't see across closures.
+      return null;
+    }
+
+    const user = currentUserQuery.data;
+    if (!user) {
+      setSubmitError('Your profile is still loading — try again in a moment.');
+      return null;
+    }
+    if (!user.phone) {
+      setSubmitError(
+        'Add a phone number on your profile so the driver can reach you.',
+      );
+      return null;
+    }
+
+    const passengerR = PassengerSnapshot.create({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phoneNumber: user.phone,
+      pushToken: null,
+      avatarUrl: user.avatarUrl,
+      defaultPaymentMethod: null,
     });
-    return true;
-  }, [canConfirm, selectedRouteIndex, selectedRideServiceId]);
+    if (!passengerR.ok) {
+      logger.error('confirm: passenger snapshot failed', passengerR.error);
+      setSubmitError('Could not build your trip — try again.');
+      return null;
+    }
+
+    const tier = services.find((s) => s.id === selectedRideServiceId);
+    if (!tier) {
+      setSubmitError('Selected ride service is no longer available.');
+      return null;
+    }
+    const tierR = RideServiceSnapshot.create({
+      id: tier.id,
+      name: tier.name,
+      baseFare: tier.baseFare,
+      minimumFare: tier.minimumFare,
+      cancelationFee: tier.cancelationFee,
+      costPerKm: tier.costPerKm,
+      costPerMinute: tier.costPerMinute,
+      seatCapacity: tier.seatCapacity,
+    });
+    if (!tierR.ok) {
+      logger.error('confirm: ride-service snapshot failed', tierR.error);
+      setSubmitError('Could not build your trip — try again.');
+      return null;
+    }
+
+    // Bake the selected route's directions into the dropoff endpoint so
+    // the trip carries the route the rider chose, and so the driver's UI
+    // can replay it via `routeToken` at dispatch time.
+    try {
+      const ride = await createRideMutation.mutateAsync({
+        passenger: passengerR.value,
+        rideService: tierR.value,
+        // `withDirections` returns a fresh Endpoint with the selected
+        // route attached; pickup directions (driver → pickup) are unset
+        // until dispatch.
+        pickup,
+        dropoff: dropoff.withDirections(selectedRoute),
+        createdAt: new Date(),
+        routePreference: {
+          avoidTolls,
+          selectedRouteSummary: selectedRoute.description || null,
+          routeToken: selectedRoute.routeToken,
+        },
+      });
+      reset();
+      logger.info('confirm: ride created', { rideId: String(ride.id) });
+      return ride.id;
+    } catch (e: unknown) {
+      logger.error('confirm: createRide failed', e);
+      setSubmitError(
+        e instanceof Error
+          ? e.message
+          : 'Could not start your ride — please try again.',
+      );
+      return null;
+    }
+  }, [
+    canConfirm,
+    pickup,
+    dropoff,
+    selectedRoute,
+    selectedRideServiceId,
+    services,
+    avoidTolls,
+    currentUserQuery.data,
+    createRideMutation,
+    reset,
+  ]);
 
   return {
     status,
@@ -270,6 +377,8 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
     selectRideService,
     setAvoidTolls,
     retry,
+    isSubmitting: createRideMutation.isPending,
+    submitError,
     confirm,
   };
 }

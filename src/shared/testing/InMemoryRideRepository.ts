@@ -1,7 +1,7 @@
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride, RideCancellation } from '@domain/entities/Ride';
-import type { RideId } from '@domain/entities/RideId';
+import { RideId } from '@domain/entities/RideId';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
@@ -77,6 +77,22 @@ export class InMemoryRideRepository implements RideRepository {
   } = null;
 
   /* ────────── RideRepository ────────── */
+
+  newId(): RideId {
+    // Firestore's auto-id is a 20-char alphanumeric. We mirror that shape so
+    // tests built against `RideId.create()`'s validation regex pass without
+    // surprises. `Math.random` is fine here — these ids never escape the
+    // test process.
+    const chars =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let value = '';
+    for (let i = 0; i < 20; i += 1) {
+      value += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    const r = RideId.create(value);
+    if (!r.ok) throw r.error;
+    return r.value;
+  }
 
   async create(
     ride: Ride,

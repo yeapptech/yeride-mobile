@@ -13,3 +13,4 @@ export {
   useServiceAreasQuery,
 } from './serviceArea.queries';
 export { useUpdateLocationMutation } from './location.queries';
+export { useCurrentUserQuery } from './user.queries';

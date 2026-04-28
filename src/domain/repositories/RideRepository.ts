@@ -33,6 +33,15 @@ import type { Result } from '../shared/Result';
  */
 export interface RideRepository {
   /**
+   * Mint a fresh, server-safe RideId without writing anything. Lets callers
+   * (the rider's `Ride.create` factory) build a complete Ride aggregate
+   * before the repository's `create` writes it. Backed by Firestore's
+   * `doc(collection).id` for the real adapter; the in-memory fake
+   * generates a Firestore-style 20-char alphanumeric.
+   */
+  newId(): RideId;
+
+  /**
    * Rider creates a new awaiting_driver ride. Direct Firestore write.
    */
   create(ride: Ride): Promise<Result<Ride, ConflictError | ValidationError>>;

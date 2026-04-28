@@ -15,7 +15,7 @@ import {
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
-import type { RideId } from '@domain/entities/RideId';
+import { RideId } from '@domain/entities/RideId';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
@@ -74,6 +74,16 @@ const DEFAULT_AVAILABLE_RADIUS_METERS = 80_467; // 50 mi (legacy)
 export class FirestoreRideRepository implements RideRepository {
   private readonly firestore = getFirestore();
   private readonly cloudFunctions = new CloudFunctionsService();
+
+  newId(): RideId {
+    // Firestore's auto-id is a 20-char alphanumeric string; `doc(collection)`
+    // without args generates one without writing. `RideId.create` accepts
+    // anything Firestore-doc-safe, so this is always valid.
+    const ref = doc(collection(this.firestore, TRIPS));
+    const r = RideId.create(ref.id);
+    if (!r.ok) throw r.error;
+    return r.value;
+  }
 
   async create(
     ride: Ride,

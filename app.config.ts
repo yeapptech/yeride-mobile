@@ -104,6 +104,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-dev-client',
+    [
+      'expo-location',
+      {
+        // Phase 3 turn 3: foreground-only reads from `useCurrentLocation`
+        // for centring the rider's home map and resolving the active
+        // service area. Phase 4 layers in `react-native-background-
+        // geolocation` for the trip-tracking lifecycle (driver side
+        // primarily); the strings below cover both surfaces.
+        locationAlwaysAndWhenInUsePermission:
+          'Allow YeRide Next to use your location so we can show nearby drivers and track trips.',
+        locationWhenInUsePermission:
+          'Allow YeRide Next to use your location so we can show nearby drivers and plan your ride.',
+      },
+    ],
     // Google Maps API keys → AndroidManifest meta-data + iOS GMSApiKey.
     // No-ops when the env vars aren't set (dev convenience: the runtime
     // falls back to FakeRoutesService in that case).

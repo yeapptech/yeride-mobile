@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { User } from '@domain/entities/User';
 import { useUseCases } from '@presentation/di';
-import type { MainStackNavigation } from '@presentation/navigation/types';
+import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { formatDomainError } from '@shared/errors';
 
 interface ProfileForm {
@@ -14,7 +14,7 @@ interface ProfileForm {
 
 export function useUserProfileViewModel() {
   const { getCurrentUser, updateProfile, logOutUser } = useUseCases();
-  const navigation = useNavigation<MainStackNavigation>();
+  const navigation = useNavigation<RiderStackNavigation>();
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);

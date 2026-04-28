@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import {
@@ -72,7 +73,22 @@ export function TestContainerProvider({
   });
   const merged: UseCases = { ...base, ...useCases };
   const container: Container = { useCases: merged };
+
+  // Every view-model test needs a QueryClientProvider — view-models
+  // compose TanStack queries / mutations as of Phase 3 turn 3. Make a
+  // fresh client per test so cache state doesn't leak between renders.
+  // `retry: false` so a deliberate "this throws" path doesn't burn time
+  // through TanStack's default retry policy.
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+
   return (
-    <ContainerProvider container={container}>{children}</ContainerProvider>
+    <QueryClientProvider client={queryClient}>
+      <ContainerProvider container={container}>{children}</ContainerProvider>
+    </QueryClientProvider>
   );
 }

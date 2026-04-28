@@ -1,22 +1,82 @@
-import type { Ride } from '@domain/entities/Ride';
+import type { DriverSnapshot } from '@domain/entities/DriverSnapshot';
+import type { Endpoint } from '@domain/entities/Endpoint';
+import type { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import { Ride, type RideRoutePreference } from '@domain/entities/Ride';
+import type { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import type { ConflictError, ValidationError } from '@domain/errors';
 import type { RideRepository } from '@domain/repositories';
-import type { Result } from '@domain/shared/Result';
+import { Result } from '@domain/shared/Result';
 
 /**
- * Rider creates a new ride. The Ride entity is fully constructed by the
- * caller (presentation builds it from the route-selection screen state),
- * so this use case is a thin authorization-and-write wrapper.
+ * Rider creates a new ride.
+ *
+ * The use case owns the full lifecycle of creating a Ride from
+ * presentation-supplied parts:
+ *
+ *   1. Mint a fresh `RideId` via `repo.newId()` (Firestore auto-id under
+ *      the hood; in-memory equivalent in tests).
+ *   2. Construct the `Ride` aggregate via `Ride.create(...)` —
+ *      `awaiting_driver` status, no driver, no cancellation, no timing.
+ *   3. Persist via `repo.create(...)`.
+ *
+ * Why the use case mints the id rather than the view-model: keeps the
+ * presentation layer free of a `RideRepository` dependency. The view-model
+ * passes "what kind of trip the rider wants" — this use case turns that
+ * spec into a persisted aggregate.
  *
  * Authorization: Firestore rules enforce that the trip's `passenger.id`
  * matches the authenticated user; nothing the client can do here violates
- * that. Surface a ConflictError if the doc id collides (extremely unlikely
- * given Firestore auto-ids).
+ * that. Surface a `ConflictError` if the doc id collides (extremely
+ * unlikely with Firestore auto-ids).
+ *
+ * Phase 6's payment surface will likely thread a `defaultPaymentMethod`
+ * Stripe id through `passenger`. The Ride entity already accepts it via
+ * the snapshot — no changes needed here.
  */
+
+export interface CreateRideInput {
+  readonly passenger: PassengerSnapshot;
+  readonly rideService: RideServiceSnapshot;
+  readonly pickup: Endpoint;
+  readonly dropoff: Endpoint;
+  readonly createdAt: Date;
+  readonly routePreference?: RideRoutePreference | null;
+  /**
+   * Initial driver snapshot — null for awaiting-driver rides (the
+   * default). Phase 5+ may pass a pre-assigned driver for fleet-mode
+   * rides.
+   */
+  readonly driver?: DriverSnapshot | null;
+}
+
 export class CreateRide {
   constructor(private readonly repo: RideRepository) {}
 
-  execute(ride: Ride): Promise<Result<Ride, ConflictError | ValidationError>> {
-    return this.repo.create(ride);
+  async execute(
+    input: CreateRideInput,
+  ): Promise<Result<Ride, ConflictError | ValidationError>> {
+    const id = this.repo.newId();
+    const args: {
+      id: typeof id;
+      passenger: PassengerSnapshot;
+      rideService: RideServiceSnapshot;
+      pickup: Endpoint;
+      dropoff: Endpoint;
+      createdAt: Date;
+      routePreference?: RideRoutePreference | null;
+    } = {
+      id,
+      passenger: input.passenger,
+      rideService: input.rideService,
+      pickup: input.pickup,
+      dropoff: input.dropoff,
+      createdAt: input.createdAt,
+    };
+    if (input.routePreference !== undefined) {
+      args.routePreference = input.routePreference;
+    }
+    const rideR = Ride.create(args);
+    if (!rideR.ok) return Result.err(rideR.error);
+    return this.repo.create(rideR.value);
   }
 }

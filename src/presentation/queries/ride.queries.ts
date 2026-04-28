@@ -6,6 +6,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 
+import type { CreateRideInput } from '@app/usecases/ride/CreateRide';
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
@@ -143,6 +144,9 @@ export function useInProgressRideQuery(
  * Mutation: create a ride from the trip-draft state. The view-model on
  * RouteSelect calls this and navigates to RideMonitor on success.
  *
+ * Input is a `CreateRideInput` spec — the use case mints the RideId and
+ * builds the `Ride` aggregate. View-models stay free of repo dependencies.
+ *
  * On success we (1) seed the byId cache so RideMonitor doesn't double-fetch
  * and (2) invalidate the per-passenger lists so RiderHome reflects the new
  * active ride if the user backs out before navigation lands.
@@ -150,13 +154,13 @@ export function useInProgressRideQuery(
 export function useCreateRideMutation(): UseMutationResult<
   Ride,
   ConflictError | ValidationError,
-  Ride
+  CreateRideInput
 > {
   const useCases = useUseCases();
   const queryClient = useQueryClient();
-  return useMutation<Ride, ConflictError | ValidationError, Ride>({
-    mutationFn: async (ride: Ride): Promise<Ride> => {
-      const r = await useCases.createRide.execute(ride);
+  return useMutation<Ride, ConflictError | ValidationError, CreateRideInput>({
+    mutationFn: async (input: CreateRideInput): Promise<Ride> => {
+      const r = await useCases.createRide.execute(input);
       if (!r.ok) throw r.error;
       return r.value;
     },

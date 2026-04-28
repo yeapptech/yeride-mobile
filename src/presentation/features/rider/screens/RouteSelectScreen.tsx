@@ -19,7 +19,7 @@ import {
   RideServicesList,
   RouteSelector,
 } from '@presentation/components/route';
-import type { MainStackNavigation } from '@presentation/navigation/types';
+import type { RiderStackNavigation } from '@presentation/navigation/types';
 
 import { useRouteSelectViewModel } from '../view-models/useRouteSelectViewModel';
 
@@ -37,7 +37,7 @@ import { useRouteSelectViewModel } from '../view-models/useRouteSelectViewModel'
  */
 export default function RouteSelectScreen() {
   const vm = useRouteSelectViewModel();
-  const navigation = useNavigation<MainStackNavigation>();
+  const navigation = useNavigation<RiderStackNavigation>();
 
   const initialRegion = vm.pickup
     ? {
@@ -172,33 +172,48 @@ export default function RouteSelectScreen() {
         </ScrollView>
 
         <View className="border-t border-border px-4 py-3">
+          {vm.submitError && (
+            <Text
+              className="mb-2 text-center text-sm text-error"
+              testID="route-select-submit-error"
+            >
+              {vm.submitError}
+            </Text>
+          )}
           <Pressable
             onPress={() => {
-              if (vm.confirm()) {
-                navigation.navigate('Home');
-              }
+              void (async () => {
+                const rideId = await vm.confirm();
+                if (rideId) {
+                  navigation.replace('RideMonitor', { rideId: String(rideId) });
+                }
+              })();
             }}
-            disabled={!vm.canConfirm}
+            disabled={!vm.canConfirm || vm.isSubmitting}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !vm.canConfirm }}
+            accessibilityState={{
+              disabled: !vm.canConfirm || vm.isSubmitting,
+              busy: vm.isSubmitting,
+            }}
             className={`items-center rounded-xl px-4 py-3 ${
-              vm.canConfirm ? 'bg-primary' : 'bg-muted'
+              vm.canConfirm && !vm.isSubmitting ? 'bg-primary' : 'bg-muted'
             }`}
             testID="route-select-confirm"
           >
-            <Text
-              className={`text-base font-semibold ${
-                vm.canConfirm
-                  ? 'text-primary-foreground'
-                  : 'text-muted-foreground'
-              }`}
-            >
-              Confirm ride
-            </Text>
+            {vm.isSubmitting ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <Text
+                className={`text-base font-semibold ${
+                  vm.canConfirm
+                    ? 'text-primary-foreground'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                Confirm ride
+              </Text>
+            )}
           </Pressable>
-          <Text className="mt-2 text-center text-xs text-muted-foreground">
-            Phase 3.3 wires this to CreateRide → RideMonitor.
-          </Text>
         </View>
       </View>
     </SafeAreaView>

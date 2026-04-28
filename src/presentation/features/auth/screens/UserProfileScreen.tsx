@@ -11,11 +11,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormField } from '@presentation/components/form/FormField';
-import type { MainStackScreenProps } from '@presentation/navigation/types';
 
 import { useUserProfileViewModel } from '../view-models/useUserProfileViewModel';
 
-export function UserProfileScreen(_props: MainStackScreenProps<'UserProfile'>) {
+// Reachable from two surfaces: as a tab inside RiderTabs, and as a modal
+// pushed onto RiderStack. Both use the same view-model; the screen itself
+// doesn't need to know which one it's mounted inside, so we don't take a
+// typed `route` / `navigation` props parameter here.
+export function UserProfileScreen() {
   const { user, loading, submitting, error, submit, signOut } =
     useUserProfileViewModel();
 

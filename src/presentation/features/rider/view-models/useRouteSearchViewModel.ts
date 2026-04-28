@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Endpoint } from '@domain/entities/Endpoint';
-import type { MainStackNavigation } from '@presentation/navigation/types';
+import type { RiderStackNavigation } from '@presentation/navigation/types';
 import {
   useActiveServiceArea,
   useTripDraftDropoff,
@@ -86,7 +86,7 @@ export function useRouteSearchViewModel(): UseRouteSearchViewModel {
   const setPickup = useTripDraftStore((s) => s.setPickup);
   const setDropoff = useTripDraftStore((s) => s.setDropoff);
   const activeArea = useActiveServiceArea();
-  const navigation = useNavigation<MainStackNavigation>();
+  const navigation = useNavigation<RiderStackNavigation>();
 
   const apiKey = useMemo(() => getMapsApiKey(), []);
   const isApiKeyMissing = apiKey.length === 0;
