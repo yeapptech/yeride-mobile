@@ -4,3 +4,4 @@ export type {
   RoutesEndpoint,
   RoutesService,
 } from './RoutesService';
+export { FareCalculator, type FareEstimateInput } from './FareCalculator';
