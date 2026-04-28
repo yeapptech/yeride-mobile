@@ -447,3 +447,94 @@ export function useDispatchRideMutation(): UseMutationResult<
     },
   });
 }
+
+/**
+ * Mutation: driver picks up the rider. Records pickup-completion odometer
+ * and flips server status `dispatched → started`. Direct Firestore write
+ * (no Cloud Function — the entity transition is purely local).
+ *
+ * Cache: byId set so the live `ObserveRide` subscription has nothing to
+ * race against on the next paint; both lists invalidated so any one-shot
+ * resume queries (driver Activity, rider history) pick up the new status.
+ */
+export interface StartRideInput {
+  readonly rideId: RideId;
+  readonly odometerMeters: number;
+}
+
+export function useStartRideMutation(): UseMutationResult<
+  Ride,
+  NotFoundError | AuthorizationError | ValidationError,
+  StartRideInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Ride,
+    NotFoundError | AuthorizationError | ValidationError,
+    StartRideInput
+  >({
+    mutationFn: async (input: StartRideInput): Promise<Ride> => {
+      const r = await useCases.startRide.execute(input);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (ride: Ride) => {
+      queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      if (ride.driver) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.ride.listsForDriver(ride.driver.id),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
+      });
+    },
+  });
+}
+
+/**
+ * Mutation: driver requests payment. Routes through the `completeTrip`
+ * Cloud Function (server-side fare math + auth checks + Stripe charge
+ * kickoff). The function flips status to `payment_requested`; the Stripe
+ * webhook later flips to `completed` (or `payment_failed`) via a separate
+ * path — the live `ObserveRide` subscription delivers either snapshot.
+ *
+ * Cache: same shape as `useStartRideMutation`. byId set + lists invalidated
+ * for both parties so any resume queries reflect the freshly-final state.
+ */
+export interface RequestPaymentInput {
+  readonly rideId: RideId;
+  readonly odometerMeters: number;
+}
+
+export function useRequestPaymentMutation(): UseMutationResult<
+  Ride,
+  NetworkError | NotFoundError | AuthorizationError | ValidationError,
+  RequestPaymentInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Ride,
+    NetworkError | NotFoundError | AuthorizationError | ValidationError,
+    RequestPaymentInput
+  >({
+    mutationFn: async (input: RequestPaymentInput): Promise<Ride> => {
+      const r = await useCases.requestPayment.execute(input);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (ride: Ride) => {
+      queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      if (ride.driver) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.ride.listsForDriver(ride.driver.id),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
+      });
+    },
+  });
+}

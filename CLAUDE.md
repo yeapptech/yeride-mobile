@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 28, 2026 (Phase 4 turn 4a)
+**Last updated:** April 28, 2026 (Phase 4 turn 4b)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -12,13 +12,15 @@ Navigation SDK quirks, and other behaviors not yet ported.
 Mid-Phase 4 (driver UI). Phase 3 shipped the full rider journey end-to-
 end against real Firebase: sign-in → home → route search →
 route/service-tier selection → CreateRide → live RideMonitor (all
-statuses) → RideReceipt. Phase 4 turns 1–4a have landed the driver
-side: real `DriverNavigator` + tabs, `DriverHomeScreen` (map + nearby
-rides + online toggle), `DriverDispatchScreen` (accept/decline), and
-`DriverMonitorScreen` with the en-route-to-pickup and at-pickup status
-views. Late-status views (started / payment / completed /
-payment_failed) and the real Start-ride / RequestPayment mutations
-land in Turn 4b.
+statuses) → RideReceipt. Phase 4 turns 1–4b have landed the full driver
+side end-to-end: real `DriverNavigator` + tabs, `DriverHomeScreen`
+(map + nearby rides + online toggle), `DriverDispatchScreen`
+(accept/decline), and `DriverMonitorScreen` with every status view —
+en-route, at-pickup, started, payment-requested, completed,
+payment-failed. The Start-ride and RequestPayment mutations route
+through real `useStartRideMutation` / `useRequestPaymentMutation`. The
+cancel UX uses a full per-reason `DriverCancelReasonSheet`. Only the
+Phase 4 cleanup pass (Turn 5) remains.
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -35,8 +37,8 @@ land in Turn 4b.
 | 4 turn 2  | DriverHome — map + ListAvailableRides cards + GPS toggle                         | ✅                             |
 | 4 turn 3  | DriverDispatch — incoming-ride accept/decline                                    | ✅                             |
 | 4 turn 4a | DriverMonitor scaffold + en-route / at-pickup status views                       | ✅                             |
-| 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations          | Next                           |
-| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | —                              |
+| 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations          | ✅                             |
+| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | Next                           |
 | 5         | Vehicle management                                                               | Pending                        |
 | 6         | Payments / Stripe Connect / tipping                                              | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
@@ -44,10 +46,14 @@ land in Turn 4b.
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
 
-End of Phase 4 turn 4a acceptance: **80 test suites / 561 tests
+End of Phase 4 turn 4b acceptance: **81 test suites / 568 tests
 passing**; typecheck + lint + format + test all green. Driver can sign
 in → go online → accept an offer → land on DriverMonitor → flip to
-at-pickup → cancel via the stub Alert.alert flow → reset to DriverHome.
+at-pickup → start ride → request payment → either land on the
+`payment_requested` spinner and auto-redirect on `completed`, or land
+on the `payment_failed` card and tap "Close trip" → return to
+DriverHome. Cancel from any cancel-eligible status uses the full
+per-reason `DriverCancelReasonSheet`.
 
 ## Tech stack
 
@@ -332,7 +338,7 @@ new app writes to it.
 | `REFACTOR_PLAN.md`                                                 | Phased migration roadmap, decisions, target architecture                                                    |
 | `docs/PHASE_1_TURN_2.md`                                           | What shipped through Phase 1                                                                                |
 | `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
-| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A}.md`      | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
+| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B}.md`   | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
 | `app.config.ts`                                                    | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
 | `scripts/patch-podfile.js`                                         | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
 | `eslint.config.js`                                                 | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
@@ -588,14 +594,16 @@ Rider status-views         → src/presentation/features/rider/components/
 Rider view-models          → src/presentation/features/rider/view-models/use*ViewModel.ts
 
 Driver screens             → src/presentation/features/driver/screens/*.tsx
-                              DriverHome, DriverDispatch, DriverMonitor (4a),
+                              DriverHome, DriverDispatch, DriverMonitor,
                               DriverActivityPlaceholder, DriverEarningsPlaceholder
 Driver status-views        → src/presentation/features/driver/components/
-                              {EnRouteToPickup,AtPickup}View.tsx (Turn 4a — 4b adds
-                              Started/PaymentRequested/Completed/PaymentFailed)
+                              {EnRouteToPickup,AtPickup,Started,PaymentRequested,
+                               Completed,PaymentFailed}View.tsx
 Driver components          → src/presentation/features/driver/components/
                               DriverRideCard, DriverRideCardStack
 Driver view-models         → src/presentation/features/driver/view-models/use*ViewModel.ts
+Driver cancel sheet        → src/presentation/components/trip/DriverCancelReasonSheet.tsx
+                              (shared by every cancel-eligible driver status view)
 
 Driver-status store        → src/presentation/stores/useDriverStatusStore.ts
                               (offline / online_idle / dispatched / on_trip + activeVehicleId)
@@ -622,5 +630,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_4_TURN_4A.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_4_TURN_4B.md`),
 then ask.

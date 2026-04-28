@@ -19,6 +19,7 @@ import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
+import { NetworkError } from '@domain/errors';
 import { useDriverStatusStore } from '@presentation/stores';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import {
@@ -29,7 +30,8 @@ import {
 
 import { useDriverMonitorViewModel } from '../useDriverMonitorViewModel';
 
-// Navigation mock — we assert reset() calls for the cancelled redirect.
+// Navigation mock — we assert reset() calls for cancelled / completed
+// terminal redirects.
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
 const mockReset = jest.fn();
@@ -39,13 +41,6 @@ jest.mock('@react-navigation/native', () => ({
     replace: mockReplace,
     reset: mockReset,
   }),
-}));
-
-// `react-native-toast-message` lives in the start-ride stub. Mock so the
-// test process doesn't hit native module surface.
-jest.mock('react-native-toast-message', () => ({
-  __esModule: true,
-  default: { show: jest.fn(), hide: jest.fn() },
 }));
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
@@ -173,14 +168,21 @@ function makeStartedRide(): Ride {
   );
 }
 
-function makeCompletedRide(): Ride {
-  const requested = unwrap(
+function makePaymentRequestedRide(): Ride {
+  return unwrap(
     makeStartedRide().requestPayment({
       odometerMeters: 6_000,
       at: new Date(),
     }),
   );
-  return unwrap(requested.markCompleted());
+}
+
+function makeCompletedRide(): Ride {
+  return unwrap(makePaymentRequestedRide().markCompleted());
+}
+
+function makePaymentFailedRide(): Ride {
+  return unwrap(makePaymentRequestedRide().markPaymentFailed());
 }
 
 interface SeededState {
@@ -279,7 +281,42 @@ describe('useDriverMonitorViewModel', () => {
     expect(result.current.ride?.status).toBe('dispatched');
   });
 
-  it("started ride → 'future_status_fallback' and store mode flips to 'on_trip'", async () => {
+  it("onStartRide() persists 'started' and status flips to 'started'", async () => {
+    const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+    const { result } = renderHook(
+      () =>
+        useDriverMonitorViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOC,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('en_route_to_pickup');
+    });
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.onStartRide();
+    });
+
+    expect(ok).toBe(true);
+    expect(setup.ridesRepo.spies.update).toBeGreaterThanOrEqual(1);
+    // Persisted ride is now 'started'.
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.status).toBe('started');
+    }
+    // Live subscription delivered → VM status flipped → store mirrors it.
+    await waitFor(() => {
+      expect(result.current.status).toBe('started');
+    });
+    expect(useDriverStatusStore.getState().mode).toBe('on_trip');
+    expect(result.current.startError).toBeNull();
+  });
+
+  it("requestPayment() persists 'payment_requested' and status flips", async () => {
     const setup = setupSeededState({ seedRide: makeStartedRide() });
     const { result } = renderHook(
       () =>
@@ -290,9 +327,63 @@ describe('useDriverMonitorViewModel', () => {
       { wrapper: withTestContainer(setup) },
     );
     await waitFor(() => {
-      expect(result.current.status).toBe('future_status_fallback');
+      expect(result.current.status).toBe('started');
     });
-    expect(useDriverStatusStore.getState().mode).toBe('on_trip');
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.requestPayment();
+    });
+
+    expect(ok).toBe(true);
+    expect(setup.ridesRepo.spies.requestPayment).toBe(1);
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.status).toBe('payment_requested');
+    }
+    await waitFor(() => {
+      expect(result.current.status).toBe('payment_requested');
+    });
+    expect(result.current.requestPaymentError).toBeNull();
+    // No terminal redirect on payment_requested — only completed/cancelled.
+    expect(mockReset).not.toHaveBeenCalled();
+  });
+
+  it('requestPayment() surfaces error message on failure', async () => {
+    const setup = setupSeededState({ seedRide: makeStartedRide() });
+    const error = new NetworkError({
+      code: 'request_payment_failed',
+      message: 'Stripe is down',
+    });
+    setup.ridesRepo.mockRequestPaymentResult(error);
+
+    const { result } = renderHook(
+      () =>
+        useDriverMonitorViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOC,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('started');
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.requestPayment();
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.requestPaymentError).toBe('Stripe is down');
+    // Persisted ride is still 'started' — the mock short-circuited
+    // before the entity transition.
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.status).toBe('started');
+    }
   });
 
   it('cancel() persists cancelled, fires reset() once, and store flips to online_idle', async () => {
@@ -408,7 +499,48 @@ describe('useDriverMonitorViewModel', () => {
     });
   });
 
-  it("ride flipping into 'completed' under us reaches the future_status_fallback", async () => {
+  it("ride flipping into 'completed' fires the terminal reset", async () => {
+    const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+    const { result, rerender } = renderHook(
+      () =>
+        useDriverMonitorViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOC,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('en_route_to_pickup');
+    });
+
+    // Server-side flip — Cloud Function path could transition the ride
+    // straight through to completed. Live subscription delivers the new
+    // state; the VM's terminal-redirect effect resets to DriverTabs.
+    setup.ridesRepo.seed(makeCompletedRide());
+    await act(async () => {
+      // Seed alone doesn't notify observers; flush a full update.
+      await setup.ridesRepo.update(makeCompletedRide());
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('completed');
+    });
+    expect(useDriverStatusStore.getState().mode).toBe('on_trip');
+    await waitFor(() => {
+      expect(mockReset).toHaveBeenCalledTimes(1);
+    });
+    expect(mockReset).toHaveBeenCalledWith({
+      index: 0,
+      routes: [{ name: 'DriverTabs' }],
+    });
+
+    // Re-render with the same status — redirectedRef should suppress a
+    // second reset call.
+    rerender({});
+    expect(mockReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("ride flipping into 'payment_failed' does NOT redirect", async () => {
     const setup = setupSeededState({ seedRide: makeDispatchedRide() });
     const { result } = renderHook(
       () =>
@@ -422,22 +554,19 @@ describe('useDriverMonitorViewModel', () => {
       expect(result.current.status).toBe('en_route_to_pickup');
     });
 
-    // Server-side flip — Cloud Function path could transition the ride
-    // straight through to completed if the rider went through the start
-    // / payment flow on a parallel session. Live subscription delivers
-    // the new state; status-router routes to the fallback (Turn 4b's
-    // CompletedView replaces it).
-    setup.ridesRepo.seed(makeCompletedRide());
+    // Flip the ride to 'payment_failed' via the same seed-then-update
+    // pattern. The driver should stay on DriverMonitor — the VM only
+    // redirects on cancelled / completed.
+    setup.ridesRepo.seed(makePaymentFailedRide());
     await act(async () => {
-      // Seed alone doesn't notify observers; flush a full update.
-      await setup.ridesRepo.update(makeCompletedRide());
+      await setup.ridesRepo.update(makePaymentFailedRide());
     });
 
     await waitFor(() => {
-      expect(result.current.status).toBe('future_status_fallback');
+      expect(result.current.status).toBe('payment_failed');
     });
     expect(useDriverStatusStore.getState().mode).toBe('on_trip');
-    // No reset fired — only `cancelled` triggers terminal redirect in 4a.
+    // No terminal redirect.
     expect(mockReset).not.toHaveBeenCalled();
   });
 });

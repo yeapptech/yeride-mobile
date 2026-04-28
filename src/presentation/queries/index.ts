@@ -7,10 +7,14 @@ export {
   useDispatchRideMutation,
   useInProgressDriverRideQuery,
   useInProgressRideQuery,
+  useRequestPaymentMutation,
   useRideQuery,
   useRidesByPassengerQuery,
+  useStartRideMutation,
   type CancelRideInput,
   type DispatchRideInput,
+  type RequestPaymentInput,
+  type StartRideInput,
 } from './ride.queries';
 export {
   useActiveServiceAreaQuery,

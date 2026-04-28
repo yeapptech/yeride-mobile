@@ -1,47 +1,67 @@
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
-import { useCallback, useMemo, useRef } from 'react';
-import { ActivityIndicator, Alert, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CancellationReason } from '@domain/entities/CancellationReason';
+import type { CancellationReason } from '@domain/entities/CancellationReason';
 import { RideId } from '@domain/entities/RideId';
 import {
   Map,
   type MapMarkerProps,
   type MapRoute,
 } from '@presentation/components/map';
+import { DriverCancelReasonSheet } from '@presentation/components/trip/DriverCancelReasonSheet';
 import { useCurrentLocation } from '@presentation/hooks';
-import type { DriverStackScreenProps } from '@presentation/navigation/types';
+import type {
+  DriverStackNavigation,
+  DriverStackScreenProps,
+} from '@presentation/navigation/types';
 
 import { AtPickupView } from '../components/AtPickupView';
+import { CompletedView } from '../components/CompletedView';
 import { EnRouteToPickupView } from '../components/EnRouteToPickupView';
+import { PaymentFailedView } from '../components/PaymentFailedView';
+import { PaymentRequestedView } from '../components/PaymentRequestedView';
+import { StartedView } from '../components/StartedView';
 import { useDriverMonitorViewModel } from '../view-models/useDriverMonitorViewModel';
 
 /**
  * DriverMonitorScreen — full-bleed map + bottom-sheet status-router for
  * the driver's active trip.
  *
- * Turn 4a status-router map:
+ * Status-router map:
  *   - 'loading'                   → spinner (waiting on ride subscription).
  *   - 'en_route_to_pickup'        → `<EnRouteToPickupView>`.
  *   - 'at_pickup'                 → `<AtPickupView>`.
- *   - 'future_status_fallback'    → "More to come (Turn 4b)" placeholder
- *                                   for `started` / `payment_requested`
- *                                   / `payment_failed` / `completed`.
+ *   - 'started'                   → `<StartedView>`.
+ *   - 'payment_requested'         → `<PaymentRequestedView>` (intermediate
+ *                                   while Stripe webhook flips the trip).
+ *   - 'completed'                 → `<CompletedView>` (one-frame fallback;
+ *                                   VM redirects to DriverTabs).
+ *   - 'payment_failed'            → `<PaymentFailedView>` (driver stays
+ *                                   on the screen — VM does NOT redirect).
  *   - 'cancelled' / 'gone'        → quiet "wrapping up" — the VM resets
- *                                   to DriverHome immediately, so this
+ *                                   to DriverTabs immediately, so this
  *                                   is a one-frame fallback.
  *
  * Snap points 25 / 50 / 90 mirror the rider-side RideMonitor. The map
  * shows a fixed-size pool of children (always-mounted-children rule
- * from `<Map/>`); we drive visibility via props.
+ * from `<Map/>`); we drive visibility via props. The driver → pickup
+ * polyline (green) shows during `dispatched`; the pickup → dropoff
+ * polyline (gold via `selectedRoute`) shows during `started` /
+ * `payment_requested` / `payment_failed` / `completed`.
  *
- * Cancel-button stub (Turn 4a):
- *   The header cancel button on each early-status view pops a confirm
- *   `Alert.alert`. Confirm calls `vm.cancel(reason)` with a hard-coded
- *   driver-allowed code per status (`'changed_mind'` while en route;
- *   `'passenger_no_show'` once arrived). The full per-reason picker
- *   modal lands in Turn 4b.
+ * Cancel: every cancel-eligible status view's header cancel button opens
+ * `DriverCancelReasonSheet`. The sheet hands a built `CancellationReason`
+ * to `vm.cancel({ reason })`; the VM's terminal redirect handles the
+ * post-cancel navigation.
+ *
+ * Close-trip: `CompletedView` + `PaymentFailedView` both expose a "Close
+ * trip" CTA that resets the stack to DriverTabs. The VM auto-redirects
+ * on `completed` (via terminal-redirect ref), so the CompletedView CTA
+ * is largely defensive — the canonical use is the PaymentFailed path
+ * where the VM does NOT auto-redirect.
  */
 export default function DriverMonitorScreen({
   route,
@@ -62,6 +82,7 @@ export default function DriverMonitorScreen({
 
 function DriverMonitorContent({ rideId }: { rideId: RideId }) {
   const currentLocation = useCurrentLocation();
+  const navigation = useNavigation<DriverStackNavigation>();
   const vm = useDriverMonitorViewModel({
     rideId,
     driverLocation: currentLocation.coordinates,
@@ -70,23 +91,31 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['25%', '50%', '90%'], []);
 
-  const handleEnRouteCancel = useCallback(() => {
-    confirmCancelWithCode({
-      code: 'changed_mind',
-      message:
-        'Cancelling will release the rider back to the queue. Are you sure?',
-      cancel: vm.cancel,
-    });
-  }, [vm.cancel]);
+  // ── Cancel sheet ───────────────────────────────────────────────
+  const [cancelSheetVisible, setCancelSheetVisible] = useState(false);
+  const openCancelSheet = useCallback(() => {
+    setCancelSheetVisible(true);
+  }, []);
+  const closeCancelSheet = useCallback(() => {
+    setCancelSheetVisible(false);
+  }, []);
+  const handleCancelConfirm = useCallback(
+    async (reason: CancellationReason) => {
+      const ok = await vm.cancel({ reason });
+      if (ok) {
+        setCancelSheetVisible(false);
+      }
+    },
+    [vm],
+  );
 
-  const handleAtPickupCancel = useCallback(() => {
-    confirmCancelWithCode({
-      code: 'passenger_no_show',
-      message:
-        'Mark this ride as a passenger no-show? The rider will be charged the cancellation fee.',
-      cancel: vm.cancel,
+  // ── Close-trip handler (CompletedView + PaymentFailedView) ─────
+  const handleCloseTrip = useCallback(() => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'DriverTabs' }],
     });
-  }, [vm.cancel]);
+  }, [navigation]);
 
   // ── Map slots ──────────────────────────────────────────────────
   const ride = vm.ride;
@@ -113,8 +142,6 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
       }
     : null;
 
-  // Dropoff pin: visible from dispatch onward so the driver can see where
-  // they're headed once the trip starts. Hidden until the ride doc is in.
   const dropoffMarker: MapMarkerProps | null = ride
     ? {
         coordinates: ride.dropoff.location,
@@ -126,14 +153,32 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
     ? { coordinates: currentLocation.coordinates, title: 'You' }
     : null;
 
-  // Driver → pickup polyline while the trip is dispatched. Once Turn 4b
-  // lands `StartedView`, we'll swap the green pickup-route polyline for
-  // the gold pickup → dropoff `selectedRoute` from `ride.dropoff`.
+  // Driver → pickup polyline only while dispatched (en-route OR at-pickup
+  // are both server-status `dispatched`). Once the trip starts, this
+  // green route disappears.
   const pickupMapRoute: MapRoute | null =
     ride?.status === 'dispatched' && ride.pickup.directions
       ? {
           id: ride.pickup.directions.routeToken || 'pickup',
           encodedPolyline: ride.pickup.directions.encodedPolyline,
+        }
+      : null;
+
+  // Pickup → dropoff polyline (gold "selectedRoute") shown from `started`
+  // through any terminal-but-still-rendered late status. We keep it
+  // mounted across `payment_requested` / `payment_failed` / `completed`
+  // so the map doesn't visibly redraw across the brief late-state
+  // transitions.
+  const isLateStatus =
+    ride?.status === 'started' ||
+    ride?.status === 'payment_requested' ||
+    ride?.status === 'completed' ||
+    ride?.status === 'payment_failed';
+  const dropoffMapRoute: MapRoute | null =
+    isLateStatus && ride?.dropoff.directions
+      ? {
+          id: ride.dropoff.directions.routeToken || 'dropoff',
+          encodedPolyline: ride.dropoff.directions.encodedPolyline,
         }
       : null;
 
@@ -144,7 +189,7 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
         pickup={pickupMarker}
         dropoff={dropoffMarker}
         driver={driverMarker}
-        selectedRoute={null}
+        selectedRoute={dropoffMapRoute}
         pickupRoute={pickupMapRoute}
         alternativeRoutes={[]}
       />
@@ -169,26 +214,36 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
             <EnRouteToPickupView
               ride={ride}
               onArrived={vm.onArriveAtPickup}
-              onPressCancel={handleEnRouteCancel}
+              onPressCancel={openCancelSheet}
               cancelDisabled={vm.isCancelling}
             />
           ) : vm.status === 'at_pickup' ? (
             <AtPickupView
               ride={ride}
-              onStartRide={vm.onStartRide}
+              onStartRide={() => {
+                void vm.onStartRide();
+              }}
               onBackToEnRoute={vm.onBackToEnRoute}
-              onPressCancel={handleAtPickupCancel}
+              onPressCancel={openCancelSheet}
               cancelDisabled={vm.isCancelling}
+              startDisabled={vm.isStarting}
             />
-          ) : vm.status === 'future_status_fallback' ? (
-            <View className="px-4 py-6">
-              <Text className="text-base font-semibold text-foreground">
-                Trip in progress
-              </Text>
-              <Text className="mt-1 text-sm text-muted-foreground">
-                Started / payment / completion views land in Turn 4b.
-              </Text>
-            </View>
+          ) : vm.status === 'started' ? (
+            <StartedView
+              ride={ride}
+              onPressCancel={openCancelSheet}
+              onRequestPayment={() => {
+                void vm.requestPayment();
+              }}
+              cancelDisabled={vm.isCancelling}
+              requestPaymentDisabled={vm.isRequestingPayment}
+            />
+          ) : vm.status === 'payment_requested' ? (
+            <PaymentRequestedView ride={ride} />
+          ) : vm.status === 'completed' ? (
+            <CompletedView ride={ride} onClose={handleCloseTrip} />
+          ) : vm.status === 'payment_failed' ? (
+            <PaymentFailedView ride={ride} onClose={handleCloseTrip} />
           ) : (
             // 'cancelled' / 'gone' — VM redirects so this is a single
             // frame at most. Quiet message instead of a spinner so we
@@ -201,44 +256,14 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
           )}
         </BottomSheetView>
       </BottomSheet>
+
+      <DriverCancelReasonSheet
+        visible={cancelSheetVisible}
+        isSubmitting={vm.isCancelling}
+        errorMessage={vm.cancelError}
+        onClose={closeCancelSheet}
+        onConfirm={handleCancelConfirm}
+      />
     </View>
   );
-}
-
-/**
- * Helper for the Turn 4a cancel stub: pops `Alert.alert` to confirm,
- * then constructs the `CancellationReason` and calls the VM's `cancel`.
- *
- * `'changed_mind'` is in the common (either-party) set, valid during
- * en-route. `'passenger_no_show'` is driver-only and the natural code
- * for the at-pickup intermediate state. The full picker UI in Turn 4b
- * will let the driver pick from the entire driver-allowed set; this
- * helper exists only so 4a can ship a working cancel without the
- * picker.
- */
-function confirmCancelWithCode(args: {
-  code: 'changed_mind' | 'passenger_no_show';
-  message: string;
-  cancel: (cancelArgs: { reason: CancellationReason }) => Promise<boolean>;
-}): void {
-  Alert.alert('Cancel ride?', args.message, [
-    { text: 'Keep ride', style: 'cancel' },
-    {
-      text: 'Cancel ride',
-      style: 'destructive',
-      onPress: () => {
-        const reasonR = CancellationReason.create({
-          code: args.code,
-          reasonText: null,
-        });
-        if (!reasonR.ok) {
-          // Both hard-coded codes are in the driver-allowed set with
-          // `reasonText: null`, so this branch is unreachable in
-          // practice. The alert just exits silently if it ever fires.
-          return;
-        }
-        void args.cancel({ reason: reasonR.value });
-      },
-    },
-  ]);
 }
