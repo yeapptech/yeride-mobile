@@ -18,8 +18,12 @@ import { CancelRideByDriver } from '@app/usecases/ride/CancelRideByDriver';
 import { CancelRideByRider } from '@app/usecases/ride/CancelRideByRider';
 import { CreateRide } from '@app/usecases/ride/CreateRide';
 import { DispatchRide } from '@app/usecases/ride/DispatchRide';
+import { GetRideById } from '@app/usecases/ride/GetRideById';
 import { ListAvailableRides } from '@app/usecases/ride/ListAvailableRides';
+import { ListRidesByPassenger } from '@app/usecases/ride/ListRidesByPassenger';
+import { ObserveLatestMessage } from '@app/usecases/ride/ObserveLatestMessage';
 import { ObserveRide } from '@app/usecases/ride/ObserveRide';
+import { ObserveTripEvents } from '@app/usecases/ride/ObserveTripEvents';
 import { RequestPayment } from '@app/usecases/ride/RequestPayment';
 import { StartRide } from '@app/usecases/ride/StartRide';
 import { ComputeRoutes } from '@app/usecases/route/ComputeRoutes';
@@ -27,6 +31,7 @@ import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
 import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
 import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
 import { GreetUser } from '@app/usecases/shared/GreetUser';
+import { EvaluateExitWarning } from '@app/usecases/trip-tracking/EvaluateExitWarning';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
 import type { FirestoreLocationRepository as FirestoreLocationRepositoryType } from '@data/repositories/FirestoreLocationRepository';
 import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@data/repositories/FirestoreRideRepository';
@@ -121,6 +126,15 @@ export interface UseCases {
   cancelRideByRider: CancelRideByRider;
   cancelRideByDriver: CancelRideByDriver;
 
+  // Ride read paths (Phase 3 turn 1)
+  getRideById: GetRideById;
+  listRidesByPassenger: ListRidesByPassenger;
+  observeTripEvents: ObserveTripEvents;
+  observeLatestMessage: ObserveLatestMessage;
+
+  // Trip-tracking domain logic (Phase 3 turn 1; full GPS lifecycle Phase 4)
+  evaluateExitWarning: EvaluateExitWarning;
+
   // Location pipeline (Phase 2 turn 3c)
   updateUserLocation: UpdateUserLocation;
   subscribeToUserLocation: SubscribeToUserLocation;
@@ -172,6 +186,11 @@ export function makeUseCases(args: {
     requestPayment: new RequestPayment(args.rides),
     cancelRideByRider: new CancelRideByRider(args.rides),
     cancelRideByDriver: new CancelRideByDriver(args.rides),
+    getRideById: new GetRideById(args.rides),
+    listRidesByPassenger: new ListRidesByPassenger(args.rides),
+    observeTripEvents: new ObserveTripEvents(args.rides),
+    observeLatestMessage: new ObserveLatestMessage(),
+    evaluateExitWarning: new EvaluateExitWarning(),
     updateUserLocation: new UpdateUserLocation(args.locations),
     subscribeToUserLocation: new SubscribeToUserLocation(args.locations),
   };

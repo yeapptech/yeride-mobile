@@ -104,6 +104,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-dev-client',
+    // Google Maps API keys → AndroidManifest meta-data + iOS GMSApiKey.
+    // No-ops when the env vars aren't set (dev convenience: the runtime
+    // falls back to FakeRoutesService in that case).
+    './plugins/withGoogleMapsApiKey.js',
     // Firebase plugins are gated on config-file presence. If we list them
     // when GoogleService-Info.plist / google-services.json are missing, the
     // plugins fail prebuild. Once you complete docs/FIREBASE_SETUP.md and

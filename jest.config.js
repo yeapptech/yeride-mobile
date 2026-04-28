@@ -29,7 +29,7 @@ module.exports = {
     // Allow Babel to transform any expo-*, @expo/*, RN, and JSX-shipping
     // packages whose source is shipped as .ts. expo-modules-core in
     // particular ships .ts polyfills loaded by the jest-expo preset.
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo|expo-[\\w-]+|@expo/.*|@expo-google-fonts/.*|react-clone-referenced-element|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|nativewind|react-native-css-interop)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo|expo-[\\w-]+|@expo/.*|@expo-google-fonts/.*|react-clone-referenced-element|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|nativewind|react-native-css-interop|react-native-maps|react-native-google-places-autocomplete|react-native-toast-message|@gorhom/bottom-sheet)/)',
   ],
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',

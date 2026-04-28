@@ -15,3 +15,25 @@ export {
   useServiceAreas,
   type ServiceAreaStatus,
 } from './useServiceAreaStore';
+export {
+  useTripDraftAvoidTolls,
+  useTripDraftDropoff,
+  useTripDraftIsConfirmable,
+  useTripDraftPickup,
+  useTripDraftRideServiceId,
+  useTripDraftRoutes,
+  useTripDraftScheduledAt,
+  useTripDraftSelectedRoute,
+  useTripDraftSelectedRouteIndex,
+  useTripDraftStore,
+} from './useTripDraftStore';
+export {
+  useDropoffExitWarningVisible,
+  useGeofenceUiStore,
+  usePickupExitWarningVisible,
+} from './useGeofenceUiStore';
+export {
+  useChatIsOpen,
+  useChatLastReadAt,
+  useChatUiStore,
+} from './useChatUiStore';
