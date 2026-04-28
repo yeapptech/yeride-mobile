@@ -16,6 +16,12 @@ export { ServiceAreaDocSchema, type ServiceAreaDoc } from './ServiceAreaDoc';
 export { TripEventDocSchema, type TripEventDoc } from './TripEventDoc';
 export { TripPaymentDocSchema, type TripPaymentDoc } from './TripPaymentDoc';
 export {
+  TripTrackingDocSchema,
+  UserLocationDocSchema,
+  type TripTrackingDoc,
+  type UserLocationDoc,
+} from './UserLocationDoc';
+export {
   UserDocSchema,
   type DriverDoc,
   type RiderDoc,

@@ -12,3 +12,4 @@ export * as rideServiceMapper from './rideServiceMapper';
 export * as rideMapper from './rideMapper';
 export * as tripEventMapper from './tripEventMapper';
 export * as tripPaymentMapper from './tripPaymentMapper';
+export * as userLocationMapper from './userLocationMapper';

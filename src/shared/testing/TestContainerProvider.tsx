@@ -9,6 +9,7 @@ import {
 
 import { FakeRoutesService } from './FakeRoutesService';
 import { InMemoryAuthRepository } from './InMemoryAuthRepository';
+import { InMemoryLocationRepository } from './InMemoryLocationRepository';
 import { InMemoryRideRepository } from './InMemoryRideRepository';
 import { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';
 import { InMemoryUserRepository } from './InMemoryUserRepository';
@@ -41,6 +42,7 @@ export function TestContainerProvider({
   users,
   serviceAreas,
   rides,
+  locations,
   routes,
   useCases,
   children,
@@ -49,6 +51,7 @@ export function TestContainerProvider({
   users?: InMemoryUserRepository;
   serviceAreas?: InMemoryServiceAreaRepository;
   rides?: InMemoryRideRepository;
+  locations?: InMemoryLocationRepository;
   routes?: FakeRoutesService;
   useCases?: Partial<UseCases>;
   children: ReactNode;
@@ -57,12 +60,14 @@ export function TestContainerProvider({
   const usersRepo = users ?? new InMemoryUserRepository();
   const serviceAreasRepo = serviceAreas ?? new InMemoryServiceAreaRepository();
   const ridesRepo = rides ?? new InMemoryRideRepository();
+  const locationsRepo = locations ?? new InMemoryLocationRepository();
   const routesService = routes ?? new FakeRoutesService();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
     serviceAreas: serviceAreasRepo,
     rides: ridesRepo,
+    locations: locationsRepo,
     routes: routesService,
   });
   const merged: UseCases = { ...base, ...useCases };
