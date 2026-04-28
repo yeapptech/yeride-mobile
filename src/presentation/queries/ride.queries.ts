@@ -9,10 +9,12 @@ import {
 import type { CreateRideInput } from '@app/usecases/ride/CreateRide';
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Coordinates } from '@domain/entities/Coordinates';
+import type { DriverSnapshot } from '@domain/entities/DriverSnapshot';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
+import type { Route } from '@domain/entities/Route';
 import type { UserId } from '@domain/entities/UserId';
 import type {
   AuthorizationError,
@@ -334,6 +336,58 @@ export function useCancelRideAsRiderMutation(): UseMutationResult<
     },
     onSuccess: (ride: Ride) => {
       queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
+      });
+    },
+  });
+}
+
+/**
+ * Mutation: dispatch a ride to this driver — the "Accept" action on
+ * DriverDispatch. Wraps `DispatchRide`, which reads the current ride
+ * state, runs the entity transition (enforces the `awaiting_driver`
+ * precondition), and writes back. If another driver won the race the
+ * entity transition fails with a `ride_illegal_transition` ValidationError;
+ * the view-model surfaces that as the `'gone'` state.
+ *
+ * Cache: byId entry is set so DriverMonitor's first paint doesn't double-
+ * fetch (Turn 4); driver's lists are invalidated so the in-progress query
+ * picks up the freshly-accepted ride; passenger's lists are invalidated
+ * so the rider's RideMonitor sees the dispatched snapshot if it doesn't
+ * already (their live ObserveRide subscription handles the steady-state
+ * case, but invalidation covers any one-shot reads).
+ */
+export interface DispatchRideInput {
+  readonly rideId: RideId;
+  readonly driver: DriverSnapshot;
+  readonly pickupDirections: Route;
+}
+
+export function useDispatchRideMutation(): UseMutationResult<
+  Ride,
+  NotFoundError | AuthorizationError | ValidationError,
+  DispatchRideInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Ride,
+    NotFoundError | AuthorizationError | ValidationError,
+    DispatchRideInput
+  >({
+    mutationFn: async (input: DispatchRideInput): Promise<Ride> => {
+      const r = await useCases.dispatchRide.execute(input);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (ride: Ride) => {
+      queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      if (ride.driver) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.ride.listsForDriver(ride.driver.id),
+        });
+      }
       void queryClient.invalidateQueries({
         queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
       });

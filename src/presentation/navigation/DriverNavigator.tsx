@@ -1,7 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
-import DriverDispatchPlaceholderScreen from '@presentation/features/driver/screens/DriverDispatchPlaceholderScreen';
+import DriverDispatchScreen from '@presentation/features/driver/screens/DriverDispatchScreen';
 
 import { DriverTabsNavigator } from './DriverTabsNavigator';
 import type { DriverStackParamList } from './types';
@@ -34,7 +34,7 @@ export function DriverNavigator() {
       />
       <Stack.Screen
         name="DriverDispatch"
-        component={DriverDispatchPlaceholderScreen}
+        component={DriverDispatchScreen}
         options={{ title: 'Incoming ride' }}
       />
       <Stack.Screen
