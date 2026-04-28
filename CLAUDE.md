@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 27, 2026
+**Last updated:** April 28, 2026
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,32 +9,34 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-End of Phase 2 (data layer complete). The full domain + data layer is
-rewritten under Uncle Bob clean architecture; auth + email-verification
-flows work end-to-end on iOS + Android against real Firebase. Phase 3
-(rider UI) starts next.
+End of Phase 3 (rider UI complete). The full rider journey runs
+end-to-end against real Firebase: sign-in → home → route search →
+route/service-tier selection → CreateRide → live RideMonitor (all
+statuses) → RideReceipt. The Phase 0 GreetUser smoke artifact has been
+retired. Phase 4 (driver UI) starts next.
 
-| Phase       | Scope                                                                    | Status                         |
-| ----------- | ------------------------------------------------------------------------ | ------------------------------ |
-| 0           | Tooling + scaffolding                                                    | ✅ Complete                    |
-| 1           | Auth + user identity                                                     | ✅ End-to-end on real Firebase |
-| 2 turn 1    | Service-area + ride-service catalog                                      | ✅                             |
-| 2 turn 2    | Routes API + Route value object                                          | ✅                             |
-| 2 turn 3a   | Ride entity + state machine + FareCalculator                             | ✅                             |
-| 2 turn 3b-1 | Ride DTOs + mappers + repository contract + in-memory fake               | ✅                             |
-| 2 turn 3b-2 | FirestoreRideRepository + Cloud Functions + 8 use cases                  | ✅                             |
-| 2 turn 3c   | UserLocation + LocationRepository (3-retry backoff)                      | ✅                             |
-| 3           | Rider UI (RiderHome, RouteSearch, RouteSelect, RideMonitor, RideReceipt) | Next                           |
-| 4           | Driver UI                                                                | Pending                        |
-| 5           | Vehicle management                                                       | Pending                        |
-| 6           | Payments / Stripe Connect / tipping                                      | Pending                        |
-| 7           | Background GPS + geofence-exit warnings                                  | Pending                        |
-| 8           | Google Navigation SDK (driver in-app navigation)                         | Pending                        |
-| 9           | Push notifications + Crashlytics + polish                                | Pending                        |
-| 10          | Cutover from legacy yeride                                               | Pending                        |
+| Phase     | Scope                                                                            | Status                         |
+| --------- | -------------------------------------------------------------------------------- | ------------------------------ |
+| 0         | Tooling + scaffolding                                                            | ✅ Complete                    |
+| 1         | Auth + user identity                                                             | ✅ End-to-end on real Firebase |
+| 2         | Domain + data layer (service area, routes, ride, location, FareCalculator)       | ✅ End of Phase 2: 422 tests   |
+| 3 turn 1  | Phase 3 foundations: domain additions, store scaffolding                         | ✅                             |
+| 3 turn 2  | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier    | ✅                             |
+| 3 turn 3  | RiderHome + role-based routing, end-to-end ride creation                         | ✅                             |
+| 3 turn 4a | RideMonitor scaffolding + early-status views (awaiting/dispatched)               | ✅                             |
+| 3 turn 4b | Late-status views (started/completed/payment_failed) + chat stub + geofence tick | ✅                             |
+| 3 turn 5  | RideReceipt + Phase 3 cleanup                                                    | ✅                             |
+| 4         | Driver UI                                                                        | Next                           |
+| 5         | Vehicle management                                                               | Pending                        |
+| 6         | Payments / Stripe Connect / tipping                                              | Pending                        |
+| 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
+| 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
+| 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
+| 10        | Cutover from legacy yeride                                                       | Pending                        |
 
-End of Phase 2 acceptance: 59 suites / 422 tests passing; typecheck +
-lint + format + test all green.
+End of Phase 3 acceptance: 74 test suites passing; typecheck + lint +
+format + test all green. Rider can complete a full trip on iOS +
+Android against real Firebase.
 
 ## Tech stack
 
@@ -58,12 +60,16 @@ lint + format + test all green.
 ```
 src/
 ├── domain/         ← entities, value objects, repository INTERFACES, errors, services
-│   ├── entities/   ← ~16 value objects + entities (User, Money, Coordinates, ServiceArea, RideService, Route, Ride, UserLocation, TripEvent, TripPayment, …)
-│   ├── repositories/ ← AuthRepository, UserRepository, ServiceAreaRepository, RideRepository, LocationRepository (interfaces only)
+│   ├── entities/   ← 27 value objects + entities (User, Money, Coordinates, ServiceArea,
+│   │                 RideService, Route, Ride, RideStatus, UserLocation, TripEvent,
+│   │                 TripPayment, ChatMessage, branded IDs, snapshots, …)
+│   ├── repositories/ ← AuthRepository, UserRepository, ServiceAreaRepository,
+│   │                 RideRepository, LocationRepository (interfaces only)
 │   ├── services/   ← RoutesService (interface), FareCalculator (pure-math implementation)
 │   ├── errors/     ← DomainError + 6 subtypes (Validation, Authorization, NotFound, Conflict, Payment, Network)
 │   └── shared/     ← Result<T,E>, brand<T,K> helpers
-├── app/            ← use cases (28 of them across auth/serviceArea/route/ride/location/shared)
+├── app/            ← use cases (35 of them across 6 bounded contexts:
+│   │                 auth, serviceArea, route, ride, location, trip-tracking)
 │   └── usecases/<bounded-context>/
 ├── data/           ← concrete adapters (Firebase + fetch)
 │   ├── dto/        ← Zod schemas matching legacy Firestore docs
@@ -72,9 +78,11 @@ src/
 │   └── services/   ← GoogleRoutesService, CloudFunctionsService
 ├── presentation/   ← screens, view-models, navigation, stores, DI
 │   ├── di/         ← container.ts (the composition root)
-│   ├── stores/     ← Zustand stores (useSessionStore, useServiceAreaStore, …)
-│   ├── navigation/ ← AuthNavigator / VerifyEmailNavigator / MainNavigator / RootNavigator
-│   ├── features/<feature>/screens|view-models/
+│   ├── stores/     ← Zustand stores (useSessionStore, useServiceAreaStore,
+│   │                 useTripDraftStore, useGeofenceUiStore, useChatUiStore)
+│   ├── navigation/ ← RootNavigator, AuthNavigator, VerifyEmailNavigator,
+│   │                 RiderNavigator, RiderTabsNavigator, DriverNavigator
+│   ├── features/   ← rider/{screens,components,view-models}, auth/, …
 │   └── AppContent.tsx, App.tsx
 └── shared/         ← logger, env, testing fakes (cross-layer utilities)
 ```
@@ -93,7 +101,7 @@ in `src/presentation/di/container.ts` is the single composition root that
 wires data adapters into use cases — boundaries-rule overrides for that
 file are listed in `eslint.config.js`.
 
-## Code conventions (locked in across Phases 0–2)
+## Code conventions (locked in across Phases 0–3)
 
 ### Result over throw
 
@@ -240,6 +248,49 @@ if (!updatedR.ok) return updatedR;
 return this.users.update(updatedR.value);
 ```
 
+### View-model hooks per screen (Phase 3)
+
+Every screen has a sibling `useXxxViewModel.ts` hook in
+`src/presentation/features/<area>/view-models/` that owns the screen's
+orchestration: pulls use cases off the DI container, wires TanStack
+Query for server state, reads/writes the relevant Zustand store(s),
+maps domain `Result` values to flat UI props (loading/error/data
+discriminated unions), and exposes typed callbacks. Screens stay dumb —
+no `useUseCases()` calls, no Firebase imports, no Result-unwrapping.
+
+Test view-models in isolation with the in-memory repository fakes via
+`TestContainerProvider`; screens get rendered tests that supply the
+view-model output as props.
+
+### Zustand vs. TanStack Query — split of concerns
+
+Strict split, never mix:
+
+- **TanStack Query** owns _server state_ (anything fetched or
+  subscribed via a use case) — list of available rides, the current
+  Ride doc, route catalog, payment methods. Query keys mirror use case
+  args.
+- **Zustand stores** own _client/UI state_ only — the trip-draft a
+  rider is composing pre-CreateRide (`useTripDraftStore`), chat
+  open/closed flag (`useChatUiStore`), geofence-warning banner
+  visibility (`useGeofenceUiStore`), session identity bag
+  (`useSessionStore`), the resolved active service area
+  (`useServiceAreaStore`).
+
+Do not put server-fetched ride data in Zustand. Do not put pure UI
+flags in TanStack Query.
+
+### Status-router pattern for live trip surfaces
+
+`RideMonitorScreen` uses a status-router: a single switch on
+`Ride.status` selects which bottom-sheet view component renders
+(`AwaitingDriverView`, `DispatchedView`, `StartedView`,
+`CompletedView`, `PaymentFailedView`). Each view is independently
+testable, gets the `Ride` + callbacks as props, and never reads from
+the store directly. Adding a new ride status = add a `RideStatus`
+literal + add one component + extend the router. Don't grow a single
+god-component.
+
 ## Data co-existence with legacy yeride
 
 **Critical decision (REFACTOR_PLAN.md §7 Decision 6):** dev + stage
@@ -260,18 +311,21 @@ new app writes to it.
 
 ## Critical files
 
-| File                                               | Purpose                                                                                                     |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `REFACTOR_PLAN.md`                                 | Phased migration roadmap, decisions, target architecture                                                    |
-| `docs/PHASE_1_TURN_2.md`                           | What shipped through Phase 1                                                                                |
-| `app.config.ts`                                    | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
-| `scripts/patch-podfile.js`                         | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
-| `eslint.config.js`                                 | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
-| `src/presentation/di/container.ts`                 | The composition root — single place where all repo + service wiring lives                                   |
-| `src/domain/entities/Ride.ts`                      | The trip aggregate + state machine. Most-touched entity                                                     |
-| `src/data/repositories/FirestoreRideRepository.ts` | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
-| `src/data/services/CloudFunctionsService.ts`       | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
-| `src/shared/testing/InMemoryRideRepository.ts`     | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
+| File                                                            | Purpose                                                                                                     |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `REFACTOR_PLAN.md`                                              | Phased migration roadmap, decisions, target architecture                                                    |
+| `docs/PHASE_1_TURN_2.md`                                        | What shipped through Phase 1                                                                                |
+| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                             | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
+| `app.config.ts`                                                 | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
+| `scripts/patch-podfile.js`                                      | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
+| `eslint.config.js`                                              | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
+| `src/presentation/di/container.ts`                              | The composition root — single place where all repo + service wiring lives                                   |
+| `src/presentation/navigation/RootNavigator.tsx`                 | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
+| `src/presentation/features/rider/screens/RideMonitorScreen.tsx` | Live-trip surface; map + bottom-sheet status-router. Most-touched UI screen                                 |
+| `src/domain/entities/Ride.ts`                                   | The trip aggregate + state machine. Most-touched domain entity                                              |
+| `src/data/repositories/FirestoreRideRepository.ts`              | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
+| `src/data/services/CloudFunctionsService.ts`                    | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
+| `src/shared/testing/InMemoryRideRepository.ts`                  | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
 
 ## Build & deployment
 
@@ -411,6 +465,12 @@ during heavy `getDoc` use in the rider UI work.
 - Build the in-memory fake repository BEFORE the real Firestore one;
   the contract is firmer that way.
 - Use synchronous unsubscribe for all subscriptions.
+- For new screens: write a `useXxxViewModel` hook alongside it, keep
+  the screen body dumb (props in, JSX out), and test the view-model in
+  isolation against in-memory repository fakes via
+  `TestContainerProvider`.
+- Server state goes in TanStack Query; client/UI state goes in Zustand.
+  Don't mix.
 - When in doubt about a legacy quirk, check the legacy
   `/Users/papagallo/yeapptech/dev/yeride/CLAUDE.md` — it captures most
   of the trial-and-error history.
@@ -432,32 +492,55 @@ during heavy `getDoc` use in the rider UI work.
 - Don't skip the verify gates before committing.
 - Don't return promises from subscription methods (legacy footgun
   explicitly fixed).
+- Don't put fetched ride/route/payment data in a Zustand store — that's
+  what TanStack Query is for. Don't put a UI flag (banner-visible,
+  sheet-open) in TanStack Query — that's what Zustand is for.
+- Don't grow `RideMonitorScreen` into a god-component. New ride status
+  = add a `RideStatus` literal + a new `<Status>View` component + one
+  case in the status-router. Each view stays prop-driven and
+  independently testable.
 
 ## Quick reference
 
 ### File locations
 
 ```
-Auth use cases       → src/app/usecases/auth/*.ts
-Service-area use cases → src/app/usecases/serviceArea/*.ts
-Routes use case      → src/app/usecases/route/ComputeRoutes.ts
-Ride lifecycle use cases → src/app/usecases/ride/*.ts (8 of them)
-Location use cases   → src/app/usecases/location/*.ts
+Auth use cases             → src/app/usecases/auth/*.ts            (~14)
+Service-area use cases     → src/app/usecases/serviceArea/*.ts     (3)
+Routes use cases           → src/app/usecases/route/*.ts           (2: ComputeRoutes, EstimateFare)
+Ride lifecycle use cases   → src/app/usecases/ride/*.ts            (~13)
+Location use cases         → src/app/usecases/location/*.ts        (2)
+Trip-tracking use case     → src/app/usecases/trip-tracking/*.ts   (1)
 
-Auth repository      → src/data/repositories/FirebaseAuthRepository.ts
-User repository      → src/data/repositories/FirestoreUserRepository.ts
-ServiceArea repo     → src/data/repositories/FirestoreServiceAreaRepository.ts
-Ride repository      → src/data/repositories/FirestoreRideRepository.ts (largest)
-Location repository  → src/data/repositories/FirestoreLocationRepository.ts (3-retry backoff)
+Auth repository            → src/data/repositories/FirebaseAuthRepository.ts
+User repository            → src/data/repositories/FirestoreUserRepository.ts
+ServiceArea repository     → src/data/repositories/FirestoreServiceAreaRepository.ts
+Ride repository            → src/data/repositories/FirestoreRideRepository.ts (largest)
+Location repository        → src/data/repositories/FirestoreLocationRepository.ts (3-retry backoff)
 
-Routes service       → src/data/services/GoogleRoutesService.ts
-Cloud Functions      → src/data/services/CloudFunctionsService.ts (us-east1)
+Routes service             → src/data/services/GoogleRoutesService.ts
+Cloud Functions            → src/data/services/CloudFunctionsService.ts (us-east1)
 
-Session store        → src/presentation/stores/useSessionStore.ts
-Service-area store   → src/presentation/stores/useServiceAreaStore.ts
+Session store              → src/presentation/stores/useSessionStore.ts
+Service-area store         → src/presentation/stores/useServiceAreaStore.ts
+Trip-draft store           → src/presentation/stores/useTripDraftStore.ts (pre-CreateRide draft)
+Geofence-UI store          → src/presentation/stores/useGeofenceUiStore.ts (banner visibility)
+Chat-UI store              → src/presentation/stores/useChatUiStore.ts (open flag, lastReadAt)
 
-DI container         → src/presentation/di/container.ts
-TestContainerProvider → src/shared/testing/TestContainerProvider.tsx
+Root navigator             → src/presentation/navigation/RootNavigator.tsx
+Auth / VerifyEmail navs    → src/presentation/navigation/{AuthNavigator,VerifyEmailNavigator}.tsx
+Rider stack + tabs         → src/presentation/navigation/{RiderNavigator,RiderTabsNavigator}.tsx
+Driver stack               → src/presentation/navigation/DriverNavigator.tsx (placeholder for Phase 4)
+
+Rider screens              → src/presentation/features/rider/screens/*.tsx
+                              RiderHome, RouteSearch, RouteSelect, RideMonitor, RideReceipt,
+                              ActivityPlaceholder, WalletPlaceholder
+Rider status-views         → src/presentation/features/rider/components/
+                              {AwaitingDriver,Dispatched,Started,Completed,PaymentFailed}View.tsx
+Rider view-models          → src/presentation/features/rider/view-models/use*ViewModel.ts
+
+DI container               → src/presentation/di/container.ts
+TestContainerProvider      → src/shared/testing/TestContainerProvider.tsx
 ```
 
 ### Import paths (TS path aliases)
@@ -478,4 +561,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped, then ask.
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_3_TURN_5.md`), then
+ask.
