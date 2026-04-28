@@ -12,17 +12,27 @@ import { SendEmailVerification } from '@app/usecases/auth/SendEmailVerification'
 import { UpdateProfile } from '@app/usecases/auth/UpdateProfile';
 import { UpdateSavedPlace } from '@app/usecases/auth/UpdateSavedPlace';
 import { UploadAvatar } from '@app/usecases/auth/UploadAvatar';
+import { CancelRideByDriver } from '@app/usecases/ride/CancelRideByDriver';
+import { CancelRideByRider } from '@app/usecases/ride/CancelRideByRider';
+import { CreateRide } from '@app/usecases/ride/CreateRide';
+import { DispatchRide } from '@app/usecases/ride/DispatchRide';
+import { ListAvailableRides } from '@app/usecases/ride/ListAvailableRides';
+import { ObserveRide } from '@app/usecases/ride/ObserveRide';
+import { RequestPayment } from '@app/usecases/ride/RequestPayment';
+import { StartRide } from '@app/usecases/ride/StartRide';
 import { ComputeRoutes } from '@app/usecases/route/ComputeRoutes';
 import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
 import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
 import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
 import { GreetUser } from '@app/usecases/shared/GreetUser';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
+import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@data/repositories/FirestoreRideRepository';
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
 import type {
   AuthRepository,
+  RideRepository,
   ServiceAreaRepository,
   UserRepository,
 } from '@domain/repositories';
@@ -32,6 +42,7 @@ import { LOG } from '@shared/logger';
 import type {
   FakeRoutesService as FakeRoutesServiceType,
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
+  InMemoryRideRepository as InMemoryRideRepositoryType,
   InMemoryServiceAreaRepository as InMemoryServiceAreaRepositoryType,
   InMemoryUserRepository as InMemoryUserRepositoryType,
 } from '@shared/testing';
@@ -94,6 +105,16 @@ export interface UseCases {
 
   // Google Routes API (Phase 2 turn 2)
   computeRoutes: ComputeRoutes;
+
+  // Ride lifecycle (Phase 2 turn 3)
+  createRide: CreateRide;
+  observeRide: ObserveRide;
+  listAvailableRides: ListAvailableRides;
+  dispatchRide: DispatchRide;
+  startRide: StartRide;
+  requestPayment: RequestPayment;
+  cancelRideByRider: CancelRideByRider;
+  cancelRideByDriver: CancelRideByDriver;
 }
 
 export interface Container {
@@ -108,6 +129,7 @@ export function makeUseCases(args: {
   auth: AuthRepository;
   users: UserRepository;
   serviceAreas: ServiceAreaRepository;
+  rides: RideRepository;
   routes: RoutesService;
   clock?: () => Date;
 }): UseCases {
@@ -132,6 +154,14 @@ export function makeUseCases(args: {
     resolveActiveServiceArea: new ResolveActiveServiceArea(args.serviceAreas),
     listRideServices: new ListRideServices(args.serviceAreas),
     computeRoutes: new ComputeRoutes(args.routes),
+    createRide: new CreateRide(args.rides),
+    observeRide: new ObserveRide(args.rides),
+    listAvailableRides: new ListAvailableRides(args.rides),
+    dispatchRide: new DispatchRide(args.rides, clock),
+    startRide: new StartRide(args.rides, clock),
+    requestPayment: new RequestPayment(args.rides),
+    cancelRideByRider: new CancelRideByRider(args.rides),
+    cancelRideByDriver: new CancelRideByDriver(args.rides),
   };
 }
 
@@ -161,14 +191,18 @@ export function buildContainer(): Container {
       require('@data/repositories/FirestoreServiceAreaRepository') as {
         FirestoreServiceAreaRepository: new () => FirestoreServiceAreaRepositoryType;
       };
+    const dataRides = require('@data/repositories/FirestoreRideRepository') as {
+      FirestoreRideRepository: new () => FirestoreRideRepositoryType;
+    };
     LOG.info(
-      'Container using FirebaseAuthRepository + FirestoreUserRepository + FirestoreServiceAreaRepository',
+      'Container using Firebase{Auth,Firestore} + FirestoreServiceArea + FirestoreRide repositories',
     );
     return {
       useCases: makeUseCases({
         auth: new dataAuth.FirebaseAuthRepository(),
         users: new dataUsers.FirestoreUserRepository(),
         serviceAreas: new dataServiceAreas.FirestoreServiceAreaRepository(),
+        rides: new dataRides.FirestoreRideRepository(),
         routes,
       }),
     };
@@ -176,11 +210,12 @@ export function buildContainer(): Container {
 
   const testing = require('@shared/testing') as {
     InMemoryAuthRepository: new () => InMemoryAuthRepositoryType;
+    InMemoryRideRepository: new () => InMemoryRideRepositoryType;
     InMemoryServiceAreaRepository: new () => InMemoryServiceAreaRepositoryType;
     InMemoryUserRepository: new () => InMemoryUserRepositoryType;
   };
   LOG.warn(
-    'Firebase config not detected — using in-memory fakes for auth/user/service-areas. ' +
+    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides. ' +
       'No data will persist. See docs/FIREBASE_SETUP.md.',
   );
   return {
@@ -188,6 +223,7 @@ export function buildContainer(): Container {
       auth: new testing.InMemoryAuthRepository(),
       users: new testing.InMemoryUserRepository(),
       serviceAreas: new testing.InMemoryServiceAreaRepository(),
+      rides: new testing.InMemoryRideRepository(),
       routes,
     }),
   };
