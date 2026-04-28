@@ -9,12 +9,10 @@ import type { DriverStackParamList } from './types';
 
 /**
  * Native-stack hosting the driver tabs + every modal / pushed screen on
- * top. Phase 4:
- *   - Turn 1: tabs + `UserProfile` modal (mirrors the rider stack).
- *   - Turn 3: `DriverDispatch` (incoming-ride accept/decline).
- *   - Turn 4a: `DriverMonitor` (active-trip surface). Drivers
- *     `navigation.replace` here from DriverDispatch on accept; the
- *     in-progress redirect on DriverHome lands here on cold launch.
+ * top. Registers `DriverTabs`, `UserProfile`, `DriverDispatch`, and
+ * `DriverMonitor`. Drivers reach `DriverMonitor` via
+ * `navigation.replace` from DriverDispatch on accept; the in-progress
+ * redirect on DriverHome also lands here on cold launch.
  *
  * `headerBackButtonDisplayMode: 'minimal'` matches the convention used in
  * `AuthNavigator` and `RiderNavigator` (legacy `headerBackTitleVisible:

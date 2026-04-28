@@ -30,9 +30,9 @@ import {
  * Why a plain `Pressable` + `Alert.alert` instead of the legacy SwipeButton
  * confirm: Phase 7 is the natural home for the swipe-to-confirm UX, where
  * the dropoff geofence will gate the swipe (drivers shouldn't be able to
- * end a trip from across town). For Turn 4b we ship a working completion
- * path with a destructive-confirm alert so the screen is functionally
- * complete without pulling in an extra native dep.
+ * end a trip from across town). Until then the destructive-confirm alert
+ * is enough for a functionally complete screen, without pulling in an
+ * extra native dep.
  *
  * Why no Navigate-to-dropoff button here: Google Navigation SDK lands in
  * Phase 8.

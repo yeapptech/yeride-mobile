@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 28, 2026 (Phase 4 turn 4b)
+**Last updated:** April 28, 2026 (Phase 4 turn 5)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,18 +9,18 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-Mid-Phase 4 (driver UI). Phase 3 shipped the full rider journey end-to-
-end against real Firebase: sign-in → home → route search →
+Phase 4 (driver UI) complete. Phase 3 shipped the full rider journey
+end-to-end against real Firebase: sign-in → home → route search →
 route/service-tier selection → CreateRide → live RideMonitor (all
-statuses) → RideReceipt. Phase 4 turns 1–4b have landed the full driver
-side end-to-end: real `DriverNavigator` + tabs, `DriverHomeScreen`
-(map + nearby rides + online toggle), `DriverDispatchScreen`
-(accept/decline), and `DriverMonitorScreen` with every status view —
+statuses) → RideReceipt. Phase 4 shipped the full driver side
+end-to-end: `DriverNavigator` + tabs, `DriverHomeScreen` (map +
+nearby rides + online toggle), `DriverDispatchScreen`
+(accept/decline), `DriverMonitorScreen` with every status view —
 en-route, at-pickup, started, payment-requested, completed,
-payment-failed. The Start-ride and RequestPayment mutations route
-through real `useStartRideMutation` / `useRequestPaymentMutation`. The
-cancel UX uses a full per-reason `DriverCancelReasonSheet`. Only the
-Phase 4 cleanup pass (Turn 5) remains.
+payment-failed — Start-ride and RequestPayment routed through real
+mutations, and a per-reason `DriverCancelReasonSheet`. Turn 5 closed
+the phase with cleanup + this CLAUDE.md driver-side fold-in. Phase 5
+(Vehicle management) is next.
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -38,18 +38,18 @@ Phase 4 cleanup pass (Turn 5) remains.
 | 4 turn 3  | DriverDispatch — incoming-ride accept/decline                                    | ✅                             |
 | 4 turn 4a | DriverMonitor scaffold + en-route / at-pickup status views                       | ✅                             |
 | 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations          | ✅                             |
-| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | Next                           |
-| 5         | Vehicle management                                                               | Pending                        |
+| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | ✅                             |
+| 5         | Vehicle management                                                               | Next                           |
 | 6         | Payments / Stripe Connect / tipping                                              | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
 | 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
 
-End of Phase 4 turn 4b acceptance: **81 test suites / 568 tests
-passing**; typecheck + lint + format + test all green. Driver can sign
-in → go online → accept an offer → land on DriverMonitor → flip to
-at-pickup → start ride → request payment → either land on the
+End of Phase 4 acceptance: **81 test suites / 568 tests passing**;
+typecheck + lint + format + test all green. Driver can sign in → go
+online → accept an offer → land on DriverMonitor → flip to at-pickup
+→ start ride → request payment → either land on the
 `payment_requested` spinner and auto-redirect on `completed`, or land
 on the `payment_failed` card and tap "Close trip" → return to
 DriverHome. Cancel from any cancel-eligible status uses the full
@@ -333,23 +333,25 @@ new app writes to it.
 
 ## Critical files
 
-| File                                                               | Purpose                                                                                                     |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `REFACTOR_PLAN.md`                                                 | Phased migration roadmap, decisions, target architecture                                                    |
-| `docs/PHASE_1_TURN_2.md`                                           | What shipped through Phase 1                                                                                |
-| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
-| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B}.md`   | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
-| `app.config.ts`                                                    | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
-| `scripts/patch-podfile.js`                                         | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
-| `eslint.config.js`                                                 | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
-| `src/presentation/di/container.ts`                                 | The composition root — single place where all repo + service wiring lives                                   |
-| `src/presentation/navigation/RootNavigator.tsx`                    | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
-| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`    | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen              |
-| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx` | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen as of 4a         |
-| `src/domain/entities/Ride.ts`                                      | The trip aggregate + state machine. Most-touched domain entity                                              |
-| `src/data/repositories/FirestoreRideRepository.ts`                 | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
-| `src/data/services/CloudFunctionsService.ts`                       | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
-| `src/shared/testing/InMemoryRideRepository.ts`                     | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
+| File                                                                        | Purpose                                                                                                     |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `REFACTOR_PLAN.md`                                                          | Phased migration roadmap, decisions, target architecture                                                    |
+| `docs/PHASE_1_TURN_2.md`                                                    | What shipped through Phase 1                                                                                |
+| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                         | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
+| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`          | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
+| `app.config.ts`                                                             | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
+| `scripts/patch-podfile.js`                                                  | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
+| `eslint.config.js`                                                          | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
+| `src/presentation/di/container.ts`                                          | The composition root — single place where all repo + service wiring lives                                   |
+| `src/presentation/navigation/RootNavigator.tsx`                             | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
+| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`             | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen              |
+| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`          | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                  |
+| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts` | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule            |
+| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`     | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)     |
+| `src/domain/entities/Ride.ts`                                               | The trip aggregate + state machine. Most-touched domain entity                                              |
+| `src/data/repositories/FirestoreRideRepository.ts`                          | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
+| `src/data/services/CloudFunctionsService.ts`                                | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
+| `src/shared/testing/InMemoryRideRepository.ts`                              | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
 
 ## Build & deployment
 
@@ -554,6 +556,68 @@ won't pick up the plist change.
   status-router. Each view stays prop-driven and independently
   testable.
 
+### Driver-side specifics (Phase 4)
+
+A handful of patterns are specific to the driver-side surfaces. Read
+these before touching `useDriverHomeViewModel`,
+`useDriverDispatchViewModel`, `useDriverMonitorViewModel`, or any of
+the four driver status views.
+
+- **Driver mode mirror.** `useDriverStatusStore` carries a
+  `mode: 'offline' | 'online_idle' | 'dispatched' | 'on_trip'` flag.
+  `useDriverMonitorViewModel` mirrors `Ride.status` into this flag so
+  DriverHome / the tabs / a future Earnings surface don't have to
+  re-derive from the in-progress ride query at every read. New ride
+  status that the driver should see = update the mirror's switch in
+  the VM. `cancelled` always maps to `'online_idle'` (driver re-joins
+  the queue); `started` / `payment_requested` / `payment_failed` /
+  `completed` all map to `'on_trip'`.
+- **Client-side `arrivedAtPickup` flag.** Server status `'dispatched'`
+  is split into UI states `'en_route_to_pickup'` and `'at_pickup'` via
+  a single client-side bool inside `useDriverMonitorViewModel`. The
+  legacy app does the same — there's no server-side `at_pickup` state.
+  Phase 7's geofence-entry event will auto-flip the flag; until then
+  the driver taps "Arrived at pickup" manually. The flag resets on
+  every status that isn't `'dispatched'` so a defensive re-render in a
+  later state can't render a stale at-pickup view.
+- **Stub odometer at start / request-payment.** The VM derives a stub
+  `pickupTiming.odometerMeters ?? 0` + 1 metre and passes it to both
+  `useStartRideMutation` and `useRequestPaymentMutation`. This passes
+  the entity's monotonicity check (`requestPayment` rejects an
+  odometer below `pickupTiming.odometerMeters`) without dragging GPS
+  into the test surface. Phase 7 swaps `stubOdometerMeters` for a real
+  GPS reading from `useGpsLifecycle` — that's the single edit-site.
+  Don't pass odometer in from the screen; the VM owns the derivation
+  so the prop surface stays stable across the GPS migration.
+- **Terminal-redirect rule.** `useDriverMonitorViewModel` resets the
+  stack to `DriverTabs` on `'cancelled'` and `'completed'`.
+  `'payment_failed'` intentionally does NOT redirect — the driver
+  stays on the failure card and taps "Close trip" themselves
+  (`navigation.reset` from the screen). The `redirectedRef` ref guards
+  against re-firing across re-renders. If you add a new terminal
+  status, decide deliberately whether it auto-redirects; don't blanket
+  add to the effect.
+- **Two cancel-sheet variants.**
+  `presentation/components/trip/CancelReasonSheet` is rider-side
+  (gated on `isRiderCode`); `DriverCancelReasonSheet` is driver-side
+  (gated on `isDriverCode`). They diverge on the available code list
+  (`driver_no_show` rider-only; `passenger_no_show` driver-only) and
+  on copy. Both build the `CancellationReason` value object and hand
+  it to `onConfirm` — the parent owns submission. Both have an
+  explicit `onPress={() => undefined}` on the inner card Pressable to
+  absorb press-bubbling under `@testing-library/react-native`'s
+  `fireEvent.press` AND to avoid a latent dismiss-on-card-tap touch
+  bug in production.
+- **DriverMonitor map polyline rules.** The map keeps a fixed pool of
+  always-mounted children (the `<Map/>` component's invariant). Drive
+  visibility via props:
+  - Green driver→pickup polyline (`pickupRoute`): visible during
+    server status `'dispatched'`. Hidden in every other state.
+  - Gold pickup→dropoff polyline (`selectedRoute`): visible during
+    `'started'` / `'payment_requested'` / `'payment_failed'` /
+    `'completed'`. Both pickup and dropoff markers stay mounted
+    across late-status transitions so the map doesn't visibly redraw.
+
 ## Quick reference
 
 ### File locations
@@ -630,5 +694,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_4_TURN_4B.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_4_TURN_5.md`),
 then ask.

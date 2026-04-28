@@ -32,9 +32,9 @@ const logger = LOG.extend('DriverMonitorVM');
  *      is derived from `Ride.status` plus a single client-side bool
  *      (`arrivedAtPickup`).
  *
- *   2. Live `ObserveTripEvents` subscription primed in Turn 4a so the
- *      future events panel is a pure rendering add. Returned but not yet
- *      consumed by an early-status view.
+ *   2. Live `ObserveTripEvents` subscription primed so the future
+ *      events panel (Phase 9 polish) is a pure rendering add. Returned
+ *      but not yet consumed by any status view.
  *
  *   3. Foreground location push: when the screen feeds in a fresh
  *      driver coordinate, write `users/{driverId}.location`. Uses the

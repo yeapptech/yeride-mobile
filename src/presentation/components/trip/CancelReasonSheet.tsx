@@ -126,8 +126,17 @@ export function CancelReasonSheet({
         onPress={handleClose}
         className="flex-1 bg-foreground/40"
       >
-        {/* Inner card — stop propagation so taps on it don't dismiss. */}
-        <Pressable className="mt-auto rounded-t-3xl bg-card p-4">
+        {/* Inner card. We give it an explicit no-op `onPress` so that
+            (a) in production, touch events that land on the card area
+            don't bubble up to the outer dismiss Pressable on RN, and
+            (b) in @testing-library/react-native's `fireEvent.press`, the
+            press is absorbed at this Pressable instead of walking up to
+            the dismiss handler that would reset internal state. Mirror
+            of the same fix in `DriverCancelReasonSheet`. */}
+        <Pressable
+          className="mt-auto rounded-t-3xl bg-card p-4"
+          onPress={() => undefined}
+        >
           <View className="self-center mb-3 h-1 w-12 rounded-full bg-border" />
           <Text className="mb-1 text-lg font-semibold text-foreground">
             Cancel ride

@@ -18,12 +18,12 @@ import {
  *     no email, no phone, no avatar URL exposure.
  *   - Pickup endpoint card.
  *   - Primary CTA "Arrived at pickup" → flips the parent into the
- *     `'at_pickup'` UI state. Phase 7's geofence-exit warning will
- *     auto-fire this; for Turn 4a it's a manual button tap.
+ *     `'at_pickup'` UI state. Phase 7's geofence-entry event will
+ *     auto-fire this; until then it's a manual button tap.
  *
  * No "Navigate" button — Google Navigation SDK integration is Phase 8.
- * The header chat button is also deferred to Phase 9 polish; the cancel
- * action is the only header trailing action in Turn 4a.
+ * The header chat button is deferred to Phase 9 polish; the cancel
+ * action is the only header trailing action.
  */
 interface EnRouteToPickupViewProps {
   readonly ride: Ride;

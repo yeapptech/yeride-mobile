@@ -92,10 +92,10 @@ export type DriverTabsParamList = {
 
 /**
  * Native-stack hosting the driver tabs + every modal / pushed screen on
- * top. Phase 4 turn 2 added `DriverDispatch`; turn 4a adds
- * `DriverMonitor` — the active-trip surface that drivers replace into
- * after accepting an offer. Both routes carry the rideId so deep links
- * and cold-launches resume.
+ * top. Mounts `DriverDispatch` (incoming-ride accept/decline) and
+ * `DriverMonitor` (active-trip surface that drivers replace into after
+ * accepting an offer). Both routes carry the rideId so deep links and
+ * cold-launches resume.
  */
 export type DriverStackParamList = {
   DriverTabs: NavigatorScreenParams<DriverTabsParamList>;
@@ -108,9 +108,9 @@ export type DriverStackParamList = {
    * Active-trip surface. Driver lands here via `navigation.replace` from
    * DriverDispatch on accept; DriverHome's in-progress redirect also
    * lands here on cold launch. The status-router inside the screen picks
-   * the right view based on `Ride.status`. Turn 4a wires the
-   * en-route-to-pickup and at-pickup views; turn 4b adds started /
-   * payment-requested / completed / payment-failed.
+   * the right view based on `Ride.status` plus a single client-side
+   * `arrivedAtPickup` flag — covering en-route-to-pickup, at-pickup,
+   * started, payment-requested, completed, and payment-failed.
    */
   DriverMonitor: { rideId: string };
   /**

@@ -10,8 +10,8 @@ import {
  * UI-only intermediate state during server status `dispatched`. The
  * driver has tapped "Arrived at pickup" on `EnRouteToPickupView`; the
  * ride is still `dispatched` server-side until they tap "Start ride"
- * here, which transitions to `started` (handler stubbed in Turn 4a;
- * full mutation lands in Turn 4b).
+ * here, which transitions to `started` via `useStartRideMutation` (a
+ * direct Firestore write through `RideRepository.update`).
  *
  * Why this is UI-only and not a server status: legacy yeride doesn't
  * have an "at pickup" status either. Arrival is a client-side affordance
@@ -19,9 +19,9 @@ import {
  * happens. Phase 7's geofence-driven "passenger pickup zone entered"
  * event will auto-flip this; until then it's manual.
  *
- * The cancel button uses a driver-only code (`'passenger_no_show'`) for
- * Turn 4a. The full per-reason picker modal lands in Turn 4b alongside
- * the late-status views.
+ * The cancel button opens the shared `DriverCancelReasonSheet` (gated
+ * on `CancellationReason.isDriverCode`). The parent owns the sheet's
+ * visibility; this view just calls `onPressCancel`.
  */
 interface AtPickupViewProps {
   readonly ride: Ride;

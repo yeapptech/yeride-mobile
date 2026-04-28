@@ -49,8 +49,8 @@ const logger = LOG.extend('DriverHomeVM');
  *     driver near `coords`.
  *   - `useInProgressDriverRideQuery(driverId)` — auto-redirects to
  *     DriverMonitor when the driver has a ride mid-flight (cold-launch
- *     resumption / accidental back-out). Turn 4a registered the real
- *     DriverMonitor route, so the redirect target is now unconditional.
+ *     resumption / accidental back-out). The DriverMonitor status-router
+ *     covers every active state, so the redirect target is unconditional.
  *   - `useUpdateLocationMutation` — writes the driver's foreground
  *     location to Firestore so riders' UIs can render driver-side ETA.
  *     Mirrors the rider-home pattern.
@@ -165,11 +165,10 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
 
-  // Auto-redirect to the active ride. Turn 4a registered the real
-  // `DriverMonitor` route, so any in-progress ride routes here directly.
-  // The status-router inside DriverMonitor handles every active state
-  // (en-route, at-pickup, started, payment_requested, payment_failed)
-  // — DriverHome doesn't need to branch.
+  // Auto-redirect to the active ride. The status-router inside
+  // DriverMonitor handles every active state (en-route, at-pickup,
+  // started, payment_requested, payment_failed), so DriverHome doesn't
+  // need to branch on status.
   useFocusEffect(
     useCallback(() => {
       if (inProgressRide) {
