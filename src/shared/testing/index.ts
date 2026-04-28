@@ -1,7 +1,10 @@
 export { TestContainerProvider } from './TestContainerProvider';
 export { FakeRoutesService } from './FakeRoutesService';
+export { FakeVinDecoderService } from './FakeVinDecoderService';
 export { InMemoryAuthRepository } from './InMemoryAuthRepository';
 export { InMemoryLocationRepository } from './InMemoryLocationRepository';
 export { InMemoryRideRepository } from './InMemoryRideRepository';
 export { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';
 export { InMemoryUserRepository } from './InMemoryUserRepository';
+export { InMemoryVehicleRepository } from './InMemoryVehicleRepository';
+export { InMemoryVehiclePhotoRepository } from './InMemoryVehiclePhotoRepository';

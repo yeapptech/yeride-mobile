@@ -28,3 +28,10 @@ export {
   type SavedPlaceDoc,
   type UserDoc,
 } from './UserDoc';
+export {
+  VehicleDocSchema,
+  type VehicleDoc,
+  type VehiclePhotosDoc,
+  type VehicleSpecsDoc,
+  type VehicleWriteDoc,
+} from './VehicleDoc';
