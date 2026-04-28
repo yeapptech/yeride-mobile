@@ -75,3 +75,8 @@ coverage/
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Local env files (real keys belong in EAS Secrets, not in git)
+.env.development
+.env.stage
+.env.production
