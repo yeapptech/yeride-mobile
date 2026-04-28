@@ -1,15 +1,22 @@
 import { useNavigation } from '@react-navigation/native';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Toast from 'react-native-toast-message';
 
+import { EvaluateExitWarning } from '@app/usecases/trip-tracking/EvaluateExitWarning';
 import type { CancellationReason } from '@domain/entities/CancellationReason';
+import type { ChatMessage } from '@domain/entities/ChatMessage';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { useUseCases } from '@presentation/di';
-import { useFirestoreSubscription } from '@presentation/hooks';
+import {
+  useCurrentLocation,
+  useFirestoreSubscription,
+} from '@presentation/hooks';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useCancelRideAsRiderMutation } from '@presentation/queries';
+import { useChatUiStore, useGeofenceUiStore } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RideMonitorVM');
@@ -28,23 +35,39 @@ const logger = LOG.extend('RideMonitorVM');
  *      so the screen's status-router renders the right view. `null`
  *      means "not loaded yet" — the screen renders a skeleton.
  *
- *   3. Wire the cancel mutation. Phase 3 turn 3.4a only needs the
- *      rider-side path (CancelRideByRider). The mutation's `onSuccess`
- *      seed flow is owned by `useCancelRideAsRiderMutation` itself.
+ *   3. Wire the cancel mutation (`CancelRideByRider`). Surfaces
+ *      `isCancelling` + `cancelError` for the screen's UI states.
  *
- *   4. Auto-redirect on terminal status. Phase 3 turn 3.4a routes
- *      `cancelled` → back to home. `completed` and `payment_requested →
- *      payment_failed` land in turn 3.4b along with their views.
+ *   4. Auto-redirect on terminal statuses:
+ *        - `cancelled` → reset to RiderTabs.
+ *        - `completed` → replace with RideReceipt (turn 3.4b).
+ *        - `payment_failed` stays on RideMonitor (the rider sees the
+ *          retry surface — actual retry mutation is Phase 6).
+ *
+ *   5. Geofence tick (turn 3.4b): during `dispatched`, evaluate
+ *      `EvaluateExitWarning(currentLocation, pickup)` whenever a fresh
+ *      foreground location read lands; flip the
+ *      `useGeofenceUiStore.pickupExitWarningVisible` flag based on the
+ *      signal. Phase 4 swaps `useCurrentLocation` for the
+ *      background-aware `useGpsLifecycle`.
+ *
+ *   6. Chat stub (turn 3.4b): subscribes to `ObserveLatestMessage`
+ *      (Phase-3-stub returns null) and exposes `unreadCount: 0` for
+ *      the dot. `onPressChat` shows a "Phase 3.5" toast.
  *
  * The view-model does NOT mount the bottom-sheet. That's the screen's
  * job — keeping animation state out of the view-model means tests don't
  * need a bottom-sheet host to exercise status transitions.
  */
 
+const evaluateExitWarning = new EvaluateExitWarning();
+
 export interface UseRideMonitorViewModel {
   readonly ride: Ride | null;
   readonly status: RideStatus | null;
   readonly events: readonly TripEvent[];
+  readonly latestMessage: ChatMessage | null;
+  readonly hasUnreadMessages: boolean;
   readonly isCancelling: boolean;
   readonly cancelError: string | null;
   /** Cancel the current ride with the given reason. */
@@ -52,6 +75,8 @@ export interface UseRideMonitorViewModel {
     reason: CancellationReason;
     odometerMeters?: number;
   }) => Promise<boolean>;
+  /** Open chat — Phase 3.5 stub: shows a toast for now. */
+  onPressChat: () => void;
 }
 
 export function useRideMonitorViewModel(args: {
@@ -80,7 +105,63 @@ export function useRideMonitorViewModel(args: {
     [],
   );
 
+  // ── Latest chat message (Phase 3 stub: always null) ────────────
+  const subscribeLatestMessage = useCallback(
+    (cb: (message: ChatMessage | null) => void) =>
+      useCases.observeLatestMessage.execute({ rideId, callback: cb }),
+    [useCases, rideId],
+  );
+  const latestMessage = useFirestoreSubscription<ChatMessage | null>(
+    subscribeLatestMessage,
+    null,
+  );
+
+  const lastReadAt = useChatUiStore((s) => s.lastReadAt);
+  const hasUnreadMessages = useMemo(() => {
+    if (!latestMessage) return false;
+    if (!lastReadAt) return true;
+    return latestMessage.createdAt.getTime() > lastReadAt.getTime();
+  }, [latestMessage, lastReadAt]);
+
   const status = ride?.status ?? null;
+
+  // ── Geofence tick (turn 3.4b) ──────────────────────────────────
+  // Drive `useGeofenceUiStore.pickupExitWarningVisible` from the
+  // foreground location read against the pickup endpoint. Only ticks
+  // during 'dispatched' — once the rider boards the car, the warning
+  // is irrelevant. Phase 4 swaps the source for `useGpsLifecycle`.
+  const currentLocation = useCurrentLocation();
+  const showPickupExitWarning = useGeofenceUiStore(
+    (s) => s.showPickupExitWarning,
+  );
+  const dismissPickupExitWarning = useGeofenceUiStore(
+    (s) => s.dismissPickupExitWarning,
+  );
+  useEffect(() => {
+    if (status !== 'dispatched') {
+      // Always clear when not in dispatched — defensive against stale
+      // banner state when the user backgrounds + foregrounds across
+      // status transitions.
+      dismissPickupExitWarning();
+      return;
+    }
+    if (!ride || !currentLocation.coordinates) return;
+    const result = evaluateExitWarning.execute({
+      current: currentLocation.coordinates,
+      anchor: ride.pickup.location,
+    });
+    if (result.signal === 'exited') {
+      showPickupExitWarning();
+    } else {
+      dismissPickupExitWarning();
+    }
+  }, [
+    status,
+    ride,
+    currentLocation.coordinates,
+    showPickupExitWarning,
+    dismissPickupExitWarning,
+  ]);
 
   // ── Cancel ─────────────────────────────────────────────────────
   const cancelMutation = useCancelRideAsRiderMutation();
@@ -116,6 +197,16 @@ export function useRideMonitorViewModel(args: {
     [cancelMutation, rideId],
   );
 
+  // ── Chat stub ──────────────────────────────────────────────────
+  const onPressChat = useCallback(() => {
+    Toast.show({
+      type: 'info',
+      text1: 'Messaging coming soon',
+      text2: 'Chat threads land in Phase 3.5.',
+      visibilityTime: 2500,
+    });
+  }, []);
+
   // ── Terminal redirects ─────────────────────────────────────────
   // Use a ref to remember whether we already dispatched a redirect so a
   // re-render with the same terminal status doesn't fire navigation
@@ -126,25 +217,34 @@ export function useRideMonitorViewModel(args: {
     if (redirectedRef.current === status) return;
     if (status === 'cancelled') {
       redirectedRef.current = status;
-      logger.info('terminal: cancelled — popping to home');
-      // Reset to the rider tabs so back nav doesn't return to a dead ride.
+      logger.info('terminal: cancelled — resetting to home');
       navigation.reset({
         index: 0,
         routes: [{ name: 'RiderTabs' }],
       });
+      return;
     }
-    // 'completed' and 'payment_failed' redirects land in turn 3.4b alongside
-    // CompletedView / PaymentFailedView. Until then RideMonitor displays
-    // those statuses as-is.
-  }, [status, navigation]);
+    if (status === 'completed') {
+      redirectedRef.current = status;
+      logger.info('terminal: completed — replacing with RideReceipt');
+      navigation.replace('RideReceipt', { rideId: String(rideId) });
+      return;
+    }
+    // `payment_failed` is intentionally NOT a redirect: the rider stays
+    // on RideMonitor and sees the retry surface (PaymentFailedView).
+    // The retry mutation itself is Phase 6.
+  }, [status, navigation, rideId]);
   void _redirectIfTerminal;
 
   return {
     ride,
     status,
     events,
+    latestMessage,
+    hasUnreadMessages,
     isCancelling: cancelMutation.isPending,
     cancelError,
     cancel,
+    onPressChat,
   };
 }

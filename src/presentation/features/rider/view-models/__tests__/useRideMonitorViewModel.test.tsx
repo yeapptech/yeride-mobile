@@ -31,6 +31,47 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+// expo-location: mock the foreground read used by useCurrentLocation,
+// which the view-model composes for the geofence tick. Default returns
+// a coordinate inside the pickup geofence so tests don't accidentally
+// trigger the exit-warning side effect.
+const mockLocationRef = { current: { latitude: 25.7617, longitude: -80.1918 } };
+jest.mock('expo-location', () => ({
+  __esModule: true,
+  Accuracy: { Balanced: 3 },
+  requestForegroundPermissionsAsync: jest.fn(async () => ({
+    status: 'granted',
+  })),
+  getCurrentPositionAsync: jest.fn(async () => ({
+    coords: mockLocationRef.current,
+  })),
+}));
+
+// react-native-toast-message: mock so the chat-stub doesn't throw when
+// the global Toast host isn't mounted in tests. The library exports a
+// default React component with static `.show` / `.hide` methods. Use
+// `jest.fn()` directly inside the factory (no outer-scope variable
+// references — babel's mock hoisting forbids that) and grab a handle
+// to the spy via `jest.requireMock` after the mock applies.
+jest.mock('react-native-toast-message', () => {
+  const show = jest.fn();
+  const hide = jest.fn();
+  function ToastComponent() {
+    return null;
+  }
+  ToastComponent.show = show;
+  ToastComponent.hide = hide;
+  return {
+    __esModule: true,
+    default: ToastComponent,
+  };
+});
+
+const mockToast = jest.requireMock('react-native-toast-message') as {
+  default: { show: jest.Mock; hide: jest.Mock };
+};
+const mockToastShow = mockToast.default.show;
+
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
   if (!r.ok) throw r.error;
   return r.value;
@@ -267,5 +308,98 @@ describe('useRideMonitorViewModel', () => {
       expect(result.current.events).toHaveLength(1);
     });
     expect(result.current.events[0]?.type).toBe('created');
+  });
+
+  it('redirects to RideReceipt when status flips to completed', async () => {
+    const ridesRepo = new InMemoryRideRepository();
+    const initial = makeAwaitingRide();
+    await ridesRepo.create(initial);
+
+    renderHook(() => useRideMonitorViewModel({ rideId: RIDE_ID }), {
+      wrapper: withTestContainer({ ridesRepo }),
+    });
+
+    // Walk the entity through awaiting → dispatched → started →
+    // payment_requested → completed by seeding fresh state directly.
+    // (We bypass the entity transitions because building a full driver
+    // snapshot + route here doesn't add coverage — repo.seed lets us
+    // jump straight to the terminal state.)
+    const completed = unwrap(
+      Ride.fromProps({
+        id: RIDE_ID,
+        status: 'completed',
+        passenger: initial.passenger,
+        driver: null,
+        rideService: initial.rideService,
+        pickup: initial.pickup,
+        dropoff: initial.dropoff,
+        createdAt: initial.createdAt,
+        pickupTiming: initial.pickupTiming,
+        dropoffTiming: initial.dropoffTiming,
+        cancellation: null,
+        routePreference: null,
+      }),
+    );
+    await ridesRepo.update(completed);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('RideReceipt', {
+        rideId: String(RIDE_ID),
+      });
+    });
+  });
+
+  it('does NOT redirect for payment_failed (rider stays on RideMonitor)', async () => {
+    const ridesRepo = new InMemoryRideRepository();
+    const initial = makeAwaitingRide();
+    await ridesRepo.create(initial);
+
+    renderHook(() => useRideMonitorViewModel({ rideId: RIDE_ID }), {
+      wrapper: withTestContainer({ ridesRepo }),
+    });
+
+    const failed = unwrap(
+      Ride.fromProps({
+        id: RIDE_ID,
+        status: 'payment_failed',
+        passenger: initial.passenger,
+        driver: null,
+        rideService: initial.rideService,
+        pickup: initial.pickup,
+        dropoff: initial.dropoff,
+        createdAt: initial.createdAt,
+        pickupTiming: initial.pickupTiming,
+        dropoffTiming: initial.dropoffTiming,
+        cancellation: null,
+        routePreference: null,
+      }),
+    );
+    await ridesRepo.update(failed);
+
+    // Give the effect a chance to (incorrectly) fire.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockReset).not.toHaveBeenCalled();
+  });
+
+  it('onPressChat shows a "Phase 3.5" toast', async () => {
+    mockToastShow.mockClear();
+    const ridesRepo = new InMemoryRideRepository();
+    await ridesRepo.create(makeAwaitingRide());
+
+    const { result } = renderHook(
+      () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+      { wrapper: withTestContainer({ ridesRepo }) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('awaiting_driver');
+    });
+
+    act(() => {
+      result.current.onPressChat();
+    });
+    expect(mockToastShow).toHaveBeenCalledTimes(1);
+    expect(mockToastShow.mock.calls[0]?.[0]?.text1).toMatch(/messaging/i);
   });
 });

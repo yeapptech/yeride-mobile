@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
 
 import { AppContent } from './AppContent';
 import { ContainerProvider } from './di';
@@ -51,6 +52,11 @@ export function App() {
           </ContainerProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
+      {/* Toast lives at the root so it floats over every screen +
+          navigator. Phase 3 turn 4b uses it for the chat stub; Phase 4+
+          will use it for GPS-permission nudges and similar transient
+          banners. */}
+      <Toast />
     </GestureHandlerRootView>
   );
 }

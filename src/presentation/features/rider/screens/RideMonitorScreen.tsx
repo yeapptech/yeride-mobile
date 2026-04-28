@@ -1,4 +1,5 @@
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
+import { useNavigation } from '@react-navigation/native';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,23 +12,35 @@ import {
   type MapRoute,
 } from '@presentation/components/map';
 import { CancelReasonSheet } from '@presentation/components/trip/CancelReasonSheet';
-import type { RiderStackScreenProps } from '@presentation/navigation/types';
+import type {
+  RiderStackNavigation,
+  RiderStackScreenProps,
+} from '@presentation/navigation/types';
 
 import { AwaitingDriverView } from '../components/AwaitingDriverView';
+import { CompletedView } from '../components/CompletedView';
 import { DispatchedView } from '../components/DispatchedView';
+import { PaymentFailedView } from '../components/PaymentFailedView';
+import { StartedView } from '../components/StartedView';
 import { useRideMonitorViewModel } from '../view-models/useRideMonitorViewModel';
 
 /**
  * RideMonitorScreen — top half map + bottom-half `@gorhom/bottom-sheet`
  * with a status-router that picks the right view for `ride.status`.
  *
- * Phase 3 turn 3.4a wires:
- *   - `awaiting_driver` → `AwaitingDriverView`
- *   - `dispatched`      → `DispatchedView`
- *   - other statuses    → fallback "next view lands in turn 3.4b"
- *
- * Turn 3.4b adds StartedView / CompletedView / PaymentFailedView and
- * the chat-stub toast.
+ * Phase 3 turn 3.4b status-router map:
+ *   - `awaiting_driver` / `scheduled` / `scheduled_driver_accepted`
+ *                                  → `AwaitingDriverView`
+ *   - `dispatched`                 → `DispatchedView`
+ *   - `started`                    → `StartedView`
+ *   - `payment_requested` / `completed` → `CompletedView`
+ *      (`completed` also triggers the view-model's redirect to
+ *      `RideReceiptScreen`; the `CompletedView` is what shows during
+ *      the brief `payment_requested → completed` window before the
+ *      Stripe webhook lands)
+ *   - `payment_failed`             → `PaymentFailedView`
+ *   - `cancelled`                  → never rendered; the view-model
+ *      resets navigation to RiderTabs immediately
  *
  * The bottom-sheet snap points pick three positions:
  *   - 25% (just the header peeking)
@@ -59,6 +72,7 @@ export default function RideMonitorScreen({
 
 function RideMonitorContent({ rideId }: { rideId: RideId }) {
   const vm = useRideMonitorViewModel({ rideId });
+  const navigation = useNavigation<RiderStackNavigation>();
 
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['25%', '50%', '90%'], []);
@@ -145,7 +159,9 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
                 Loading your ride…
               </Text>
             </View>
-          ) : ride.status === 'awaiting_driver' ? (
+          ) : ride.status === 'awaiting_driver' ||
+            ride.status === 'scheduled' ||
+            ride.status === 'scheduled_driver_accepted' ? (
             <AwaitingDriverView
               ride={ride}
               onPressCancel={openCancel}
@@ -155,11 +171,36 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
             <DispatchedView
               ride={ride}
               onPressCancel={openCancel}
-              onPressChat={onChatStub}
+              onPressChat={vm.onPressChat}
               cancelDisabled={vm.isCancelling}
             />
+          ) : ride.status === 'started' ? (
+            <StartedView
+              ride={ride}
+              hasUnread={vm.hasUnreadMessages}
+              onPressCancel={openCancel}
+              onPressChat={vm.onPressChat}
+              cancelDisabled={vm.isCancelling}
+            />
+          ) : ride.status === 'payment_requested' ||
+            ride.status === 'completed' ? (
+            <CompletedView
+              ride={ride}
+              onViewReceipt={() =>
+                navigation.replace('RideReceipt', { rideId: String(rideId) })
+              }
+            />
+          ) : ride.status === 'payment_failed' ? (
+            <PaymentFailedView ride={ride} />
           ) : (
-            <FutureStatusFallback status={ride.status} />
+            // 'cancelled' should never render here — the view-model
+            // redirects on that status — but if React commits a frame
+            // before the redirect lands, fall back to a quiet message.
+            <View className="px-4 py-6">
+              <Text className="text-sm text-muted-foreground">
+                Wrapping up…
+              </Text>
+            </View>
           )}
         </BottomSheetView>
       </BottomSheet>
@@ -173,31 +214,4 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
       />
     </View>
   );
-}
-
-/**
- * Placeholder copy for statuses whose status views land in turn 3.4b.
- * Keeps the screen functional during a partial roll-out (e.g. a beta
- * tester whose ride raced ahead of the rider client's deploy).
- */
-function FutureStatusFallback({ status }: { status: string }) {
-  return (
-    <View className="px-4 py-6">
-      <Text className="text-base font-semibold text-foreground">
-        Status: {status}
-      </Text>
-      <Text className="mt-2 text-sm text-muted-foreground">
-        The view for this status lands in Phase 3 turn 3.4b. The ride itself is
-        unaffected — you can come back to this screen once the driver continues.
-      </Text>
-    </View>
-  );
-}
-
-/**
- * Phase 3 turn 3.4a chat stub. Phase 3.5 replaces this with a real
- * thread modal.
- */
-function onChatStub(): void {
-  // intentionally empty — Phase 3.5 fills this in
 }
