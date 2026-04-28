@@ -41,8 +41,9 @@ const logger = LOG.extend('DriverDispatchVM');
  *     pickup-route preview. Re-fetches if the rideId or driver location
  *     changes.
  *   - `useDispatchRideMutation` — the accept handler. On success: writes
- *     `useDriverStatusStore.setMode('dispatched')` and pops back to
- *     DriverHome (Turn 4 routes to DriverMonitor instead).
+ *     `useDriverStatusStore.setMode('dispatched')` and replaces the
+ *     navigation stack with `DriverMonitor` so back-nav doesn't bounce
+ *     the driver back into the dispatch screen mid-trip.
  *
  * No dispatch model with offer-timeouts; YeRide is driver-pull (drivers
  * pick from the available list; whichever accepts first wins the entity
@@ -219,11 +220,11 @@ export function useDriverDispatchViewModel(
       {
         onSuccess: () => {
           setMode('dispatched');
-          // Turn 4 swaps to navigation.replace('DriverMonitor', { rideId }).
-          // For Turn 3 we pop back to DriverHome; the in-progress redirect
-          // there bounces to DriverDispatch with the now-`dispatched` ride
-          // (which then renders the live state — clean handoff).
-          navigation.goBack();
+          // Replace (not push) so back-nav goes to DriverHome rather
+          // than bouncing the driver into the now-stale dispatch
+          // screen. The status-router inside DriverMonitor renders the
+          // appropriate view from the live ride.
+          navigation.replace('DriverMonitor', { rideId: String(rideId) });
         },
         onError: (e: unknown) => {
           logger.warn('dispatchRide failed', e);

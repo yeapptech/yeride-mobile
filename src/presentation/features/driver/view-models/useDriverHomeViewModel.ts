@@ -49,11 +49,8 @@ const logger = LOG.extend('DriverHomeVM');
  *     driver near `coords`.
  *   - `useInProgressDriverRideQuery(driverId)` — auto-redirects to
  *     DriverMonitor when the driver has a ride mid-flight (cold-launch
- *     resumption / accidental back-out). Phase 4 turn 4 ships
- *     DriverMonitor; for Turn 2 the redirect is wired but DriverMonitor
- *     is still a placeholder route, so we fall back to DriverDispatch
- *     when the in-progress ride lacks a destination state we can resume
- *     into. (See `_inProgressTarget` below — Turn 4 simplifies it.)
+ *     resumption / accidental back-out). Turn 4a registered the real
+ *     DriverMonitor route, so the redirect target is now unconditional.
  *   - `useUpdateLocationMutation` — writes the driver's foreground
  *     location to Firestore so riders' UIs can render driver-side ETA.
  *     Mirrors the rider-home pattern.
@@ -81,7 +78,7 @@ export interface UseDriverHomeViewModel {
   onToggleOnline: () => void;
   /** Tap a ride card → push DriverDispatch with that rideId. */
   onSelectRide: (rideId: string) => void;
-  /** Resume an in-progress ride (DriverMonitor route lands Phase 4 turn 4). */
+  /** Resume an in-progress ride — pushes DriverMonitor with the rideId. */
   onResumeInProgress: (rideId: string) => void;
   /** Re-request location permission and re-read. */
   refreshLocation: () => Promise<void>;
@@ -168,14 +165,15 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
 
-  // Auto-redirect to the active ride. Phase 4 turn 4 lands the real
-  // `DriverMonitor` route; for Turn 2 we route to `DriverDispatch` with
-  // the in-progress rideId so the placeholder at least shows the right
-  // ride. The redirect target switches to DriverMonitor in turn 4.
+  // Auto-redirect to the active ride. Turn 4a registered the real
+  // `DriverMonitor` route, so any in-progress ride routes here directly.
+  // The status-router inside DriverMonitor handles every active state
+  // (en-route, at-pickup, started, payment_requested, payment_failed)
+  // — DriverHome doesn't need to branch.
   useFocusEffect(
     useCallback(() => {
       if (inProgressRide) {
-        navigation.navigate('DriverDispatch', {
+        navigation.navigate('DriverMonitor', {
           rideId: String(inProgressRide.id),
         });
       }
@@ -206,7 +204,7 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
 
   const onResumeInProgress = useCallback(
     (rideId: string) => {
-      navigation.navigate('DriverDispatch', { rideId });
+      navigation.navigate('DriverMonitor', { rideId });
     },
     [navigation],
   );

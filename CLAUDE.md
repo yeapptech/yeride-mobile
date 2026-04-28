@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 28, 2026
+**Last updated:** April 28, 2026 (Phase 4 turn 4a)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,11 +9,16 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-End of Phase 3 (rider UI complete). The full rider journey runs
-end-to-end against real Firebase: sign-in → home → route search →
+Mid-Phase 4 (driver UI). Phase 3 shipped the full rider journey end-to-
+end against real Firebase: sign-in → home → route search →
 route/service-tier selection → CreateRide → live RideMonitor (all
-statuses) → RideReceipt. The Phase 0 GreetUser smoke artifact has been
-retired. Phase 4 (driver UI) starts next.
+statuses) → RideReceipt. Phase 4 turns 1–4a have landed the driver
+side: real `DriverNavigator` + tabs, `DriverHomeScreen` (map + nearby
+rides + online toggle), `DriverDispatchScreen` (accept/decline), and
+`DriverMonitorScreen` with the en-route-to-pickup and at-pickup status
+views. Late-status views (started / payment / completed /
+payment_failed) and the real Start-ride / RequestPayment mutations
+land in Turn 4b.
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -26,7 +31,12 @@ retired. Phase 4 (driver UI) starts next.
 | 3 turn 4a | RideMonitor scaffolding + early-status views (awaiting/dispatched)               | ✅                             |
 | 3 turn 4b | Late-status views (started/completed/payment_failed) + chat stub + geofence tick | ✅                             |
 | 3 turn 5  | RideReceipt + Phase 3 cleanup                                                    | ✅                             |
-| 4         | Driver UI                                                                        | Next                           |
+| 4 turn 1  | Phase 4 foundations: DriverNavigator + tabs + driver-status store                | ✅                             |
+| 4 turn 2  | DriverHome — map + ListAvailableRides cards + GPS toggle                         | ✅                             |
+| 4 turn 3  | DriverDispatch — incoming-ride accept/decline                                    | ✅                             |
+| 4 turn 4a | DriverMonitor scaffold + en-route / at-pickup status views                       | ✅                             |
+| 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations          | Next                           |
+| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | —                              |
 | 5         | Vehicle management                                                               | Pending                        |
 | 6         | Payments / Stripe Connect / tipping                                              | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
@@ -34,9 +44,10 @@ retired. Phase 4 (driver UI) starts next.
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
 
-End of Phase 3 acceptance: 74 test suites passing; typecheck + lint +
-format + test all green. Rider can complete a full trip on iOS +
-Android against real Firebase.
+End of Phase 4 turn 4a acceptance: **80 test suites / 561 tests
+passing**; typecheck + lint + format + test all green. Driver can sign
+in → go online → accept an offer → land on DriverMonitor → flip to
+at-pickup → cancel via the stub Alert.alert flow → reset to DriverHome.
 
 ## Tech stack
 
@@ -282,10 +293,15 @@ flags in TanStack Query.
 
 ### Status-router pattern for live trip surfaces
 
-`RideMonitorScreen` uses a status-router: a single switch on
-`Ride.status` selects which bottom-sheet view component renders
-(`AwaitingDriverView`, `DispatchedView`, `StartedView`,
-`CompletedView`, `PaymentFailedView`). Each view is independently
+Both `RideMonitorScreen` (rider) and `DriverMonitorScreen` (driver) use
+a status-router: a single switch on `Ride.status` selects which
+bottom-sheet view component renders. Rider views: `AwaitingDriverView`,
+`DispatchedView`, `StartedView`, `CompletedView`, `PaymentFailedView`.
+Driver views (Turn 4a): `EnRouteToPickupView`, `AtPickupView`. The
+driver side adds a thin client-side `arrivedAtPickup` boolean to split
+server status `'dispatched'` into the en-route ↔ at-pickup distinction
+— UI-only, no server write. Phase 7's geofence-entry event will
+auto-flip it. Each view is independently
 testable, gets the `Ride` + callbacks as props, and never reads from
 the store directly. Adding a new ride status = add a `RideStatus`
 literal + add one component + extend the router. Don't grow a single
@@ -311,21 +327,23 @@ new app writes to it.
 
 ## Critical files
 
-| File                                                            | Purpose                                                                                                     |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `REFACTOR_PLAN.md`                                              | Phased migration roadmap, decisions, target architecture                                                    |
-| `docs/PHASE_1_TURN_2.md`                                        | What shipped through Phase 1                                                                                |
-| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                             | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
-| `app.config.ts`                                                 | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
-| `scripts/patch-podfile.js`                                      | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
-| `eslint.config.js`                                              | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
-| `src/presentation/di/container.ts`                              | The composition root — single place where all repo + service wiring lives                                   |
-| `src/presentation/navigation/RootNavigator.tsx`                 | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
-| `src/presentation/features/rider/screens/RideMonitorScreen.tsx` | Live-trip surface; map + bottom-sheet status-router. Most-touched UI screen                                 |
-| `src/domain/entities/Ride.ts`                                   | The trip aggregate + state machine. Most-touched domain entity                                              |
-| `src/data/repositories/FirestoreRideRepository.ts`              | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
-| `src/data/services/CloudFunctionsService.ts`                    | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
-| `src/shared/testing/InMemoryRideRepository.ts`                  | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
+| File                                                               | Purpose                                                                                                     |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `REFACTOR_PLAN.md`                                                 | Phased migration roadmap, decisions, target architecture                                                    |
+| `docs/PHASE_1_TURN_2.md`                                           | What shipped through Phase 1                                                                                |
+| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
+| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A}.md`      | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
+| `app.config.ts`                                                    | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
+| `scripts/patch-podfile.js`                                         | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
+| `eslint.config.js`                                                 | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
+| `src/presentation/di/container.ts`                                 | The composition root — single place where all repo + service wiring lives                                   |
+| `src/presentation/navigation/RootNavigator.tsx`                    | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
+| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`    | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen              |
+| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx` | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen as of 4a         |
+| `src/domain/entities/Ride.ts`                                      | The trip aggregate + state machine. Most-touched domain entity                                              |
+| `src/data/repositories/FirestoreRideRepository.ts`                 | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
+| `src/data/services/CloudFunctionsService.ts`                       | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
+| `src/shared/testing/InMemoryRideRepository.ts`                     | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
 
 ## Build & deployment
 
@@ -452,6 +470,35 @@ pins to BoM 34.0.0 in its `withNavigationSdk.js`. We don't pin yet; if
 this surfaces, look at the legacy plugin for the fix. Watch for it
 during heavy `getDoc` use in the rider UI work.
 
+### iOS RCTFatal on boot: "missing usage descriptions" / `EXBaseLocationRequester getPermissions`
+
+`expo-location` hard-fails (`RCTFatal`) the first time
+`requestForegroundPermissionsAsync()` is called if the iOS Info.plist
+is missing `NSLocationWhenInUseUsageDescription` /
+`NSLocationAlwaysAndWhenInUseUsageDescription`. Crashes the entire app
+on boot because `useCurrentLocation` mounts on every map-bearing
+screen.
+
+The strings ARE configured in `app.config.ts` under the `expo-location`
+plugin block — but only a fresh `npm run prebuild` writes them into
+`ios/<app>/Info.plist`. If you edited the plugin block (or the iOS
+native folder was generated before the plugin was added) the plist
+falls out of sync.
+
+Fix paths:
+
+1. **Canonical**: `npm run prebuild` to regenerate the iOS native tree
+   (also re-runs `pod install` and the `patch-podfile.js` Podfile
+   fixes). Required before the next iOS rebuild.
+2. **Quick unblock** (between prebuilds): manually patch
+   `ios/<AppName>/Info.plist` with both `NSLocationWhenInUseUsageDescription`
+   and `NSLocationAlwaysAndWhenInUseUsageDescription` keys using the
+   same strings the plugin block configures. The next `npm run prebuild`
+   produces identical content, so the patch is idempotent.
+
+A native rebuild (`npm run ios`) is required either way — a JS reload
+won't pick up the plist change.
+
 ## AI best practices
 
 ### Do
@@ -495,10 +542,11 @@ during heavy `getDoc` use in the rider UI work.
 - Don't put fetched ride/route/payment data in a Zustand store — that's
   what TanStack Query is for. Don't put a UI flag (banner-visible,
   sheet-open) in TanStack Query — that's what Zustand is for.
-- Don't grow `RideMonitorScreen` into a god-component. New ride status
-  = add a `RideStatus` literal + a new `<Status>View` component + one
-  case in the status-router. Each view stays prop-driven and
-  independently testable.
+- Don't grow `RideMonitorScreen` or `DriverMonitorScreen` into a
+  god-component. New ride status = add a `RideStatus` literal + a new
+  `<Status>View` component + one case in the relevant side's
+  status-router. Each view stays prop-driven and independently
+  testable.
 
 ## Quick reference
 
@@ -539,6 +587,19 @@ Rider status-views         → src/presentation/features/rider/components/
                               {AwaitingDriver,Dispatched,Started,Completed,PaymentFailed}View.tsx
 Rider view-models          → src/presentation/features/rider/view-models/use*ViewModel.ts
 
+Driver screens             → src/presentation/features/driver/screens/*.tsx
+                              DriverHome, DriverDispatch, DriverMonitor (4a),
+                              DriverActivityPlaceholder, DriverEarningsPlaceholder
+Driver status-views        → src/presentation/features/driver/components/
+                              {EnRouteToPickup,AtPickup}View.tsx (Turn 4a — 4b adds
+                              Started/PaymentRequested/Completed/PaymentFailed)
+Driver components          → src/presentation/features/driver/components/
+                              DriverRideCard, DriverRideCardStack
+Driver view-models         → src/presentation/features/driver/view-models/use*ViewModel.ts
+
+Driver-status store        → src/presentation/stores/useDriverStatusStore.ts
+                              (offline / online_idle / dispatched / on_trip + activeVehicleId)
+
 DI container               → src/presentation/di/container.ts
 TestContainerProvider      → src/shared/testing/TestContainerProvider.tsx
 ```
@@ -561,5 +622,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_3_TURN_5.md`), then
-ask.
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_4_TURN_4A.md`),
+then ask.

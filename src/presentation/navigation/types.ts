@@ -92,10 +92,10 @@ export type DriverTabsParamList = {
 
 /**
  * Native-stack hosting the driver tabs + every modal / pushed screen on
- * top. Phase 4 turn 2 adds the `DriverDispatch` route (placeholder
- * screen — Turn 3 swaps it for the real accept/decline flow). Later
- * turns push:
- *   - `DriverMonitor`  — active-trip surface (Turns 4a / 4b).
+ * top. Phase 4 turn 2 added `DriverDispatch`; turn 4a adds
+ * `DriverMonitor` — the active-trip surface that drivers replace into
+ * after accepting an offer. Both routes carry the rideId so deep links
+ * and cold-launches resume.
  */
 export type DriverStackParamList = {
   DriverTabs: NavigatorScreenParams<DriverTabsParamList>;
@@ -104,6 +104,15 @@ export type DriverStackParamList = {
    * here with the rideId; Turn 3 wires the real accept/decline use cases.
    */
   DriverDispatch: { rideId: string };
+  /**
+   * Active-trip surface. Driver lands here via `navigation.replace` from
+   * DriverDispatch on accept; DriverHome's in-progress redirect also
+   * lands here on cold launch. The status-router inside the screen picks
+   * the right view based on `Ride.status`. Turn 4a wires the
+   * en-route-to-pickup and at-pickup views; turn 4b adds started /
+   * payment-requested / completed / payment-failed.
+   */
+  DriverMonitor: { rideId: string };
   /**
    * Profile editor reachable as a modal from the Profile tab. Same screen
    * that the Profile tab points at, but pushed instead of root-mounted, so

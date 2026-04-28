@@ -344,6 +344,59 @@ export function useCancelRideAsRiderMutation(): UseMutationResult<
 }
 
 /**
+ * Mutation: cancel a ride as the driver. Mirror of
+ * `useCancelRideAsRiderMutation` routed through `cancelRideByDriver`. The use
+ * case enforces the driver-allowed cancellation-code set
+ * (`'passenger_no_show'` is driver-only; `'driver_no_show'` is rejected with
+ * a `cancellation_reason_not_driver_allowed` ValidationError).
+ *
+ * Cache: byId entry is set so DriverMonitor's last-paint shows the cancelled
+ * snapshot; both the driver's and passenger's lists are invalidated so the
+ * resume queries on either side drop the now-terminal ride.
+ */
+export function useCancelRideAsDriverMutation(): UseMutationResult<
+  Ride,
+  NetworkError | NotFoundError | AuthorizationError | ValidationError,
+  CancelRideInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Ride,
+    NetworkError | NotFoundError | AuthorizationError | ValidationError,
+    CancelRideInput
+  >({
+    mutationFn: async (input: CancelRideInput): Promise<Ride> => {
+      const cancelArgs: {
+        rideId: RideId;
+        reason: CancellationReason;
+        odometerMeters?: number;
+      } = {
+        rideId: input.rideId,
+        reason: input.reason,
+      };
+      if (input.odometerMeters !== undefined) {
+        cancelArgs.odometerMeters = input.odometerMeters;
+      }
+      const r = await useCases.cancelRideByDriver.execute(cancelArgs);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (ride: Ride) => {
+      queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      if (ride.driver) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.ride.listsForDriver(ride.driver.id),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
+      });
+    },
+  });
+}
+
+/**
  * Mutation: dispatch a ride to this driver — the "Accept" action on
  * DriverDispatch. Wraps `DispatchRide`, which reads the current ride
  * state, runs the entity transition (enforces the `awaiting_driver`

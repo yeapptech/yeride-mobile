@@ -32,8 +32,13 @@ import { useDriverDispatchViewModel } from '../useDriverDispatchViewModel';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+const mockReplace = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
+  useNavigation: () => ({
+    navigate: mockNavigate,
+    goBack: mockGoBack,
+    replace: mockReplace,
+  }),
 }));
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
@@ -218,6 +223,7 @@ describe('useDriverDispatchViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockGoBack.mockClear();
+    mockReplace.mockClear();
     useDriverStatusStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
@@ -292,7 +298,7 @@ describe('useDriverDispatchViewModel', () => {
     expect(result.current.cannotAcceptReason).toBe('no_active_vehicle');
   });
 
-  it('onAccept calls DispatchRide and goes back on success', async () => {
+  it('onAccept calls DispatchRide and replaces with DriverMonitor on success', async () => {
     const setup = await setupSeededState();
     const { result } = renderHook(
       () =>
@@ -311,8 +317,11 @@ describe('useDriverDispatchViewModel', () => {
     });
 
     await waitFor(() => {
-      expect(mockGoBack).toHaveBeenCalled();
+      expect(mockReplace).toHaveBeenCalledWith('DriverMonitor', {
+        rideId: String(RIDE_ID),
+      });
     });
+    expect(mockGoBack).not.toHaveBeenCalled();
     expect(useDriverStatusStore.getState().mode).toBe('dispatched');
     // The seeded ride is now dispatched in the fake repo.
     const persisted = await setup.ridesRepo.getById(RIDE_ID);

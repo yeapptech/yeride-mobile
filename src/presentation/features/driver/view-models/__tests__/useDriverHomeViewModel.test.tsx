@@ -340,7 +340,7 @@ describe('useDriverHomeViewModel', () => {
     });
   });
 
-  it('redirects to DriverDispatch when the driver has an in-progress ride', async () => {
+  it('redirects to DriverMonitor when the driver has an in-progress ride', async () => {
     const setup = await setupSeededState();
     // Build an awaiting ride, dispatch it to this driver, and seed it.
     const driverSnap = unwrap(
@@ -394,7 +394,7 @@ describe('useDriverHomeViewModel', () => {
     });
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('DriverDispatch', {
+      expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
         rideId: 'rideInProgress12345ab',
       });
     });

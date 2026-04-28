@@ -1,0 +1,116 @@
+import { Pressable, Text, View } from 'react-native';
+
+import type { Ride } from '@domain/entities/Ride';
+import {
+  BottomSheetHeader,
+  HeaderIconButton,
+} from '@presentation/components/trip/BottomSheetHeader';
+
+/**
+ * Status view for the driver's `dispatched`-but-not-yet-arrived state.
+ * Driver is en route to the rider's pickup. Bottom-sheet content:
+ *
+ *   - Header with ETA-to-pickup (pulled from `ride.pickup.directions`,
+ *     set by the dispatch use case at accept time) + a destructive
+ *     cancel button.
+ *   - Sanitized passenger card: first name + last initial only. PII
+ *     boundary mirrors the rider-side `DispatchedView` driver card —
+ *     no email, no phone, no avatar URL exposure.
+ *   - Pickup endpoint card.
+ *   - Primary CTA "Arrived at pickup" → flips the parent into the
+ *     `'at_pickup'` UI state. Phase 7's geofence-exit warning will
+ *     auto-fire this; for Turn 4a it's a manual button tap.
+ *
+ * No "Navigate" button — Google Navigation SDK integration is Phase 8.
+ * The header chat button is also deferred to Phase 9 polish; the cancel
+ * action is the only header trailing action in Turn 4a.
+ */
+interface EnRouteToPickupViewProps {
+  readonly ride: Ride;
+  readonly onArrived: () => void;
+  readonly onPressCancel: () => void;
+  readonly cancelDisabled?: boolean;
+  readonly arriveDisabled?: boolean;
+}
+
+export function EnRouteToPickupView({
+  ride,
+  onArrived,
+  onPressCancel,
+  cancelDisabled,
+  arriveDisabled,
+}: EnRouteToPickupViewProps) {
+  const directions = ride.pickup.directions;
+  const eta = directions ? formatEta(directions.durationSeconds) : null;
+  const distance = directions ? directions.distanceText : null;
+  const passenger = ride.passenger;
+
+  return (
+    <View>
+      <BottomSheetHeader
+        title={eta ? `Pickup in ~${eta}` : 'Heading to pickup'}
+        subtitle={distance ? `${distance} away` : undefined}
+        trailing={
+          <HeaderIconButton
+            label="Cancel ride"
+            tone="destructive"
+            onPress={onPressCancel}
+            disabled={cancelDisabled}
+            testID="en-route-cancel"
+          >
+            <Text className="text-sm font-semibold text-error">Cancel</Text>
+          </HeaderIconButton>
+        }
+      />
+
+      <View className="border-t border-border px-4 py-3">
+        <Text className="text-xs uppercase text-muted-foreground">
+          Passenger
+        </Text>
+        <Text className="mt-0.5 text-base font-semibold text-foreground">
+          {passenger.name.first} {passenger.name.last.charAt(0)}.
+        </Text>
+      </View>
+
+      <View className="border-t border-border px-4 py-3">
+        <Text className="text-xs uppercase text-muted-foreground">Pickup</Text>
+        <Text className="mt-0.5 text-sm text-foreground" numberOfLines={2}>
+          {ride.pickup.placeName ?? ride.pickup.address}
+        </Text>
+      </View>
+
+      <View className="px-4 py-4">
+        <Pressable
+          onPress={onArrived}
+          disabled={arriveDisabled}
+          accessibilityRole="button"
+          accessibilityLabel="Arrived at pickup"
+          accessibilityState={{ disabled: arriveDisabled }}
+          className={`items-center rounded-xl px-4 py-4 ${
+            arriveDisabled ? 'bg-primary/60' : 'bg-primary'
+          }`}
+          testID="en-route-arrived"
+        >
+          <Text className="text-base font-semibold text-primary-foreground">
+            Arrived at pickup
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Format a duration in seconds as a short ETA — "2 mins", "12 mins",
+ * "1 hr 5m", etc. Same cadence as the rider-side `DispatchedView`.
+ */
+function formatEta(durationSeconds: number): string {
+  if (durationSeconds < 60) return '< 1 min';
+  const totalMinutes = Math.round(durationSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${String(totalMinutes)} min${totalMinutes === 1 ? '' : 's'}`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  return `${String(hours)} hr ${String(mins)}m`;
+}
