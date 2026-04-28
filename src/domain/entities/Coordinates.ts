@@ -54,6 +54,31 @@ export class Coordinates {
     );
   }
 
+  /**
+   * Great-circle distance to another point in METERS, computed via the
+   * Haversine formula on a spherical-Earth model with mean radius 6_371_000 m.
+   *
+   * Accuracy: ~0.5% — sufficient for "is this user inside the service area?"
+   * checks where the radius is hundreds of kilometres. Not suitable for
+   * sub-metre navigation. For trip routing, defer to the Google Routes API
+   * which uses geodesic math against a WGS84 ellipsoid.
+   *
+   * Symmetric: a.distanceTo(b) === b.distanceTo(a).
+   */
+  distanceTo(other: Coordinates): number {
+    const EARTH_RADIUS_METERS = 6_371_000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const φ1 = toRad(this.latitude);
+    const φ2 = toRad(other.latitude);
+    const Δφ = toRad(other.latitude - this.latitude);
+    const Δλ = toRad(other.longitude - this.longitude);
+    const a =
+      Math.sin(Δφ / 2) ** 2 +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return EARTH_RADIUS_METERS * c;
+  }
+
   toString(): string {
     return `${this.latitude.toFixed(6)},${this.longitude.toFixed(6)}`;
   }

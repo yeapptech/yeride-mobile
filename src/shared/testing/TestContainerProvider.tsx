@@ -8,6 +8,7 @@ import {
 } from '@presentation/di';
 
 import { InMemoryAuthRepository } from './InMemoryAuthRepository';
+import { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';
 import { InMemoryUserRepository } from './InMemoryUserRepository';
 
 /**
@@ -15,12 +16,12 @@ import { InMemoryUserRepository } from './InMemoryUserRepository';
  * `useUseCases()`. Three usage modes:
  *
  *   1. Zero config — provides every use case wired against fresh in-memory
- *      AuthRepository + UserRepository instances.
+ *      AuthRepository + UserRepository + ServiceAreaRepository instances.
  *
  *      <TestContainerProvider><Comp/></TestContainerProvider>
  *
  *   2. Override repositories — useful when the test wants to seed accounts
- *      / users before the component mounts.
+ *      / users / service-areas before the component mounts.
  *
  *      <TestContainerProvider auth={authFake} users={usersFake}>
  *        <Comp/>
@@ -36,17 +37,24 @@ import { InMemoryUserRepository } from './InMemoryUserRepository';
 export function TestContainerProvider({
   auth,
   users,
+  serviceAreas,
   useCases,
   children,
 }: {
   auth?: InMemoryAuthRepository;
   users?: InMemoryUserRepository;
+  serviceAreas?: InMemoryServiceAreaRepository;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
   const authRepo = auth ?? new InMemoryAuthRepository();
   const usersRepo = users ?? new InMemoryUserRepository();
-  const base = makeUseCases({ auth: authRepo, users: usersRepo });
+  const serviceAreasRepo = serviceAreas ?? new InMemoryServiceAreaRepository();
+  const base = makeUseCases({
+    auth: authRepo,
+    users: usersRepo,
+    serviceAreas: serviceAreasRepo,
+  });
   const merged: UseCases = { ...base, ...useCases };
   const container: Container = { useCases: merged };
   return (

@@ -12,13 +12,22 @@ import { SendEmailVerification } from '@app/usecases/auth/SendEmailVerification'
 import { UpdateProfile } from '@app/usecases/auth/UpdateProfile';
 import { UpdateSavedPlace } from '@app/usecases/auth/UpdateSavedPlace';
 import { UploadAvatar } from '@app/usecases/auth/UploadAvatar';
+import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
+import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
+import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
 import { GreetUser } from '@app/usecases/shared/GreetUser';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
+import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
-import type { AuthRepository, UserRepository } from '@domain/repositories';
+import type {
+  AuthRepository,
+  ServiceAreaRepository,
+  UserRepository,
+} from '@domain/repositories';
 import { LOG } from '@shared/logger';
 import type {
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
+  InMemoryServiceAreaRepository as InMemoryServiceAreaRepositoryType,
   InMemoryUserRepository as InMemoryUserRepositoryType,
 } from '@shared/testing';
 
@@ -72,6 +81,11 @@ export interface UseCases {
   addSavedPlace: AddSavedPlace;
   updateSavedPlace: UpdateSavedPlace;
   removeSavedPlace: RemoveSavedPlace;
+
+  // Service-area catalog (Phase 2 turn 1)
+  listServiceAreas: ListServiceAreas;
+  resolveActiveServiceArea: ResolveActiveServiceArea;
+  listRideServices: ListRideServices;
 }
 
 export interface Container {
@@ -85,6 +99,7 @@ export interface Container {
 export function makeUseCases(args: {
   auth: AuthRepository;
   users: UserRepository;
+  serviceAreas: ServiceAreaRepository;
   clock?: () => Date;
 }): UseCases {
   const clock = args.clock ?? (() => new Date());
@@ -104,6 +119,9 @@ export function makeUseCases(args: {
     addSavedPlace: new AddSavedPlace(args.auth, args.users),
     updateSavedPlace: new UpdateSavedPlace(args.auth, args.users),
     removeSavedPlace: new RemoveSavedPlace(args.auth, args.users),
+    listServiceAreas: new ListServiceAreas(args.serviceAreas),
+    resolveActiveServiceArea: new ResolveActiveServiceArea(args.serviceAreas),
+    listRideServices: new ListRideServices(args.serviceAreas),
   };
 }
 
@@ -125,29 +143,36 @@ export function buildContainer(): Container {
     const dataUsers = require('@data/repositories/FirestoreUserRepository') as {
       FirestoreUserRepository: new () => FirestoreUserRepositoryType;
     };
+    const dataServiceAreas =
+      require('@data/repositories/FirestoreServiceAreaRepository') as {
+        FirestoreServiceAreaRepository: new () => FirestoreServiceAreaRepositoryType;
+      };
     LOG.info(
-      'Container using FirebaseAuthRepository + FirestoreUserRepository',
+      'Container using FirebaseAuthRepository + FirestoreUserRepository + FirestoreServiceAreaRepository',
     );
     return {
       useCases: makeUseCases({
         auth: new dataAuth.FirebaseAuthRepository(),
         users: new dataUsers.FirestoreUserRepository(),
+        serviceAreas: new dataServiceAreas.FirestoreServiceAreaRepository(),
       }),
     };
   }
 
   const testing = require('@shared/testing') as {
     InMemoryAuthRepository: new () => InMemoryAuthRepositoryType;
+    InMemoryServiceAreaRepository: new () => InMemoryServiceAreaRepositoryType;
     InMemoryUserRepository: new () => InMemoryUserRepositoryType;
   };
   LOG.warn(
-    'Firebase config not detected — using in-memory auth/user fakes. ' +
+    'Firebase config not detected — using in-memory fakes for auth/user/service-areas. ' +
       'No data will persist. See docs/FIREBASE_SETUP.md.',
   );
   return {
     useCases: makeUseCases({
       auth: new testing.InMemoryAuthRepository(),
       users: new testing.InMemoryUserRepository(),
+      serviceAreas: new testing.InMemoryServiceAreaRepository(),
     }),
   };
 }
