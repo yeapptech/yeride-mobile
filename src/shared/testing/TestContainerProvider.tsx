@@ -7,6 +7,7 @@ import {
   type UseCases,
 } from '@presentation/di';
 
+import { FakeRoutesService } from './FakeRoutesService';
 import { InMemoryAuthRepository } from './InMemoryAuthRepository';
 import { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';
 import { InMemoryUserRepository } from './InMemoryUserRepository';
@@ -38,22 +39,26 @@ export function TestContainerProvider({
   auth,
   users,
   serviceAreas,
+  routes,
   useCases,
   children,
 }: {
   auth?: InMemoryAuthRepository;
   users?: InMemoryUserRepository;
   serviceAreas?: InMemoryServiceAreaRepository;
+  routes?: FakeRoutesService;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
   const authRepo = auth ?? new InMemoryAuthRepository();
   const usersRepo = users ?? new InMemoryUserRepository();
   const serviceAreasRepo = serviceAreas ?? new InMemoryServiceAreaRepository();
+  const routesService = routes ?? new FakeRoutesService();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
     serviceAreas: serviceAreasRepo,
+    routes: routesService,
   });
   const merged: UseCases = { ...base, ...useCases };
   const container: Container = { useCases: merged };

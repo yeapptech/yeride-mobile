@@ -4,3 +4,4 @@ export { AuthorizationError } from './AuthorizationError';
 export { NotFoundError } from './NotFoundError';
 export { ConflictError } from './ConflictError';
 export { PaymentError } from './PaymentError';
+export { NetworkError } from './NetworkError';

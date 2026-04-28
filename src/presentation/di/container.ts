@@ -12,6 +12,7 @@ import { SendEmailVerification } from '@app/usecases/auth/SendEmailVerification'
 import { UpdateProfile } from '@app/usecases/auth/UpdateProfile';
 import { UpdateSavedPlace } from '@app/usecases/auth/UpdateSavedPlace';
 import { UploadAvatar } from '@app/usecases/auth/UploadAvatar';
+import { ComputeRoutes } from '@app/usecases/route/ComputeRoutes';
 import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
 import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
 import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
@@ -19,13 +20,17 @@ import { GreetUser } from '@app/usecases/shared/GreetUser';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
+import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
 import type {
   AuthRepository,
   ServiceAreaRepository,
   UserRepository,
 } from '@domain/repositories';
+import type { RoutesService } from '@domain/services';
+import { getGoogleMapsApiKey } from '@shared/env';
 import { LOG } from '@shared/logger';
 import type {
+  FakeRoutesService as FakeRoutesServiceType,
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
   InMemoryServiceAreaRepository as InMemoryServiceAreaRepositoryType,
   InMemoryUserRepository as InMemoryUserRepositoryType,
@@ -86,6 +91,9 @@ export interface UseCases {
   listServiceAreas: ListServiceAreas;
   resolveActiveServiceArea: ResolveActiveServiceArea;
   listRideServices: ListRideServices;
+
+  // Google Routes API (Phase 2 turn 2)
+  computeRoutes: ComputeRoutes;
 }
 
 export interface Container {
@@ -100,6 +108,7 @@ export function makeUseCases(args: {
   auth: AuthRepository;
   users: UserRepository;
   serviceAreas: ServiceAreaRepository;
+  routes: RoutesService;
   clock?: () => Date;
 }): UseCases {
   const clock = args.clock ?? (() => new Date());
@@ -122,6 +131,7 @@ export function makeUseCases(args: {
     listServiceAreas: new ListServiceAreas(args.serviceAreas),
     resolveActiveServiceArea: new ResolveActiveServiceArea(args.serviceAreas),
     listRideServices: new ListRideServices(args.serviceAreas),
+    computeRoutes: new ComputeRoutes(args.routes),
   };
 }
 
@@ -136,6 +146,10 @@ export function makeUseCases(args: {
  *   - The test environment doesn't try to load native modules at all.
  */
 export function buildContainer(): Container {
+  // Routes service is configured independently of Firebase: a build can have
+  // either / both / neither. Resolve once and pass into makeUseCases.
+  const routes = buildRoutesService();
+
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
       FirebaseAuthRepository: new () => FirebaseAuthRepositoryType;
@@ -155,6 +169,7 @@ export function buildContainer(): Container {
         auth: new dataAuth.FirebaseAuthRepository(),
         users: new dataUsers.FirestoreUserRepository(),
         serviceAreas: new dataServiceAreas.FirestoreServiceAreaRepository(),
+        routes,
       }),
     };
   }
@@ -173,8 +188,37 @@ export function buildContainer(): Container {
       auth: new testing.InMemoryAuthRepository(),
       users: new testing.InMemoryUserRepository(),
       serviceAreas: new testing.InMemoryServiceAreaRepository(),
+      routes,
     }),
   };
+}
+
+/**
+ * Pick the right RoutesService for the build:
+ *   - GoogleMapsApiKey present → real GoogleRoutesService
+ *   - absent                   → FakeRoutesService (development convenience)
+ *
+ * Lazy-required from the appropriate side so the bundle never pulls
+ * GoogleRoutesService into a fakes-only build, and never pulls
+ * FakeRoutesService into a real build.
+ */
+function buildRoutesService(): RoutesService {
+  const apiKey = getGoogleMapsApiKey();
+  if (apiKey !== null) {
+    const dataRoutes = require('@data/services/GoogleRoutesService') as {
+      GoogleRoutesService: new (apiKey: string) => GoogleRoutesServiceType;
+    };
+    LOG.info('Container using GoogleRoutesService');
+    return new dataRoutes.GoogleRoutesService(apiKey);
+  }
+  const testing = require('@shared/testing') as {
+    FakeRoutesService: new () => FakeRoutesServiceType;
+  };
+  LOG.warn(
+    'Google Maps API key not configured — using FakeRoutesService. ' +
+      'Set GOOGLE_MAPS_APIKEY_ANDROID / GOOGLE_MAPS_APIKEY_IOS to enable real routes.',
+  );
+  return new testing.FakeRoutesService();
 }
 
 function isFirebaseConfigured(): boolean {

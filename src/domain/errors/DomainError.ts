@@ -30,4 +30,5 @@ export type DomainErrorKind =
   | 'authorization'
   | 'not_found'
   | 'conflict'
-  | 'payment';
+  | 'payment'
+  | 'network';

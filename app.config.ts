@@ -155,6 +155,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     appEnv: APP_ENV,
     firebaseConfigured: Boolean(iosFirebaseConfig && androidFirebaseConfig),
+    // Google Maps API keys — kept under the legacy yeride env-var names so
+    // EAS Secrets configuration can be reused 1:1 (REFACTOR_PLAN.md §7
+    // Decision 6: same Google project, same keys). NOT prefixed with
+    // EXPO_PUBLIC_ because they're consumed via expo-constants's `extra`
+    // bag at runtime, not via process.env in the JS bundle. Build-time
+    // resolution + runtime read keeps them out of the bundled string blob.
+    googleMapsApiKeyAndroid: process.env.GOOGLE_MAPS_APIKEY_ANDROID ?? null,
+    googleMapsApiKeyIos: process.env.GOOGLE_MAPS_APIKEY_IOS ?? null,
   },
   experiments: {
     typedRoutes: false,

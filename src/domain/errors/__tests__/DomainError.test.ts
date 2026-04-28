@@ -1,6 +1,7 @@
 import { AuthorizationError } from '../AuthorizationError';
 import { ConflictError } from '../ConflictError';
 import { DomainError } from '../DomainError';
+import { NetworkError } from '../NetworkError';
 import { NotFoundError } from '../NotFoundError';
 import { PaymentError } from '../PaymentError';
 import { ValidationError } from '../ValidationError';
@@ -82,6 +83,29 @@ describe('DomainError hierarchy', () => {
     });
   });
 
+  describe('NetworkError', () => {
+    it('exposes a code and is identified as kind: network', () => {
+      const e = new NetworkError({
+        code: 'routes_request_timeout',
+        message: 'Routes API timed out',
+      });
+      expect(e).toBeInstanceOf(DomainError);
+      expect(e.kind).toBe('network');
+      expect(e.code).toBe('routes_request_timeout');
+      expect(e.name).toBe('NetworkError');
+    });
+
+    it('preserves the cause for breadcrumbs', () => {
+      const root = new Error('fetch aborted');
+      const e = new NetworkError({
+        code: 'routes_request_failed',
+        message: 'Routes API failed',
+        cause: root,
+      });
+      expect(e.cause).toBe(root);
+    });
+  });
+
   it('all subclasses serialize to JSON cleanly enough for logging', () => {
     const errors: DomainError[] = [
       new ValidationError({ code: 'v', message: 'V' }),
@@ -89,6 +113,7 @@ describe('DomainError hierarchy', () => {
       new NotFoundError({ code: 'n', message: 'N', resource: 'thing' }),
       new ConflictError({ code: 'c', message: 'C' }),
       new PaymentError({ code: 'p', message: 'P' }),
+      new NetworkError({ code: 'n2', message: 'N2' }),
     ];
     for (const e of errors) {
       const json = JSON.stringify({
