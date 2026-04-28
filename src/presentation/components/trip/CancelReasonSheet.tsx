@@ -1,0 +1,231 @@
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import {
+  CancellationReason,
+  type CancellationReasonCode,
+} from '@domain/entities/CancellationReason';
+
+/**
+ * Modal sheet asking the rider to confirm a cancellation and pick a
+ * reason. Renders only the rider-allowed codes (filtered via
+ * `CancellationReason.isRiderCode`); presents the freeform text box when
+ * the rider picks "Other" and requires it before the Confirm button enables.
+ *
+ * Why a `Modal` instead of `@gorhom/bottom-sheet`: the parent screen
+ * already hosts a bottom-sheet; nesting two bottom-sheets is fragile in
+ * react-native-gesture-handler. `Modal` is the simplest cross-platform
+ * primitive that respects edge-to-edge (turn 3.4a passes
+ * `statusBarTranslucent` + `navigationBarTranslucent` per legacy CLAUDE.md
+ * note).
+ *
+ * The sheet does NOT call the cancel mutation — the parent (RideMonitor)
+ * owns it. The sheet only assembles a `CancellationReason` value object
+ * and hands it back via `onConfirm`. This keeps the sheet reusable across
+ * Awaiting / Dispatched / Started views (each owns its own confirm
+ * handler that may capture the trip's odometer or surface different
+ * copy).
+ */
+
+const RIDER_ALLOWED_CODES: readonly {
+  code: CancellationReasonCode;
+  label: string;
+  description: string;
+}[] = [
+  {
+    code: 'changed_mind',
+    label: 'Changed my mind',
+    description: "I don't need a ride anymore.",
+  },
+  {
+    code: 'driver_no_show',
+    label: "Driver didn't show",
+    description: "Driver hasn't arrived after a long wait.",
+  },
+  {
+    code: 'vehicle_malfunction',
+    label: 'Vehicle issue',
+    description: 'A problem with the vehicle was reported.',
+  },
+  {
+    code: 'vehicle_accident',
+    label: 'Accident',
+    description: 'A collision or roadside incident occurred.',
+  },
+  {
+    code: 'safety_concerns',
+    label: 'Safety concern',
+    description: "I don't feel safe taking this ride.",
+  },
+  {
+    code: 'other',
+    label: 'Other',
+    description: 'Tell us what happened.',
+  },
+];
+
+interface CancelReasonSheetProps {
+  readonly visible: boolean;
+  readonly isSubmitting?: boolean;
+  readonly errorMessage?: string | null;
+  readonly onClose: () => void;
+  readonly onConfirm: (reason: CancellationReason) => void | Promise<void>;
+}
+
+export function CancelReasonSheet({
+  visible,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onConfirm,
+}: CancelReasonSheetProps) {
+  const [selected, setSelected] = useState<CancellationReasonCode | null>(null);
+  const [reasonText, setReasonText] = useState<string>('');
+
+  const trimmedText = reasonText.trim();
+  const otherTextValid = selected === 'other' ? trimmedText.length > 0 : true;
+  const canConfirm = selected !== null && otherTextValid && !isSubmitting;
+
+  const handleConfirm = (): void => {
+    if (!selected) return;
+    const r = CancellationReason.create({
+      code: selected,
+      reasonText: selected === 'other' ? trimmedText : null,
+    });
+    if (!r.ok) return;
+    void onConfirm(r.value);
+  };
+
+  const handleClose = (): void => {
+    setSelected(null);
+    setReasonText('');
+    onClose();
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      // legacy CLAUDE.md: pass these or the backdrop won't extend under
+      // the system bars on Android 15 edge-to-edge.
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={handleClose}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss"
+        onPress={handleClose}
+        className="flex-1 bg-foreground/40"
+      >
+        {/* Inner card — stop propagation so taps on it don't dismiss. */}
+        <Pressable className="mt-auto rounded-t-3xl bg-card p-4">
+          <View className="self-center mb-3 h-1 w-12 rounded-full bg-border" />
+          <Text className="mb-1 text-lg font-semibold text-foreground">
+            Cancel ride
+          </Text>
+          <Text className="mb-3 text-sm text-muted-foreground">
+            Pick a reason so we can improve.
+          </Text>
+
+          {RIDER_ALLOWED_CODES.map((opt) => {
+            const isSelected = selected === opt.code;
+            return (
+              <Pressable
+                key={opt.code}
+                onPress={() => setSelected(opt.code)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+                className={`mb-2 rounded-xl border px-4 py-3 ${
+                  isSelected ? 'border-primary bg-primary/10' : 'border-border'
+                }`}
+                testID={`cancel-reason-${opt.code}`}
+              >
+                <Text className="text-base font-medium text-foreground">
+                  {opt.label}
+                </Text>
+                <Text className="text-xs text-muted-foreground">
+                  {opt.description}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          {selected === 'other' && (
+            <View className="mt-1">
+              <Text className="mb-1 text-xs uppercase text-muted-foreground">
+                Tell us more
+              </Text>
+              <TextInput
+                value={reasonText}
+                onChangeText={setReasonText}
+                multiline
+                placeholder="Describe what happened…"
+                placeholderTextColor="#9ca3af"
+                className="rounded-lg border border-border px-3 py-2 text-foreground"
+                style={{ minHeight: 64 }}
+                testID="cancel-reason-other-text"
+              />
+            </View>
+          )}
+
+          {errorMessage && (
+            <Text
+              className="mt-3 text-sm text-error"
+              testID="cancel-reason-error"
+            >
+              {errorMessage}
+            </Text>
+          )}
+
+          <View className="mt-4 flex-row gap-3">
+            <Pressable
+              onPress={handleClose}
+              disabled={isSubmitting}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isSubmitting }}
+              className={`flex-1 items-center rounded-xl bg-muted px-4 py-3 ${
+                isSubmitting ? 'opacity-50' : ''
+              }`}
+              testID="cancel-reason-keep"
+            >
+              <Text className="text-base font-semibold text-foreground">
+                Keep ride
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={handleConfirm}
+              disabled={!canConfirm}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canConfirm }}
+              className={`flex-1 items-center rounded-xl px-4 py-3 ${
+                canConfirm ? 'bg-error' : 'bg-muted'
+              }`}
+              testID="cancel-reason-confirm"
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Text
+                  className={`text-base font-semibold ${
+                    canConfirm ? 'text-white' : 'text-muted-foreground'
+                  }`}
+                >
+                  Cancel ride
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
