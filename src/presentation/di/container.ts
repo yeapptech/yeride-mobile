@@ -34,20 +34,34 @@ import { ListRideServices } from '@app/usecases/serviceArea/ListRideServices';
 import { ListServiceAreas } from '@app/usecases/serviceArea/ListServiceAreas';
 import { ResolveActiveServiceArea } from '@app/usecases/serviceArea/ResolveActiveServiceArea';
 import { EvaluateExitWarning } from '@app/usecases/trip-tracking/EvaluateExitWarning';
+import { ApproveVehicle } from '@app/usecases/vehicle/ApproveVehicle';
+import { DecodeVin } from '@app/usecases/vehicle/DecodeVin';
+import { DeleteVehicle } from '@app/usecases/vehicle/DeleteVehicle';
+import { GetVehicle } from '@app/usecases/vehicle/GetVehicle';
+import { ListDriverVehicles } from '@app/usecases/vehicle/ListDriverVehicles';
+import { RegisterVehicle } from '@app/usecases/vehicle/RegisterVehicle';
+import { RejectVehicle } from '@app/usecases/vehicle/RejectVehicle';
+import { SetActiveVehicle } from '@app/usecases/vehicle/SetActiveVehicle';
+import { UploadVehiclePhotos } from '@app/usecases/vehicle/UploadVehiclePhotos';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
+import type { FirebaseStorageVehiclePhotoRepository as FirebaseStorageVehiclePhotoRepositoryType } from '@data/repositories/FirebaseStorageVehiclePhotoRepository';
 import type { FirestoreLocationRepository as FirestoreLocationRepositoryType } from '@data/repositories/FirestoreLocationRepository';
 import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@data/repositories/FirestoreRideRepository';
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
+import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } from '@data/repositories/FirestoreVehicleRepository';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
+import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
 import type {
   AuthRepository,
   LocationRepository,
   RideRepository,
   ServiceAreaRepository,
   UserRepository,
+  VehicleRepository,
+  VehicleStorageRepository,
 } from '@domain/repositories';
-import type { RoutesService } from '@domain/services';
+import type { RoutesService, VinDecoderService } from '@domain/services';
 import { getGoogleMapsApiKey } from '@shared/env';
 import { LOG } from '@shared/logger';
 import type {
@@ -57,6 +71,8 @@ import type {
   InMemoryRideRepository as InMemoryRideRepositoryType,
   InMemoryServiceAreaRepository as InMemoryServiceAreaRepositoryType,
   InMemoryUserRepository as InMemoryUserRepositoryType,
+  InMemoryVehiclePhotoRepository as InMemoryVehiclePhotoRepositoryType,
+  InMemoryVehicleRepository as InMemoryVehicleRepositoryType,
 } from '@shared/testing';
 
 /**
@@ -141,6 +157,17 @@ export interface UseCases {
   // Location pipeline (Phase 2 turn 3c)
   updateUserLocation: UpdateUserLocation;
   subscribeToUserLocation: SubscribeToUserLocation;
+
+  // Vehicle management (Phase 5 turn 2)
+  registerVehicle: RegisterVehicle;
+  listDriverVehicles: ListDriverVehicles;
+  getVehicle: GetVehicle;
+  setActiveVehicle: SetActiveVehicle;
+  uploadVehiclePhotos: UploadVehiclePhotos;
+  deleteVehicle: DeleteVehicle;
+  approveVehicle: ApproveVehicle;
+  rejectVehicle: RejectVehicle;
+  decodeVin: DecodeVin;
 }
 
 export interface Container {
@@ -158,6 +185,9 @@ export function makeUseCases(args: {
   rides: RideRepository;
   locations: LocationRepository;
   routes: RoutesService;
+  vehicles: VehicleRepository;
+  vehiclePhotos: VehicleStorageRepository;
+  vinDecoder: VinDecoderService;
   clock?: () => Date;
 }): UseCases {
   const clock = args.clock ?? (() => new Date());
@@ -198,6 +228,26 @@ export function makeUseCases(args: {
     evaluateExitWarning: new EvaluateExitWarning(),
     updateUserLocation: new UpdateUserLocation(args.locations),
     subscribeToUserLocation: new SubscribeToUserLocation(args.locations),
+    registerVehicle: new RegisterVehicle(
+      args.auth,
+      args.users,
+      args.vehicles,
+      clock,
+    ),
+    listDriverVehicles: new ListDriverVehicles(args.vehicles),
+    getVehicle: new GetVehicle(args.vehicles),
+    setActiveVehicle: new SetActiveVehicle(args.auth, args.vehicles),
+    uploadVehiclePhotos: new UploadVehiclePhotos(
+      args.auth,
+      args.users,
+      args.vehicles,
+      args.vehiclePhotos,
+      clock,
+    ),
+    deleteVehicle: new DeleteVehicle(args.auth, args.vehicles),
+    approveVehicle: new ApproveVehicle(args.vehicles, clock),
+    rejectVehicle: new RejectVehicle(args.vehicles, clock),
+    decodeVin: new DecodeVin(args.vinDecoder),
   };
 }
 
@@ -215,6 +265,11 @@ export function buildContainer(): Container {
   // Routes service is configured independently of Firebase: a build can have
   // either / both / neither. Resolve once and pass into makeUseCases.
   const routes = buildRoutesService();
+
+  // VIN decoder is unconditional in production: NHTSA's API needs no key
+  // and is keyless / read-only, so it ships in every build (Phase 5 Turn 2
+  // locked decision: real NHTSA in fakes-only branch too — Q2 confirmed).
+  const vinDecoder = buildVinDecoderService();
 
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
@@ -234,8 +289,16 @@ export function buildContainer(): Container {
       require('@data/repositories/FirestoreLocationRepository') as {
         FirestoreLocationRepository: new () => FirestoreLocationRepositoryType;
       };
+    const dataVehicles =
+      require('@data/repositories/FirestoreVehicleRepository') as {
+        FirestoreVehicleRepository: new () => FirestoreVehicleRepositoryType;
+      };
+    const dataVehiclePhotos =
+      require('@data/repositories/FirebaseStorageVehiclePhotoRepository') as {
+        FirebaseStorageVehiclePhotoRepository: new () => FirebaseStorageVehiclePhotoRepositoryType;
+      };
     LOG.info(
-      'Container using Firebase{Auth,Firestore} + FirestoreServiceArea + FirestoreRide + FirestoreLocation repositories',
+      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories',
     );
     return {
       useCases: makeUseCases({
@@ -245,6 +308,10 @@ export function buildContainer(): Container {
         rides: new dataRides.FirestoreRideRepository(),
         locations: new dataLocations.FirestoreLocationRepository(),
         routes,
+        vehicles: new dataVehicles.FirestoreVehicleRepository(),
+        vehiclePhotos:
+          new dataVehiclePhotos.FirebaseStorageVehiclePhotoRepository(),
+        vinDecoder,
       }),
     };
   }
@@ -255,9 +322,11 @@ export function buildContainer(): Container {
     InMemoryRideRepository: new () => InMemoryRideRepositoryType;
     InMemoryServiceAreaRepository: new () => InMemoryServiceAreaRepositoryType;
     InMemoryUserRepository: new () => InMemoryUserRepositoryType;
+    InMemoryVehicleRepository: new () => InMemoryVehicleRepositoryType;
+    InMemoryVehiclePhotoRepository: new () => InMemoryVehiclePhotoRepositoryType;
   };
   LOG.warn(
-    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides/locations. ' +
+    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides/locations/vehicles. ' +
       'No data will persist. See docs/FIREBASE_SETUP.md.',
   );
   return {
@@ -268,6 +337,9 @@ export function buildContainer(): Container {
       rides: new testing.InMemoryRideRepository(),
       locations: new testing.InMemoryLocationRepository(),
       routes,
+      vehicles: new testing.InMemoryVehicleRepository(),
+      vehiclePhotos: new testing.InMemoryVehiclePhotoRepository(),
+      vinDecoder,
     }),
   };
 }
@@ -298,6 +370,23 @@ function buildRoutesService(): RoutesService {
       'Set GOOGLE_MAPS_APIKEY_ANDROID / GOOGLE_MAPS_APIKEY_IOS to enable real routes.',
   );
   return new testing.FakeRoutesService();
+}
+
+/**
+ * Build the VIN decoder service. NHTSA's vPIC + SafetyRatings APIs are
+ * keyless and free for read traffic, so the real adapter is unconditional
+ * in production (Phase 5 Turn 2 locked decision Q2). Tests swap in
+ * `FakeVinDecoderService` via `TestContainerProvider` overrides — never
+ * via this builder.
+ *
+ * Lazy-required so a fakes-only build that never instantiates the
+ * container won't pull `NhtsaVinDecoderService` into the bundle.
+ */
+function buildVinDecoderService(): VinDecoderService {
+  const dataVinDecoder = require('@data/services/NhtsaVinDecoderService') as {
+    NhtsaVinDecoderService: new () => NhtsaVinDecoderServiceType;
+  };
+  return new dataVinDecoder.NhtsaVinDecoderService();
 }
 
 function isFirebaseConfigured(): boolean {

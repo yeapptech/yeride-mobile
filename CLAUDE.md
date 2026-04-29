@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 28, 2026 (Phase 4 turn 5)
+**Last updated:** April 28, 2026 (Phase 5 turn 2)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,18 +9,17 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-Phase 4 (driver UI) complete. Phase 3 shipped the full rider journey
-end-to-end against real Firebase: sign-in → home → route search →
-route/service-tier selection → CreateRide → live RideMonitor (all
-statuses) → RideReceipt. Phase 4 shipped the full driver side
-end-to-end: `DriverNavigator` + tabs, `DriverHomeScreen` (map +
-nearby rides + online toggle), `DriverDispatchScreen`
-(accept/decline), `DriverMonitorScreen` with every status view —
-en-route, at-pickup, started, payment-requested, completed,
-payment-failed — Start-ride and RequestPayment routed through real
-mutations, and a per-reason `DriverCancelReasonSheet`. Turn 5 closed
-the phase with cleanup + this CLAUDE.md driver-side fold-in. Phase 5
-(Vehicle management) is next.
+Phase 5 turn 2 complete. Turn 1 shipped the Vehicle domain + DTO + 3
+in-memory fakes. Turn 2 shipped real adapters
+(`FirestoreVehicleRepository`, `FirebaseStorageVehiclePhotoRepository`,
+`NhtsaVinDecoderService`), the 9 vehicle-management use cases
+(`RegisterVehicle`, `ListDriverVehicles`, `GetVehicle`,
+`SetActiveVehicle`, `UploadVehiclePhotos`, `DeleteVehicle`,
+`ApproveVehicle`, `RejectVehicle`, `DecodeVin`), and the DI +
+TestContainerProvider wiring. Phase 4 (driver UI) is complete behind
+this. Phase 3 shipped the full rider journey end-to-end against real
+Firebase. Phase 5 turn 3 (VehicleList + VehicleRegistration screens) is
+next.
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -39,7 +38,10 @@ the phase with cleanup + this CLAUDE.md driver-side fold-in. Phase 5
 | 4 turn 4a | DriverMonitor scaffold + en-route / at-pickup status views                       | ✅                             |
 | 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations          | ✅                             |
 | 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | ✅                             |
-| 5         | Vehicle management                                                               | Next                           |
+| 5 turn 1  | Vehicle domain + DTO + mappers + in-memory fakes                                 | ✅                             |
+| 5 turn 2  | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring            | ✅                             |
+| 5 turn 3  | VehicleList + VehicleRegistration screens                                        | Next                           |
+| 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                         | —                              |
 | 6         | Payments / Stripe Connect / tipping                                              | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
 | 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
@@ -54,6 +56,15 @@ online → accept an offer → land on DriverMonitor → flip to at-pickup
 on the `payment_failed` card and tap "Close trip" → return to
 DriverHome. Cancel from any cancel-eligible status uses the full
 per-reason `DriverCancelReasonSheet`.
+
+End of Phase 5 turn 2 acceptance: **97 test suites / 708 tests passing**
+(+10 suites / +47 tests over Phase 5 turn 1's 87/661); typecheck, lint,
+format, and test all green. The 9 vehicle-management use cases are
+wired through the DI container against real Firestore + Storage +
+NHTSA adapters in production builds, in-memory fakes + real keyless
+NHTSA in dev / test builds, and `InMemoryVehicleRepository` /
+`InMemoryVehiclePhotoRepository` / `FakeVinDecoderService` overridable
+via `TestContainerProvider`.
 
 ## Tech stack
 

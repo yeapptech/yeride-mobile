@@ -9,11 +9,14 @@ import {
 } from '@presentation/di';
 
 import { FakeRoutesService } from './FakeRoutesService';
+import { FakeVinDecoderService } from './FakeVinDecoderService';
 import { InMemoryAuthRepository } from './InMemoryAuthRepository';
 import { InMemoryLocationRepository } from './InMemoryLocationRepository';
 import { InMemoryRideRepository } from './InMemoryRideRepository';
 import { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';
 import { InMemoryUserRepository } from './InMemoryUserRepository';
+import { InMemoryVehiclePhotoRepository } from './InMemoryVehiclePhotoRepository';
+import { InMemoryVehicleRepository } from './InMemoryVehicleRepository';
 
 /**
  * Provider for unit tests that need to render a component requiring
@@ -45,6 +48,9 @@ export function TestContainerProvider({
   rides,
   locations,
   routes,
+  vehicles,
+  vehiclePhotos,
+  vinDecoder,
   useCases,
   children,
 }: {
@@ -54,6 +60,9 @@ export function TestContainerProvider({
   rides?: InMemoryRideRepository;
   locations?: InMemoryLocationRepository;
   routes?: FakeRoutesService;
+  vehicles?: InMemoryVehicleRepository;
+  vehiclePhotos?: InMemoryVehiclePhotoRepository;
+  vinDecoder?: FakeVinDecoderService;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
@@ -63,6 +72,10 @@ export function TestContainerProvider({
   const ridesRepo = rides ?? new InMemoryRideRepository();
   const locationsRepo = locations ?? new InMemoryLocationRepository();
   const routesService = routes ?? new FakeRoutesService();
+  const vehiclesRepo = vehicles ?? new InMemoryVehicleRepository();
+  const vehiclePhotosRepo =
+    vehiclePhotos ?? new InMemoryVehiclePhotoRepository();
+  const vinDecoderService = vinDecoder ?? new FakeVinDecoderService();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
@@ -70,6 +83,9 @@ export function TestContainerProvider({
     rides: ridesRepo,
     locations: locationsRepo,
     routes: routesService,
+    vehicles: vehiclesRepo,
+    vehiclePhotos: vehiclePhotosRepo,
+    vinDecoder: vinDecoderService,
   });
   const merged: UseCases = { ...base, ...useCases };
   const container: Container = { useCases: merged };
