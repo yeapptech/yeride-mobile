@@ -12,3 +12,4 @@ export {
 } from './VehicleClassifier';
 export type { VinDecodeResult, VinDecoderService } from './VinDecoderService';
 export type { StripeServerService } from './StripeServerService';
+export type { PaymentCallableService } from './PaymentCallableService';

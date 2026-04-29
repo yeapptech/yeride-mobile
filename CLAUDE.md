@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 29, 2026 (Phase 6 turn 1 — domain + DTO + fakes shipped)
+**Last updated:** April 29, 2026 (Phase 6 turn 2 — adapter + 13 use cases + DI wired)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,20 +9,30 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-**Phase 6 turn 1 shipped.** Pure domain + data-layer foundation for
-Payments / Stripe Connect / tipping: three branded Stripe IDs
-(`StripeCustomerId`, `StripeAccountId`, `PaymentMethodId`), four payment
-value objects (`PaymentMethod` with `normalizeCardBrand` + `isExpired`,
-`Payout`, `BalanceTransaction` with `net = amount - fee` invariant,
-`StripeAccountStatus` 4-arm union + `deriveStripeAccountStatus`
-helper), the 11-method `StripeServerService` interface, and a
-seed/spy/failNext-equipped `FakeStripeServerService` in `@shared/testing`.
-The `UserDoc` DTO + `userMapper` are patched to read AND write the
-legacy nested `stripe: { id, charges_enabled, payouts_enabled }` shape
-alongside the canonical flat fields, so existing legacy drivers
-hydrate correctly and legacy yeride keeps reading state the rewrite
-writes. No use cases or UI yet — those land in turn 2 (real adapter,
-the 12 use cases, and DI wiring) and turns 3-5 (Wallet, Earnings, tip).
+**Phase 6 turn 2 shipped.** End-to-end payment surface from data layer
+through DI container — but no UI yet. Real `StripeServerHttpAdapter`
+implementing the 11-method `StripeServerService` interface (fetch-based,
+Bearer auth, Idempotency-Key on `createCustomer` only, retry-with-
+backoff on 5xx + transport throws via the new shared `retryWithBackoff`
+helper). `CloudFunctionsService` extended with `tipDriver`. Twelve
+use cases plus a thirteenth (`CreateAccountLoginLink` for the Express-
+dashboard affordance Turn 4 needs): `EnsureStripeCustomer`,
+`CreateSetupIntent`, `ListPaymentMethods`, `SetDefaultPaymentMethod`,
+`DetachPaymentMethod`, `EnsureStripeConnectAccount`,
+`CreateConnectOnboardingLink`, `CreateAccountLoginLink`,
+`RefreshConnectAccountStatus`, `GetDriverBalance`, `ListDriverPayouts`,
+`ListBalanceTransactions`, `ProcessTip`. New `PaymentCallableService`
+domain interface abstracts the tip-callable surface so `ProcessTip`
+doesn't import data-layer types. `FakeCloudFunctionsService` joins
+`@shared/testing`. The DI container wires the real adapter +
+`CloudFunctionsService` when env is configured, fakes otherwise.
+`Rider.stripeCustomerId` and `Driver.stripeAccountId` are now branded
+(`StripeCustomerId | null`, `StripeAccountId | null`); `Rider` gains
+`defaultPaymentMethodId: PaymentMethodId | null` which
+`useRouteSelectViewModel` plumbs into `PassengerSnapshot.defaultPaymentMethod`
+at trip-creation time. `PaymentMethod.expiry` is now nullable since the
+legacy server doesn't expose it. UI screens (Wallet / Earnings / tip
+flow) still pending — Turns 3-5.
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -46,8 +56,8 @@ the 12 use cases, and DI wiring) and turns 3-5 (Wallet, Earnings, tip).
 | 5 turn 3  | VehicleList + VehicleRegistration screens                                        | ✅                             |
 | 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                         | ✅                             |
 | 6 turn 1  | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake        | ✅                             |
-| 6 turn 2  | `StripeServerHttpAdapter` + `tipDriver` callable + 12 use cases + DI wiring      | Next                           |
-| 6 turn 3  | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)     | Pending                        |
+| 6 turn 2  | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring      | ✅                             |
+| 6 turn 3  | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)     | Next                           |
 | 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)        | Pending                        |
 | 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup                                        | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
@@ -117,6 +127,35 @@ payouts_enabled }` shape that existing legacy drivers actually have on
 disk, falling back from the canonical flat fields when those are
 absent, and writes BOTH shapes for legacy yeride co-existence under
 `setDoc { merge: true }`.
+
+End of Phase 6 turn 2 acceptance: **132 test suites / 1000 tests passing**
+(+17 suites / +123 tests over Phase 6 turn 1's 115/877); typecheck,
+lint, format, and test all green. The real `StripeServerHttpAdapter`
+(11 methods, fetch-based, Bearer-authed, retry-with-backoff on 5xx +
+transport throws via the new shared `retryWithBackoff` helper) is wired
+through the DI container alongside `CloudFunctionsService.tipDriver`;
+both fall back to `FakeStripeServerService` / `FakeCloudFunctionsService`
+when env (`STRIPE_SERVER_URL` + `STRIPE_SERVER_API_KEY`) is missing.
+Thirteen authorization-aware payment use cases ship: 4 rider-side
+(`EnsureStripeCustomer`, `CreateSetupIntent`, `ListPaymentMethods`,
+`SetDefaultPaymentMethod`, `DetachPaymentMethod`), 7 driver-side
+(`EnsureStripeConnectAccount`, `CreateConnectOnboardingLink`,
+`CreateAccountLoginLink`, `RefreshConnectAccountStatus`,
+`GetDriverBalance`, `ListDriverPayouts`, `ListBalanceTransactions`),
+and `ProcessTip` (rider-side, $1 floor, whole-dollar requirement,
+Money → dollars conversion at the boundary). New `PaymentCallableService`
+domain interface keeps `ProcessTip` from importing data-layer types.
+`Rider.stripeCustomerId` and `Driver.stripeAccountId` are now branded;
+`Rider` gains `defaultPaymentMethodId: PaymentMethodId | null`, which
+`useRouteSelectViewModel` plumbs into `PassengerSnapshot.defaultPaymentMethod`
+so `completeTrip` charges the right card on trip completion.
+`PaymentMethod.expiry` softened to nullable (the legacy server doesn't
+expose `exp_month` / `exp_year`); the value object's `isExpired(now)`
+returns `false` when expiry is unknown. Four immutable User-entity
+helpers added (`setStripeCustomerId`, `setDefaultPaymentMethodId`,
+`setStripeAccountId`, `setStripeAccountFlags`). `userMapper`
+gracefully falls back to `null` (with `LOG.warn`) on malformed Stripe
+ids — never crashes hydration on a single bad doc.
 
 ## Tech stack
 
@@ -423,7 +462,13 @@ new app writes to it.
 | `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`           | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)                                                                      |
 | `src/domain/entities/Ride.ts`                                                     | The trip aggregate + state machine. Most-touched domain entity                                                                                                               |
 | `src/data/repositories/FirestoreRideRepository.ts`                                | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                                                                                                |
-| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                                                                                         |
+| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` / `tipDriver` (us-east1)                                                                                           |
+| `src/data/services/StripeServerHttpAdapter.ts`                                    | Phase 6 turn 2 — fetch-based 11-method Stripe microservice adapter; Bearer-authed; Idempotency-Key on `createCustomer`; retry-with-backoff on 5xx + transport throws         |
+| `src/data/services/_shared/retryWithBackoff.ts`                                   | Phase 6 turn 2 — generic retry helper with `{attempts, delaysMs, shouldRetry, sleep?}` policy. Inject `sleep` in tests to skip wall-clock                                    |
+| `src/domain/services/PaymentCallableService.ts`                                   | Phase 6 turn 2 — domain seam over server-side payment callables. Just `tipDriver` for now; `CloudFunctionsService` + `FakeCloudFunctionsService` both satisfy structurally   |
+| `src/app/usecases/payment/ProcessTip.ts`                                          | Phase 6 turn 2 — Money → dollars at the boundary, $1 floor, whole-dollar requirement, passenger-ownership check                                                              |
+| `src/shared/testing/FakeCloudFunctionsService.ts`                                 | Phase 6 turn 2 — programmable fake covering `completeTrip` / `cancelTrip` / `tipDriver` with seed/spy/failNext seams                                                         |
+| `src/shared/env/stripeServer.ts`                                                  | Phase 6 turn 2 — `getStripeServerConfig()` reads `STRIPE_SERVER_URL` + `STRIPE_SERVER_API_KEY` from `extra`; both required as a unit                                         |
 | `src/shared/testing/InMemoryRideRepository.ts`                                    | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                                                                                                |
 | `src/domain/entities/Vehicle.ts`                                                  | Vehicle aggregate + status state machine; VIN as identity                                                                                                                    |
 | `src/domain/services/VehicleClassifier.ts`                                        | Pure-math manual-entry classifier + `computeEligibleServices` (parity with NHTSA path)                                                                                       |
@@ -791,7 +836,17 @@ expo-web-browser           → phase 6 turn 4 (Connect onboarding — openAuthSe
 
 Stripe IDs (branded)       → src/domain/entities/{StripeCustomerId,StripeAccountId,PaymentMethodId}.ts
 Payment value objects      → src/domain/entities/{PaymentMethod,Payout,BalanceTransaction,StripeAccountStatus}.ts
-Payment use cases          → src/app/usecases/payment/*.ts                (12 — phase 6 turn 2)
+Payment use cases          → src/app/usecases/payment/*.ts                (13 — phase 6 turn 2)
+                              EnsureStripeCustomer, CreateSetupIntent, ListPaymentMethods,
+                              SetDefaultPaymentMethod, DetachPaymentMethod,
+                              EnsureStripeConnectAccount, CreateConnectOnboardingLink,
+                              CreateAccountLoginLink, RefreshConnectAccountStatus,
+                              GetDriverBalance, ListDriverPayouts, ListBalanceTransactions,
+                              ProcessTip
+PaymentCallableService     → src/domain/services/PaymentCallableService.ts (interface — phase 6 turn 2)
+StripeServerHttpAdapter    → src/data/services/StripeServerHttpAdapter.ts (real impl — phase 6 turn 2)
+retryWithBackoff helper    → src/data/services/_shared/retryWithBackoff.ts (phase 6 turn 2)
+FakeCloudFunctionsService  → src/shared/testing/FakeCloudFunctionsService.ts (phase 6 turn 2)
 
 Session store              → src/presentation/stores/useSessionStore.ts
 Service-area store         → src/presentation/stores/useServiceAreaStore.ts

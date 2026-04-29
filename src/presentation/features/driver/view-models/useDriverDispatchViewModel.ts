@@ -201,7 +201,10 @@ export function useDriverDispatchViewModel(
       name: user.name,
       email: user.email,
       phoneNumber: user.phone,
-      stripeAccountId: user.stripeAccountId,
+      // DriverSnapshot's `stripeAccountId` is a denormalized trip-doc
+      // payload (not the branded ID type). Stringify the brand here so
+      // the snapshot's wire shape stays unchanged from Phase 4.
+      stripeAccountId: String(user.stripeAccountId),
       pushToken: null,
       avatarUrl: user.avatarUrl,
       vehicle: null, // VehicleSnapshot wiring lives in Phase 5

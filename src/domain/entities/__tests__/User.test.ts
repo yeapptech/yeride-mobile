@@ -1,9 +1,12 @@
 import { Address } from '../Address';
 import { Coordinates } from '../Coordinates';
 import { Email } from '../Email';
+import { PaymentMethodId } from '../PaymentMethodId';
 import { PersonName } from '../PersonName';
 import { PhoneNumber } from '../PhoneNumber';
 import { SavedPlace, SavedPlaceId } from '../SavedPlace';
+import { StripeAccountId } from '../StripeAccountId';
+import { StripeCustomerId } from '../StripeCustomerId';
 import {
   isDriver,
   isRider,
@@ -12,8 +15,12 @@ import {
   makeUser,
   removeSavedPlace,
   setAvatarUrl,
+  setDefaultPaymentMethodId,
   setEmail,
   setEmailVerified,
+  setStripeAccountFlags,
+  setStripeAccountId,
+  setStripeCustomerId,
   updateProfile,
   upsertSavedPlace,
   type Rider,
@@ -93,8 +100,15 @@ describe('User factories', () => {
     });
 
     it('preserves provided Stripe customer id', () => {
-      const r = makeRider({ ...baseArgs(), stripeCustomerId: 'cus_abc' });
-      expect(r.stripeCustomerId).toBe('cus_abc');
+      const cusR = StripeCustomerId.create('cus_abc');
+      if (!cusR.ok) throw cusR.error;
+      const r = makeRider({ ...baseArgs(), stripeCustomerId: cusR.value });
+      expect(String(r.stripeCustomerId)).toBe('cus_abc');
+    });
+
+    it('produces a Rider with default null defaultPaymentMethodId', () => {
+      const r = makeRider(baseArgs());
+      expect(r.defaultPaymentMethodId).toBeNull();
     });
   });
 
@@ -208,6 +222,78 @@ describe('Saved-places helpers', () => {
     const missingR = SavedPlaceId.create('nonexistent');
     if (!missingR.ok) throw missingR.error;
     expect(removeSavedPlace(u, missingR.value, LATER)).toBe(u);
+  });
+});
+
+describe('Stripe state helpers', () => {
+  function rider(): Rider {
+    return makeRider(baseArgs());
+  }
+  function driver(): Driver {
+    return makeDriver(baseArgs());
+  }
+  function cusId(value = 'cus_abc'): StripeCustomerId {
+    const r = StripeCustomerId.create(value);
+    if (!r.ok) throw r.error;
+    return r.value;
+  }
+  function acctId(value = 'acct_xyz'): StripeAccountId {
+    const r = StripeAccountId.create(value);
+    if (!r.ok) throw r.error;
+    return r.value;
+  }
+  function pmId(value = 'pm_card1'): PaymentMethodId {
+    const r = PaymentMethodId.create(value);
+    if (!r.ok) throw r.error;
+    return r.value;
+  }
+
+  it('setStripeCustomerId sets the id and bumps updatedAt', () => {
+    const r = rider();
+    const next = setStripeCustomerId(r, cusId(), LATER);
+    expect(String(next.stripeCustomerId)).toBe('cus_abc');
+    expect(next.updatedAt).toBe(LATER);
+  });
+
+  it('setStripeCustomerId is a no-op when the id is already the same', () => {
+    const r0 = rider();
+    const r1 = setStripeCustomerId(r0, cusId(), LATER);
+    const r2 = setStripeCustomerId(r1, cusId(), new Date('2030-01-01Z'));
+    expect(r2).toBe(r1);
+  });
+
+  it('setDefaultPaymentMethodId sets and clears with explicit null', () => {
+    const r0 = rider();
+    const set = setDefaultPaymentMethodId(r0, pmId(), LATER);
+    expect(String(set.defaultPaymentMethodId)).toBe('pm_card1');
+    const cleared = setDefaultPaymentMethodId(set, null, LATER);
+    expect(cleared.defaultPaymentMethodId).toBeNull();
+  });
+
+  it('setStripeAccountId sets the id on a driver', () => {
+    const d = driver();
+    const next = setStripeAccountId(d, acctId(), LATER);
+    expect(String(next.stripeAccountId)).toBe('acct_xyz');
+    expect(next.updatedAt).toBe(LATER);
+  });
+
+  it('setStripeAccountFlags updates only when changed', () => {
+    const d0 = driver();
+    const enabled = setStripeAccountFlags(
+      d0,
+      { chargesEnabled: true, payoutsEnabled: true },
+      LATER,
+    );
+    expect(enabled.stripeChargesEnabled).toBe(true);
+    expect(enabled.stripePayoutsEnabled).toBe(true);
+    expect(enabled.updatedAt).toBe(LATER);
+    // Same flags → no-op (returns the same instance).
+    const same = setStripeAccountFlags(
+      enabled,
+      { chargesEnabled: true, payoutsEnabled: true },
+      new Date('2099-01-01Z'),
+    );
+    expect(same).toBe(enabled);
   });
 });
 

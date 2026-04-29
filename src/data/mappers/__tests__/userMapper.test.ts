@@ -1,6 +1,9 @@
 import { Email } from '@domain/entities/Email';
+import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { StripeAccountId } from '@domain/entities/StripeAccountId';
+import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import {
   isDriver,
   isRider,
@@ -146,7 +149,8 @@ describe('toDomain', () => {
       expect(r.value.avatarUrl).toBe('https://avatars/x.png');
       expect(r.value.savedPlaces).toHaveLength(1);
       if (isRider(r.value)) {
-        expect(r.value.stripeCustomerId).toBe('cus_abc');
+        expect(String(r.value.stripeCustomerId)).toBe('cus_abc');
+        expect(r.value.defaultPaymentMethodId).toBeNull();
       }
     }
   });
@@ -222,6 +226,8 @@ describe('toDoc', () => {
     if (!nameR.ok) throw nameR.error;
     const phoneR = PhoneNumber.create('+14155550123');
     if (!phoneR.ok) throw phoneR.error;
+    const cusR = StripeCustomerId.create('cus_abc');
+    if (!cusR.ok) throw cusR.error;
     return makeRider({
       id: uid(),
       email: emailR.value,
@@ -230,7 +236,7 @@ describe('toDoc', () => {
       avatarUrl: 'https://avatars/x.png',
       createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
-      stripeCustomerId: 'cus_abc',
+      stripeCustomerId: cusR.value,
     });
   }
 
@@ -305,7 +311,7 @@ describe('legacy nested stripe shape on driver docs', () => {
     const r = toDomain(uid(), parsed.value);
     expect(r.ok).toBe(true);
     if (r.ok && isDriver(r.value)) {
-      expect(r.value.stripeAccountId).toBe('acct_legacyABC');
+      expect(String(r.value.stripeAccountId)).toBe('acct_legacyABC');
       expect(r.value.stripeChargesEnabled).toBe(true);
       expect(r.value.stripePayoutsEnabled).toBe(false);
     }
@@ -318,11 +324,11 @@ describe('legacy nested stripe shape on driver docs', () => {
       lastName: 'Hopper',
       role: 'driver',
       createdDateTime: FIXED_NOW.toISOString(),
-      stripeAccountId: 'acct_FLAT_NEW',
+      stripeAccountId: 'acct_flatNew',
       stripeChargesEnabled: true,
       stripePayoutsEnabled: true,
       stripe: {
-        id: 'acct_NESTED_OLD',
+        id: 'acct_nestedOld',
         charges_enabled: false,
         payouts_enabled: false,
       },
@@ -332,7 +338,7 @@ describe('legacy nested stripe shape on driver docs', () => {
     const r = toDomain(uid(), parsed.value);
     expect(r.ok).toBe(true);
     if (r.ok && isDriver(r.value)) {
-      expect(r.value.stripeAccountId).toBe('acct_FLAT_NEW');
+      expect(String(r.value.stripeAccountId)).toBe('acct_flatNew');
       expect(r.value.stripeChargesEnabled).toBe(true);
       expect(r.value.stripePayoutsEnabled).toBe(true);
     }
@@ -341,14 +347,15 @@ describe('legacy nested stripe shape on driver docs', () => {
   it('writes both flat fields and the nested stripe shape on driver docs (legacy compatibility)', () => {
     const emailR = Email.create('driver@yeapp.tech');
     const nameR = PersonName.create({ first: 'Grace', last: 'Hopper' });
-    if (!emailR.ok || !nameR.ok) throw new Error('setup');
+    const acctR = StripeAccountId.create('acct_RIDER');
+    if (!emailR.ok || !nameR.ok || !acctR.ok) throw new Error('setup');
     const driver = makeDriver({
       id: uid(),
       email: emailR.value,
       name: nameR.value,
       createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
-      stripeAccountId: 'acct_RIDER',
+      stripeAccountId: acctR.value,
       stripeChargesEnabled: true,
       stripePayoutsEnabled: false,
     });
@@ -381,5 +388,96 @@ describe('legacy nested stripe shape on driver docs', () => {
     if (doc.role !== 'driver') throw new Error('expected driver doc');
     expect(doc.stripeAccountId).toBeNull();
     expect(doc.stripe).toBeNull();
+  });
+});
+
+describe('rider defaultPaymentMethodId round-trip (Phase 6 turn 2)', () => {
+  it('reads a populated defaultPaymentMethodId into a branded id', () => {
+    const parsed = parseUserDoc({
+      email: 'ada@yeapp.tech',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      stripeCustomerId: 'cus_ada',
+      defaultPaymentMethodId: 'pm_carddefault',
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok && isRider(r.value)) {
+      expect(String(r.value.defaultPaymentMethodId)).toBe('pm_carddefault');
+    }
+  });
+
+  it('hydrates with null defaultPaymentMethodId when the field is missing', () => {
+    const parsed = parseUserDoc({
+      email: 'ada@yeapp.tech',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    if (r.ok && isRider(r.value)) {
+      expect(r.value.defaultPaymentMethodId).toBeNull();
+    }
+  });
+
+  it('falls back to null on a malformed defaultPaymentMethodId rather than failing the whole hydration', () => {
+    const parsed = parseUserDoc({
+      email: 'ada@yeapp.tech',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      // Not a `pm_*` prefixed id — branded factory rejects, mapper logs + defaults.
+      defaultPaymentMethodId: 'garbage',
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok && isRider(r.value)) {
+      expect(r.value.defaultPaymentMethodId).toBeNull();
+    }
+  });
+
+  it('writes the rider doc with a populated defaultPaymentMethodId field', () => {
+    const emailR = Email.create('ada@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Ada', last: 'Lovelace' });
+    const cusR = StripeCustomerId.create('cus_ada');
+    const pmR = PaymentMethodId.create('pm_carddefault');
+    if (!emailR.ok || !nameR.ok || !cusR.ok || !pmR.ok)
+      throw new Error('setup');
+    const rider = makeRider({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+      stripeCustomerId: cusR.value,
+      defaultPaymentMethodId: pmR.value,
+    });
+    const doc = toDoc(rider);
+    if (doc.role !== 'rider') throw new Error('expected rider doc');
+    expect(doc.stripeCustomerId).toBe('cus_ada');
+    expect(doc.defaultPaymentMethodId).toBe('pm_carddefault');
+  });
+
+  it('writes null when the rider has no default payment method (drops field on merge)', () => {
+    const emailR = Email.create('ada@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Ada', last: 'Lovelace' });
+    if (!emailR.ok || !nameR.ok) throw new Error('setup');
+    const rider = makeRider({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+    const doc = toDoc(rider);
+    if (doc.role !== 'rider') throw new Error('expected rider doc');
+    expect(doc.defaultPaymentMethodId).toBeNull();
   });
 });

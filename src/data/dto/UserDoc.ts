@@ -59,6 +59,15 @@ const BaseUserDocSchema = z.object({
 const RiderDocSchema = BaseUserDocSchema.extend({
   role: z.literal('rider'),
   stripeCustomerId: z.string().nullish(),
+  /**
+   * Phase 6 turn 2: which saved card the rider has tagged as default.
+   * Persisted as a raw `pm_*` string for read efficiency; the mapper
+   * validates against `PaymentMethodId.create` on hydration. Legacy
+   * yeride doesn't read this field — it stores the default in React
+   * Context only — so the rewrite owns it. Safe to extend without
+   * coordinating with the legacy clients.
+   */
+  defaultPaymentMethodId: z.string().nullish(),
 });
 
 /**

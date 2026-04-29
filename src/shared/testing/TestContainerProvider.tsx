@@ -8,7 +8,9 @@ import {
   type UseCases,
 } from '@presentation/di';
 
+import { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
 import { FakeRoutesService } from './FakeRoutesService';
+import { FakeStripeServerService } from './FakeStripeServerService';
 import { FakeVinDecoderService } from './FakeVinDecoderService';
 import { InMemoryAuthRepository } from './InMemoryAuthRepository';
 import { InMemoryLocationRepository } from './InMemoryLocationRepository';
@@ -51,6 +53,8 @@ export function TestContainerProvider({
   vehicles,
   vehiclePhotos,
   vinDecoder,
+  stripeServer,
+  cloudFunctions,
   useCases,
   children,
 }: {
@@ -63,6 +67,8 @@ export function TestContainerProvider({
   vehicles?: InMemoryVehicleRepository;
   vehiclePhotos?: InMemoryVehiclePhotoRepository;
   vinDecoder?: FakeVinDecoderService;
+  stripeServer?: FakeStripeServerService;
+  cloudFunctions?: FakeCloudFunctionsService;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
@@ -76,6 +82,9 @@ export function TestContainerProvider({
   const vehiclePhotosRepo =
     vehiclePhotos ?? new InMemoryVehiclePhotoRepository();
   const vinDecoderService = vinDecoder ?? new FakeVinDecoderService();
+  const stripeServerService = stripeServer ?? new FakeStripeServerService();
+  const cloudFunctionsService =
+    cloudFunctions ?? new FakeCloudFunctionsService();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
@@ -86,6 +95,8 @@ export function TestContainerProvider({
     vehicles: vehiclesRepo,
     vehiclePhotos: vehiclePhotosRepo,
     vinDecoder: vinDecoderService,
+    stripeServer: stripeServerService,
+    paymentCallable: cloudFunctionsService,
   });
   const merged: UseCases = { ...base, ...useCases };
   const container: Container = { useCases: merged };

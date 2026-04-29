@@ -1,15 +1,21 @@
 import { Address } from '@domain/entities/Address';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
+import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
 import { SavedPlace, SavedPlaceId } from '@domain/entities/SavedPlace';
+import { StripeAccountId } from '@domain/entities/StripeAccountId';
+import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import { type User, makeDriver, makeRider } from '@domain/entities/User';
 import type { UserId } from '@domain/entities/UserId';
 import { ValidationError } from '@domain/errors';
 import { Result } from '@domain/shared/Result';
+import { LOG } from '@shared/logger';
 
 import { UserDocSchema, type UserDoc } from '../dto/UserDoc';
+
+const logger = LOG.extend('userMapper');
 
 /**
  * Bidirectional mappers between the Firestore `users/{uid}` document and the
@@ -74,7 +80,15 @@ export function toDoc(user: User): UserDoc {
     return {
       ...base,
       role: 'rider' as const,
-      stripeCustomerId: user.stripeCustomerId,
+      // Branded ids stringify cleanly via `String(...)`; null stays null
+      // (so the field is dropped on writes rather than written as the
+      // string "null").
+      stripeCustomerId:
+        user.stripeCustomerId !== null ? String(user.stripeCustomerId) : null,
+      defaultPaymentMethodId:
+        user.defaultPaymentMethodId !== null
+          ? String(user.defaultPaymentMethodId)
+          : null,
     };
   }
   // Drivers get BOTH the flat (canonical) and legacy-nested Stripe shapes.
@@ -84,10 +98,12 @@ export function toDoc(user: User): UserDoc {
   // flat fields too means the rewrite's reads stay fast (no nested
   // traversal) and a future cleanup migration can drop the nested shape
   // without coordinated client updates.
+  const flatAccountId =
+    user.stripeAccountId !== null ? String(user.stripeAccountId) : null;
   const nestedStripe =
-    user.stripeAccountId !== null
+    flatAccountId !== null
       ? {
-          id: user.stripeAccountId,
+          id: flatAccountId,
           charges_enabled: user.stripeChargesEnabled,
           payouts_enabled: user.stripePayoutsEnabled,
         }
@@ -95,7 +111,7 @@ export function toDoc(user: User): UserDoc {
   return {
     ...base,
     role: 'driver' as const,
-    stripeAccountId: user.stripeAccountId,
+    stripeAccountId: flatAccountId,
     stripeChargesEnabled: user.stripeChargesEnabled,
     stripePayoutsEnabled: user.stripePayoutsEnabled,
     stripe: nestedStripe,
@@ -164,7 +180,11 @@ export function toDomain(
     return Result.ok(
       makeRider({
         ...common,
-        stripeCustomerId: doc.stripeCustomerId ?? null,
+        stripeCustomerId: parseStripeCustomerId(doc.stripeCustomerId, uid),
+        defaultPaymentMethodId: parsePaymentMethodId(
+          doc.defaultPaymentMethodId,
+          uid,
+        ),
       }),
     );
   }
@@ -175,7 +195,7 @@ export function toDomain(
   // `false` defaults.
   const flatAccountId = doc.stripeAccountId ?? null;
   const nested = doc.stripe ?? null;
-  const stripeAccountId = flatAccountId ?? nested?.id ?? null;
+  const rawAccountId = flatAccountId ?? nested?.id ?? null;
   const stripeChargesEnabled =
     doc.stripeChargesEnabled ?? nested?.charges_enabled ?? false;
   const stripePayoutsEnabled =
@@ -184,13 +204,70 @@ export function toDomain(
   return Result.ok(
     makeDriver({
       ...common,
-      stripeAccountId,
+      stripeAccountId: parseStripeAccountId(rawAccountId, uid),
       stripeChargesEnabled,
       stripePayoutsEnabled,
       activeVehicleId: doc.activeVehicleId ?? null,
       vehicleIds: doc.vehicleIds,
     }),
   );
+}
+
+/**
+ * Validate a raw `cus_*` string into a `StripeCustomerId`. Falls back to
+ * `null` (with a `LOG.warn`) on shape failure rather than crashing the
+ * whole user hydration — a malformed Stripe id on a single user doc
+ * shouldn't take down the app's auth flow.
+ */
+function parseStripeCustomerId(
+  raw: string | null | undefined,
+  uid: UserId,
+): StripeCustomerId | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const r = StripeCustomerId.create(raw);
+  if (!r.ok) {
+    logger.warn('toDomain: malformed stripeCustomerId; treating as null', {
+      uid: String(uid),
+      code: r.error.code,
+    });
+    return null;
+  }
+  return r.value;
+}
+
+function parseStripeAccountId(
+  raw: string | null | undefined,
+  uid: UserId,
+): StripeAccountId | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const r = StripeAccountId.create(raw);
+  if (!r.ok) {
+    logger.warn('toDomain: malformed stripeAccountId; treating as null', {
+      uid: String(uid),
+      code: r.error.code,
+    });
+    return null;
+  }
+  return r.value;
+}
+
+function parsePaymentMethodId(
+  raw: string | null | undefined,
+  uid: UserId,
+): PaymentMethodId | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const r = PaymentMethodId.create(raw);
+  if (!r.ok) {
+    logger.warn(
+      'toDomain: malformed defaultPaymentMethodId; treating as null',
+      {
+        uid: String(uid),
+        code: r.error.code,
+      },
+    );
+    return null;
+  }
+  return r.value;
 }
 
 /* ─────────────────────────── helpers ──────────────────────────── */

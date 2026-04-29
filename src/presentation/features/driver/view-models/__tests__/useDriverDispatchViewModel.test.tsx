@@ -17,6 +17,7 @@ import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
+import { StripeAccountId } from '@domain/entities/StripeAccountId';
 import { makeDriver } from '@domain/entities/User';
 import { UserId } from '@domain/entities/UserId';
 import { useDriverStatusStore } from '@presentation/stores';
@@ -186,7 +187,7 @@ async function setupSeededState(opts?: {
     savedPlaces: [],
     createdAt: new Date(),
     updatedAt: new Date(),
-    stripeAccountId: 'acct_driver',
+    stripeAccountId: unwrap(StripeAccountId.create('acct_driver')),
     stripeChargesEnabled: true,
     stripePayoutsEnabled: true,
     activeVehicleId: 'vehicle-real-1',

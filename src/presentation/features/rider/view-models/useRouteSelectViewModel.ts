@@ -287,7 +287,14 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
       phoneNumber: user.phone,
       pushToken: null,
       avatarUrl: user.avatarUrl,
-      defaultPaymentMethod: null,
+      // Phase 6 turn 2: bake the rider's default payment method id into
+      // the trip snapshot so the server-side `completeTrip` Cloud
+      // Function knows which card to charge. `String(...)` strips the
+      // brand for the legacy wire-format storage.
+      defaultPaymentMethod:
+        user.role === 'rider' && user.defaultPaymentMethodId !== null
+          ? String(user.defaultPaymentMethodId)
+          : null,
     });
     if (!passengerR.ok) {
       logger.error('confirm: passenger snapshot failed', passengerR.error);

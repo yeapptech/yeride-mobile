@@ -109,6 +109,19 @@ describe('PaymentMethod.create', () => {
     });
     expect(r.ok).toBe(true);
   });
+
+  it('accepts a payment method with null expiry (legacy server omits it)', () => {
+    const r = PaymentMethod.create({
+      id: id(),
+      brand: 'visa',
+      last4: '4242',
+      expiry: null,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.expiry).toBeNull();
+    }
+  });
 });
 
 describe('PaymentMethod.isExpired', () => {
@@ -140,6 +153,17 @@ describe('PaymentMethod.isExpired', () => {
     expect(card.isExpired(new Date('2026-12-31T23:59:59.000Z'))).toBe(false);
     // First instant of January 2027 expired.
     expect(card.isExpired(new Date('2027-01-01T00:00:00.000Z'))).toBe(true);
+  });
+
+  it('returns false for a card with null expiry (cannot know without data)', () => {
+    const r = PaymentMethod.create({
+      id: id(),
+      brand: 'visa',
+      last4: '4242',
+      expiry: null,
+    });
+    if (!r.ok) throw new Error('test setup: pm failed');
+    expect(r.value.isExpired(new Date('2099-01-01T00:00:00.000Z'))).toBe(false);
   });
 });
 

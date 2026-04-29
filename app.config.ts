@@ -196,6 +196,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // resolution + runtime read keeps them out of the bundled string blob.
     googleMapsApiKeyAndroid: process.env.GOOGLE_MAPS_APIKEY_ANDROID ?? null,
     googleMapsApiKeyIos: process.env.GOOGLE_MAPS_APIKEY_IOS ?? null,
+    // Stripe microservice connection (Phase 6 turn 2). Same out-of-bundle
+    // pattern as the Maps keys. The API key is an APP-LEVEL bearer token
+    // the stripe-server uses to authenticate this app — not Stripe's
+    // secret key, which lives only on the server. Treat as semi-sensitive
+    // (rotate on any leak); without both env vars set the DI container
+    // falls back to `FakeStripeServerService`.
+    stripeServerUrl: process.env.STRIPE_SERVER_URL ?? null,
+    stripeServerApiKey: process.env.STRIPE_SERVER_API_KEY ?? null,
   },
   experiments: {
     typedRoutes: false,

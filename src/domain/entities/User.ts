@@ -1,8 +1,11 @@
 import type { Email } from './Email';
+import type { PaymentMethodId } from './PaymentMethodId';
 import type { PersonName } from './PersonName';
 import type { PhoneNumber } from './PhoneNumber';
 import type { Role } from './Role';
 import type { SavedPlace, SavedPlaceId } from './SavedPlace';
+import type { StripeAccountId } from './StripeAccountId';
+import type { StripeCustomerId } from './StripeCustomerId';
 import type { UserId } from './UserId';
 
 /**
@@ -37,23 +40,33 @@ export interface UserBase {
 }
 
 /**
- * Rider-specific fields. Stripe customer + payment-method state lives here
- * but is populated in Phase 6 (payments). For Phase 1 the field exists as
- * `null` and we don't require it for any rider-facing flow yet.
+ * Rider-specific fields. Stripe customer + payment-method state lives here.
+ * `stripeCustomerId` and `defaultPaymentMethodId` are branded so the type
+ * system rejects passing one in for the other (Phase 6 turn 2 — three
+ * distinct branded ids: customer / account / payment method).
+ *
+ *   - `stripeCustomerId`: populated by `EnsureStripeCustomer` on the first
+ *     Wallet visit (or first card-add). Null until then.
+ *   - `defaultPaymentMethodId`: which saved card the rider has tagged as
+ *     default. `CreateRide` reads this and bakes the string id into the
+ *     trip's `passenger.defaultPaymentMethod` field for the server-side
+ *     fare-charge pipeline.
  */
 export interface Rider extends UserBase {
   readonly role: 'rider';
-  readonly stripeCustomerId: string | null;
+  readonly stripeCustomerId: StripeCustomerId | null;
+  readonly defaultPaymentMethodId: PaymentMethodId | null;
 }
 
 /**
  * Driver-specific fields. Stripe Connect onboarding (account id, charges
- * enabled, payouts enabled) lives here, also populated in Phase 6. Vehicle
+ * enabled, payouts enabled) lives here. `stripeAccountId` is branded
+ * (Phase 6 turn 2) for symmetry with `Rider.stripeCustomerId`. Vehicle
  * ownership and active-vehicle pointer arrive in Phase 5.
  */
 export interface Driver extends UserBase {
   readonly role: 'driver';
-  readonly stripeAccountId: string | null;
+  readonly stripeAccountId: StripeAccountId | null;
   readonly stripeChargesEnabled: boolean;
   readonly stripePayoutsEnabled: boolean;
   readonly activeVehicleId: string | null;
@@ -78,10 +91,14 @@ interface NewUserCommon {
 
 /**
  * Construct a freshly-registered Rider. All Stripe fields default to null —
- * Phase 6 will populate them on first card-add.
+ * Phase 6 populates them via `EnsureStripeCustomer` /
+ * `SetDefaultPaymentMethod`.
  */
 export function makeRider(
-  args: NewUserCommon & { stripeCustomerId?: string | null },
+  args: NewUserCommon & {
+    stripeCustomerId?: StripeCustomerId | null;
+    defaultPaymentMethodId?: PaymentMethodId | null;
+  },
 ): Rider {
   return {
     role: 'rider',
@@ -95,6 +112,7 @@ export function makeRider(
     createdAt: args.createdAt,
     updatedAt: args.updatedAt,
     stripeCustomerId: args.stripeCustomerId ?? null,
+    defaultPaymentMethodId: args.defaultPaymentMethodId ?? null,
   };
 }
 
@@ -104,7 +122,7 @@ export function makeRider(
  */
 export function makeDriver(
   args: NewUserCommon & {
-    stripeAccountId?: string | null;
+    stripeAccountId?: StripeAccountId | null;
     stripeChargesEnabled?: boolean;
     stripePayoutsEnabled?: boolean;
     activeVehicleId?: string | null;
@@ -219,6 +237,75 @@ export function removeSavedPlace(
   const next = user.savedPlaces.filter((p) => p.id !== id);
   if (next.length === user.savedPlaces.length) return user;
   return { ...user, savedPlaces: next, updatedAt: now };
+}
+
+/* ─────────────────────────── Stripe state helpers (Phase 6) ────── */
+
+/**
+ * Set a rider's Stripe customer id (one-shot — `EnsureStripeCustomer`
+ * writes this on the first card-add and never changes it). No-op if the
+ * id is already the same.
+ */
+export function setStripeCustomerId(
+  user: Rider,
+  customerId: StripeCustomerId,
+  now: Date,
+): Rider {
+  if (user.stripeCustomerId !== null && user.stripeCustomerId === customerId) {
+    return user;
+  }
+  return { ...user, stripeCustomerId: customerId, updatedAt: now };
+}
+
+/**
+ * Set or clear a rider's default payment method. `null` clears it (used
+ * by `DetachPaymentMethod` when the detached card was the default).
+ */
+export function setDefaultPaymentMethodId(
+  user: Rider,
+  methodId: PaymentMethodId | null,
+  now: Date,
+): Rider {
+  if (user.defaultPaymentMethodId === methodId) return user;
+  return { ...user, defaultPaymentMethodId: methodId, updatedAt: now };
+}
+
+/**
+ * Set a driver's Stripe Connect account id (one-shot — `EnsureStripeConnectAccount`
+ * writes this on the first onboarding click and never changes it).
+ */
+export function setStripeAccountId(
+  user: Driver,
+  accountId: StripeAccountId,
+  now: Date,
+): Driver {
+  if (user.stripeAccountId !== null && user.stripeAccountId === accountId) {
+    return user;
+  }
+  return { ...user, stripeAccountId: accountId, updatedAt: now };
+}
+
+/**
+ * Update a driver's Stripe Connect onboarding flags. `RefreshConnectAccountStatus`
+ * writes these after the `WebBrowser` onboarding session returns.
+ */
+export function setStripeAccountFlags(
+  user: Driver,
+  flags: { chargesEnabled: boolean; payoutsEnabled: boolean },
+  now: Date,
+): Driver {
+  if (
+    user.stripeChargesEnabled === flags.chargesEnabled &&
+    user.stripePayoutsEnabled === flags.payoutsEnabled
+  ) {
+    return user;
+  }
+  return {
+    ...user,
+    stripeChargesEnabled: flags.chargesEnabled,
+    stripePayoutsEnabled: flags.payoutsEnabled,
+    updatedAt: now,
+  };
 }
 
 /* ─────────────────────────── Type guards ───────────────────────── */

@@ -14,6 +14,19 @@ import { UpdateSavedPlace } from '@app/usecases/auth/UpdateSavedPlace';
 import { UploadAvatar } from '@app/usecases/auth/UploadAvatar';
 import { SubscribeToUserLocation } from '@app/usecases/location/SubscribeToUserLocation';
 import { UpdateUserLocation } from '@app/usecases/location/UpdateUserLocation';
+import { CreateAccountLoginLink } from '@app/usecases/payment/CreateAccountLoginLink';
+import { CreateConnectOnboardingLink } from '@app/usecases/payment/CreateConnectOnboardingLink';
+import { CreateSetupIntent } from '@app/usecases/payment/CreateSetupIntent';
+import { DetachPaymentMethod } from '@app/usecases/payment/DetachPaymentMethod';
+import { EnsureStripeConnectAccount } from '@app/usecases/payment/EnsureStripeConnectAccount';
+import { EnsureStripeCustomer } from '@app/usecases/payment/EnsureStripeCustomer';
+import { GetDriverBalance } from '@app/usecases/payment/GetDriverBalance';
+import { ListBalanceTransactions } from '@app/usecases/payment/ListBalanceTransactions';
+import { ListDriverPayouts } from '@app/usecases/payment/ListDriverPayouts';
+import { ListPaymentMethods } from '@app/usecases/payment/ListPaymentMethods';
+import { ProcessTip } from '@app/usecases/payment/ProcessTip';
+import { RefreshConnectAccountStatus } from '@app/usecases/payment/RefreshConnectAccountStatus';
+import { SetDefaultPaymentMethod } from '@app/usecases/payment/SetDefaultPaymentMethod';
 import { CancelRideByDriver } from '@app/usecases/ride/CancelRideByDriver';
 import { CancelRideByRider } from '@app/usecases/ride/CancelRideByRider';
 import { CreateRide } from '@app/usecases/ride/CreateRide';
@@ -50,8 +63,10 @@ import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@da
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
 import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } from '@data/repositories/FirestoreVehicleRepository';
+import type { CloudFunctionsService as CloudFunctionsServiceType } from '@data/services/CloudFunctionsService';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
 import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
+import type { StripeServerHttpAdapter as StripeServerHttpAdapterType } from '@data/services/StripeServerHttpAdapter';
 import type {
   AuthRepository,
   LocationRepository,
@@ -61,11 +76,18 @@ import type {
   VehicleRepository,
   VehicleStorageRepository,
 } from '@domain/repositories';
-import type { RoutesService, VinDecoderService } from '@domain/services';
-import { getGoogleMapsApiKey } from '@shared/env';
+import type {
+  PaymentCallableService,
+  RoutesService,
+  StripeServerService,
+  VinDecoderService,
+} from '@domain/services';
+import { getGoogleMapsApiKey, getStripeServerConfig } from '@shared/env';
 import { LOG } from '@shared/logger';
 import type {
+  FakeCloudFunctionsService as FakeCloudFunctionsServiceType,
   FakeRoutesService as FakeRoutesServiceType,
+  FakeStripeServerService as FakeStripeServerServiceType,
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
   InMemoryLocationRepository as InMemoryLocationRepositoryType,
   InMemoryRideRepository as InMemoryRideRepositoryType,
@@ -168,6 +190,21 @@ export interface UseCases {
   approveVehicle: ApproveVehicle;
   rejectVehicle: RejectVehicle;
   decodeVin: DecodeVin;
+
+  // Payments / Stripe Connect / tipping (Phase 6 turn 2)
+  ensureStripeCustomer: EnsureStripeCustomer;
+  createSetupIntent: CreateSetupIntent;
+  listPaymentMethods: ListPaymentMethods;
+  setDefaultPaymentMethod: SetDefaultPaymentMethod;
+  detachPaymentMethod: DetachPaymentMethod;
+  ensureStripeConnectAccount: EnsureStripeConnectAccount;
+  createConnectOnboardingLink: CreateConnectOnboardingLink;
+  createAccountLoginLink: CreateAccountLoginLink;
+  refreshConnectAccountStatus: RefreshConnectAccountStatus;
+  getDriverBalance: GetDriverBalance;
+  listDriverPayouts: ListDriverPayouts;
+  listBalanceTransactions: ListBalanceTransactions;
+  processTip: ProcessTip;
 }
 
 export interface Container {
@@ -188,6 +225,8 @@ export function makeUseCases(args: {
   vehicles: VehicleRepository;
   vehiclePhotos: VehicleStorageRepository;
   vinDecoder: VinDecoderService;
+  stripeServer: StripeServerService;
+  paymentCallable: PaymentCallableService;
   clock?: () => Date;
 }): UseCases {
   const clock = args.clock ?? (() => new Date());
@@ -248,6 +287,71 @@ export function makeUseCases(args: {
     approveVehicle: new ApproveVehicle(args.vehicles, clock),
     rejectVehicle: new RejectVehicle(args.vehicles, clock),
     decodeVin: new DecodeVin(args.vinDecoder),
+    ensureStripeCustomer: new EnsureStripeCustomer(
+      args.auth,
+      args.users,
+      args.stripeServer,
+      clock,
+    ),
+    createSetupIntent: new CreateSetupIntent(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    listPaymentMethods: new ListPaymentMethods(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    setDefaultPaymentMethod: new SetDefaultPaymentMethod(
+      args.auth,
+      args.users,
+      clock,
+    ),
+    detachPaymentMethod: new DetachPaymentMethod(
+      args.auth,
+      args.users,
+      args.stripeServer,
+      clock,
+    ),
+    ensureStripeConnectAccount: new EnsureStripeConnectAccount(
+      args.auth,
+      args.users,
+      args.stripeServer,
+      clock,
+    ),
+    createConnectOnboardingLink: new CreateConnectOnboardingLink(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    createAccountLoginLink: new CreateAccountLoginLink(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    refreshConnectAccountStatus: new RefreshConnectAccountStatus(
+      args.auth,
+      args.users,
+      args.stripeServer,
+      clock,
+    ),
+    getDriverBalance: new GetDriverBalance(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    listDriverPayouts: new ListDriverPayouts(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    listBalanceTransactions: new ListBalanceTransactions(
+      args.auth,
+      args.users,
+      args.stripeServer,
+    ),
+    processTip: new ProcessTip(args.auth, args.rides, args.paymentCallable),
   };
 }
 
@@ -270,6 +374,11 @@ export function buildContainer(): Container {
   // and is keyless / read-only, so it ships in every build (Phase 5 Turn 2
   // locked decision: real NHTSA in fakes-only branch too — Q2 confirmed).
   const vinDecoder = buildVinDecoderService();
+
+  // Stripe server adapter is independent of Firebase: a build can have
+  // Stripe configured without Firebase (rare but supported). Same fallback
+  // pattern as routes: real adapter when env keys present, fake otherwise.
+  const stripeServer = buildStripeServerService();
 
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
@@ -297,8 +406,14 @@ export function buildContainer(): Container {
       require('@data/repositories/FirebaseStorageVehiclePhotoRepository') as {
         FirebaseStorageVehiclePhotoRepository: new () => FirebaseStorageVehiclePhotoRepositoryType;
       };
+    const dataCloudFunctions =
+      require('@data/services/CloudFunctionsService') as {
+        CloudFunctionsService: new () => CloudFunctionsServiceType;
+      };
+    const paymentCallable: PaymentCallableService =
+      new dataCloudFunctions.CloudFunctionsService();
     LOG.info(
-      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories',
+      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories + StripeServer + CloudFunctions',
     );
     return {
       useCases: makeUseCases({
@@ -312,11 +427,14 @@ export function buildContainer(): Container {
         vehiclePhotos:
           new dataVehiclePhotos.FirebaseStorageVehiclePhotoRepository(),
         vinDecoder,
+        stripeServer,
+        paymentCallable,
       }),
     };
   }
 
   const testing = require('@shared/testing') as {
+    FakeCloudFunctionsService: new () => FakeCloudFunctionsServiceType;
     InMemoryAuthRepository: new () => InMemoryAuthRepositoryType;
     InMemoryLocationRepository: new () => InMemoryLocationRepositoryType;
     InMemoryRideRepository: new () => InMemoryRideRepositoryType;
@@ -326,7 +444,7 @@ export function buildContainer(): Container {
     InMemoryVehiclePhotoRepository: new () => InMemoryVehiclePhotoRepositoryType;
   };
   LOG.warn(
-    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides/locations/vehicles. ' +
+    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides/locations/vehicles + FakeCloudFunctionsService. ' +
       'No data will persist. See docs/FIREBASE_SETUP.md.',
   );
   return {
@@ -340,6 +458,8 @@ export function buildContainer(): Container {
       vehicles: new testing.InMemoryVehicleRepository(),
       vehiclePhotos: new testing.InMemoryVehiclePhotoRepository(),
       vinDecoder,
+      stripeServer,
+      paymentCallable: new testing.FakeCloudFunctionsService(),
     }),
   };
 }
@@ -387,6 +507,41 @@ function buildVinDecoderService(): VinDecoderService {
     NhtsaVinDecoderService: new () => NhtsaVinDecoderServiceType;
   };
   return new dataVinDecoder.NhtsaVinDecoderService();
+}
+
+/**
+ * Pick the right StripeServerService for the build:
+ *   - Both `STRIPE_SERVER_URL` and `STRIPE_SERVER_API_KEY` resolved →
+ *     real `StripeServerHttpAdapter`.
+ *   - Either missing → `FakeStripeServerService` (development convenience).
+ *
+ * Lazy-required from the appropriate side so the bundle never pulls
+ * `StripeServerHttpAdapter` into a fakes-only build, and never pulls the
+ * fake into a release build with real env.
+ */
+function buildStripeServerService(): StripeServerService {
+  const config = getStripeServerConfig();
+  if (config !== null) {
+    const dataAdapter = require('@data/services/StripeServerHttpAdapter') as {
+      StripeServerHttpAdapter: new (config: {
+        baseUrl: string;
+        apiKey: string;
+      }) => StripeServerHttpAdapterType;
+    };
+    LOG.info('Container using StripeServerHttpAdapter');
+    return new dataAdapter.StripeServerHttpAdapter({
+      baseUrl: config.url,
+      apiKey: config.apiKey,
+    });
+  }
+  const testing = require('@shared/testing') as {
+    FakeStripeServerService: new () => FakeStripeServerServiceType;
+  };
+  LOG.warn(
+    'Stripe server env not configured (STRIPE_SERVER_URL / STRIPE_SERVER_API_KEY) ' +
+      '— using FakeStripeServerService. Payments will fail loudly until env is set.',
+  );
+  return new testing.FakeStripeServerService();
 }
 
 function isFirebaseConfigured(): boolean {

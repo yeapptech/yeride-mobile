@@ -1,4 +1,9 @@
 export { TestContainerProvider } from './TestContainerProvider';
+export { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
+export type {
+  CloudFunctionsMethod,
+  FakeCloudFunctionsSpies,
+} from './FakeCloudFunctionsService';
 export { FakeRoutesService } from './FakeRoutesService';
 export { FakeStripeServerService } from './FakeStripeServerService';
 export type { FakeStripeServerSpies } from './FakeStripeServerService';
