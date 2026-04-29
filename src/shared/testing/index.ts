@@ -1,5 +1,7 @@
 export { TestContainerProvider } from './TestContainerProvider';
 export { FakeRoutesService } from './FakeRoutesService';
+export { FakeStripeServerService } from './FakeStripeServerService';
+export type { FakeStripeServerSpies } from './FakeStripeServerService';
 export { FakeVinDecoderService } from './FakeVinDecoderService';
 export { InMemoryAuthRepository } from './InMemoryAuthRepository';
 export { InMemoryLocationRepository } from './InMemoryLocationRepository';

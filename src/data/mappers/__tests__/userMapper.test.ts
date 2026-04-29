@@ -1,7 +1,12 @@
 import { Email } from '@domain/entities/Email';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
-import { isDriver, isRider, makeRider } from '@domain/entities/User';
+import {
+  isDriver,
+  isRider,
+  makeDriver,
+  makeRider,
+} from '@domain/entities/User';
 import { UserId } from '@domain/entities/UserId';
 
 import { parseUserDoc, toDoc, toDomain } from '../userMapper';
@@ -273,5 +278,108 @@ describe('toDoc', () => {
     });
     const doc = toDoc(user);
     expect(doc.phoneNumber).toBeNull();
+  });
+});
+
+describe('legacy nested stripe shape on driver docs', () => {
+  it('reads the legacy nested stripe object when flat fields are absent', () => {
+    // This is what an existing legacy-yeride driver currently has on disk.
+    const parsed = parseUserDoc({
+      email: 'driver@yeapp.tech',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      role: 'driver',
+      createdDateTime: FIXED_NOW.toISOString(),
+      stripe: {
+        id: 'acct_legacyABC',
+        charges_enabled: true,
+        payouts_enabled: false,
+        // Stripe response carries many other fields — they should
+        // round-trip through passthrough without affecting the parse.
+        country: 'US',
+        default_currency: 'usd',
+      },
+    });
+    if (!parsed.ok) throw parsed.error;
+
+    const r = toDomain(uid(), parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok && isDriver(r.value)) {
+      expect(r.value.stripeAccountId).toBe('acct_legacyABC');
+      expect(r.value.stripeChargesEnabled).toBe(true);
+      expect(r.value.stripePayoutsEnabled).toBe(false);
+    }
+  });
+
+  it('prefers flat fields when both flat and nested are present (rewrite has won the cleanup)', () => {
+    const parsed = parseUserDoc({
+      email: 'driver@yeapp.tech',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      role: 'driver',
+      createdDateTime: FIXED_NOW.toISOString(),
+      stripeAccountId: 'acct_FLAT_NEW',
+      stripeChargesEnabled: true,
+      stripePayoutsEnabled: true,
+      stripe: {
+        id: 'acct_NESTED_OLD',
+        charges_enabled: false,
+        payouts_enabled: false,
+      },
+    });
+    if (!parsed.ok) throw parsed.error;
+
+    const r = toDomain(uid(), parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok && isDriver(r.value)) {
+      expect(r.value.stripeAccountId).toBe('acct_FLAT_NEW');
+      expect(r.value.stripeChargesEnabled).toBe(true);
+      expect(r.value.stripePayoutsEnabled).toBe(true);
+    }
+  });
+
+  it('writes both flat fields and the nested stripe shape on driver docs (legacy compatibility)', () => {
+    const emailR = Email.create('driver@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Grace', last: 'Hopper' });
+    if (!emailR.ok || !nameR.ok) throw new Error('setup');
+    const driver = makeDriver({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+      stripeAccountId: 'acct_RIDER',
+      stripeChargesEnabled: true,
+      stripePayoutsEnabled: false,
+    });
+    const doc = toDoc(driver);
+
+    if (doc.role !== 'driver') throw new Error('expected driver doc');
+    expect(doc.stripeAccountId).toBe('acct_RIDER');
+    expect(doc.stripeChargesEnabled).toBe(true);
+    expect(doc.stripePayoutsEnabled).toBe(false);
+    // Legacy nested shape also written, so legacy yeride keeps reading state.
+    expect(doc.stripe).toEqual({
+      id: 'acct_RIDER',
+      charges_enabled: true,
+      payouts_enabled: false,
+    });
+  });
+
+  it('omits the nested stripe shape when the driver has no Stripe Connect account yet', () => {
+    const emailR = Email.create('driver@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Grace', last: 'Hopper' });
+    if (!emailR.ok || !nameR.ok) throw new Error('setup');
+    const driver = makeDriver({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+    const doc = toDoc(driver);
+    if (doc.role !== 'driver') throw new Error('expected driver doc');
+    expect(doc.stripeAccountId).toBeNull();
+    expect(doc.stripe).toBeNull();
   });
 });

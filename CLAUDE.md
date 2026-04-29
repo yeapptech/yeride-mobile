@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 29, 2026 (Phase 5 turn 4 — Phase 5 closed)
+**Last updated:** April 29, 2026 (Phase 6 turn 1 — domain + DTO + fakes shipped)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,16 +9,20 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-**Phase 5 closed.** Turn 4 shipped the driver-facing photo upload +
-read-only detail surfaces and retired the `'vehicle-stub'` literal from
-`useDriverHomeViewModel`. The full vehicle-management journey is now
-end-to-end: a signed-in driver can register a vehicle, edit photos
-(library picker via `expo-image-picker` → Firebase Storage), set the
-active vehicle, and soft-delete — all gated through the 9
-authorization-aware use cases shipped in Turn 2. DriverHome surfaces an
-empty-state "Register a vehicle" prompt when the driver has no active
-vehicle, and the active vehicle's stock photo when they do. Phase 6
-(Payments / Stripe Connect / tipping) is next.
+**Phase 6 turn 1 shipped.** Pure domain + data-layer foundation for
+Payments / Stripe Connect / tipping: three branded Stripe IDs
+(`StripeCustomerId`, `StripeAccountId`, `PaymentMethodId`), four payment
+value objects (`PaymentMethod` with `normalizeCardBrand` + `isExpired`,
+`Payout`, `BalanceTransaction` with `net = amount - fee` invariant,
+`StripeAccountStatus` 4-arm union + `deriveStripeAccountStatus`
+helper), the 11-method `StripeServerService` interface, and a
+seed/spy/failNext-equipped `FakeStripeServerService` in `@shared/testing`.
+The `UserDoc` DTO + `userMapper` are patched to read AND write the
+legacy nested `stripe: { id, charges_enabled, payouts_enabled }` shape
+alongside the canonical flat fields, so existing legacy drivers
+hydrate correctly and legacy yeride keeps reading state the rewrite
+writes. No use cases or UI yet — those land in turn 2 (real adapter,
+the 12 use cases, and DI wiring) and turns 3-5 (Wallet, Earnings, tip).
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -41,7 +45,11 @@ vehicle, and the active vehicle's stock photo when they do. Phase 6
 | 5 turn 2  | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring            | ✅                             |
 | 5 turn 3  | VehicleList + VehicleRegistration screens                                        | ✅                             |
 | 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                         | ✅                             |
-| 6         | Payments / Stripe Connect / tipping                                              | Next                           |
+| 6 turn 1  | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake        | ✅                             |
+| 6 turn 2  | `StripeServerHttpAdapter` + `tipDriver` callable + 12 use cases + DI wiring      | Next                           |
+| 6 turn 3  | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)     | Pending                        |
+| 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)        | Pending                        |
+| 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup                                        | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
 | 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
@@ -96,6 +104,20 @@ joins the dep set; permission strings live in `app.config.ts` and a
 fresh `npm run prebuild` is required before the next iOS / Android
 build.
 
+End of Phase 6 turn 1 acceptance: **115 test suites / 877 tests passing**
+(+8 suites / +78 tests over Phase 5 turn 4's 107/799); typecheck, lint,
+format, and test all green. No new deps, no native config changes, no
+DI-container changes. The 11-method `StripeServerService` interface +
+the 4 payment value objects + 3 branded Stripe IDs are in place; the
+`FakeStripeServerService` covers every method with seed/spy/failNext
+seams and idempotent `createCustomer` mirroring the real
+`/customers-create` endpoint. Critical hygiene fix: `userMapper` now
+reads the legacy nested `users/{uid}.stripe = { id, charges_enabled,
+payouts_enabled }` shape that existing legacy drivers actually have on
+disk, falling back from the canonical flat fields when those are
+absent, and writes BOTH shapes for legacy yeride co-existence under
+`setDoc { merge: true }`.
+
 ## Tech stack
 
 | Category          | Choice                                                                                                                                    |
@@ -118,9 +140,10 @@ build.
 ```
 src/
 ├── domain/         ← entities, value objects, repository INTERFACES, errors, services
-│   ├── entities/   ← 27 value objects + entities (User, Money, Coordinates, ServiceArea,
+│   ├── entities/   ← value objects + entities (User, Money, Coordinates, ServiceArea,
 │   │                 RideService, Route, Ride, RideStatus, UserLocation, TripEvent,
-│   │                 TripPayment, ChatMessage, branded IDs, snapshots, …)
+│   │                 TripPayment, ChatMessage, Vehicle, PaymentMethod, Payout,
+│   │                 BalanceTransaction, StripeAccountStatus, branded IDs, snapshots, …)
 │   ├── repositories/ ← AuthRepository, UserRepository, ServiceAreaRepository,
 │   │                 RideRepository, LocationRepository (interfaces only)
 │   ├── services/   ← RoutesService (interface), FareCalculator (pure-math implementation)
@@ -368,39 +391,50 @@ rewrite reads what legacy writes and vice versa. This means:
   the rewrite doesn't track yet.
 - Cloud Functions are deployed once and called by both apps — keep
   function signatures byte-identical.
+- **Driver Stripe Connect state lives in two shapes on disk** — legacy
+  yeride writes the FULL `stripe.accounts.create` response spread into
+  `users/{uid}.stripe = { id, charges_enabled, payouts_enabled, … }`,
+  while the rewrite emits both that nested shape AND canonical flat
+  fields (`stripeAccountId / stripeChargesEnabled / stripePayoutsEnabled`).
+  `userMapper` reads either, prefers flat, and writes both. Don't drop
+  the dual-write until legacy yeride is retired (Phase 10).
 
 Production (post-cutover): fresh `yeapp-prod` Firebase project, only the
 new app writes to it.
 
 ## Critical files
 
-| File                                                                              | Purpose                                                                                                                                |
-| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `REFACTOR_PLAN.md`                                                                | Phased migration roadmap, decisions, target architecture                                                                               |
-| `docs/PHASE_1_TURN_2.md`                                                          | What shipped through Phase 1                                                                                                           |
-| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                               | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                                                          |
-| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`                | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                                                         |
-| `docs/PHASE_5_KICKOFF.md` + `docs/PHASE_5_TURN_{1,2,3,4}.md`                      | Phase 5 turn-by-turn record — read newest first when picking up vehicle work                                                           |
-| `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                                                    |
-| `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting)                            |
-| `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                                             |
-| `src/presentation/di/container.ts`                                                | The composition root — single place where all repo + service wiring lives                                                              |
-| `src/presentation/navigation/RootNavigator.tsx`                                   | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                                                         |
-| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`                   | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen                                         |
-| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`                | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                                             |
-| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts`       | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule                                       |
-| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`           | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)                                |
-| `src/domain/entities/Ride.ts`                                                     | The trip aggregate + state machine. Most-touched domain entity                                                                         |
-| `src/data/repositories/FirestoreRideRepository.ts`                                | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                                                          |
-| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                                                   |
-| `src/shared/testing/InMemoryRideRepository.ts`                                    | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                                                          |
-| `src/domain/entities/Vehicle.ts`                                                  | Vehicle aggregate + status state machine; VIN as identity                                                                              |
-| `src/domain/services/VehicleClassifier.ts`                                        | Pure-math manual-entry classifier + `computeEligibleServices` (parity with NHTSA path)                                                 |
-| `src/data/repositories/FirestoreVehicleRepository.ts`                             | write-batch cross-aggregate writes + per-VIN fan-out subscribe                                                                         |
-| `src/presentation/features/driver/view-models/useVehicleRegistrationViewModel.ts` | Tagged-union form state machine; 400ms VIN debounce; manual / decoded / conflict branches                                              |
-| `src/presentation/features/driver/view-models/useVehiclePhotosViewModel.ts`       | Per-tile upload state machine — `inFlight` / `errors` keyed on `VehiclePhotoType` + `useUploadVehiclePhotosMutation` via `mutateAsync` |
-| `src/presentation/features/driver/view-models/useVehicleDetailsViewModel.ts`      | Read-only detail VM — composes `useVehicleQuery` + setActive / delete mutations + `Alert.alert` confirmation                           |
-| `src/presentation/queries/vehicle.queries.ts`                                     | All vehicle TanStack hooks — VIN decode + register / setActive / delete / upload mutations + byVin / activeForDriver reads             |
+| File                                                                              | Purpose                                                                                                                                                                      |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REFACTOR_PLAN.md`                                                                | Phased migration roadmap, decisions, target architecture                                                                                                                     |
+| `docs/PHASE_1_TURN_2.md`                                                          | What shipped through Phase 1                                                                                                                                                 |
+| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                               | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                                                                                                |
+| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`                | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                                                                                               |
+| `docs/PHASE_5_KICKOFF.md` + `docs/PHASE_5_TURN_{1,2,3,4}.md`                      | Phase 5 turn-by-turn record — read newest first when picking up vehicle work                                                                                                 |
+| `docs/PHASE_6_KICKOFF.md` + `docs/PHASE_6_TURN_{1,…}.md`                          | Phase 6 turn-by-turn record — read newest first when picking up payments / Stripe / tipping work                                                                             |
+| `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                                                                                          |
+| `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting)                                                                  |
+| `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                                                                                   |
+| `src/presentation/di/container.ts`                                                | The composition root — single place where all repo + service wiring lives                                                                                                    |
+| `src/presentation/navigation/RootNavigator.tsx`                                   | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                                                                                               |
+| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`                   | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen                                                                               |
+| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`                | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                                                                                   |
+| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts`       | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule                                                                             |
+| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`           | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)                                                                      |
+| `src/domain/entities/Ride.ts`                                                     | The trip aggregate + state machine. Most-touched domain entity                                                                                                               |
+| `src/data/repositories/FirestoreRideRepository.ts`                                | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                                                                                                |
+| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                                                                                         |
+| `src/shared/testing/InMemoryRideRepository.ts`                                    | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                                                                                                |
+| `src/domain/entities/Vehicle.ts`                                                  | Vehicle aggregate + status state machine; VIN as identity                                                                                                                    |
+| `src/domain/services/VehicleClassifier.ts`                                        | Pure-math manual-entry classifier + `computeEligibleServices` (parity with NHTSA path)                                                                                       |
+| `src/data/repositories/FirestoreVehicleRepository.ts`                             | write-batch cross-aggregate writes + per-VIN fan-out subscribe                                                                                                               |
+| `src/presentation/features/driver/view-models/useVehicleRegistrationViewModel.ts` | Tagged-union form state machine; 400ms VIN debounce; manual / decoded / conflict branches                                                                                    |
+| `src/presentation/features/driver/view-models/useVehiclePhotosViewModel.ts`       | Per-tile upload state machine — `inFlight` / `errors` keyed on `VehiclePhotoType` + `useUploadVehiclePhotosMutation` via `mutateAsync`                                       |
+| `src/presentation/features/driver/view-models/useVehicleDetailsViewModel.ts`      | Read-only detail VM — composes `useVehicleQuery` + setActive / delete mutations + `Alert.alert` confirmation                                                                 |
+| `src/presentation/queries/vehicle.queries.ts`                                     | All vehicle TanStack hooks — VIN decode + register / setActive / delete / upload mutations + byVin / activeForDriver reads                                                   |
+| `src/domain/services/StripeServerService.ts`                                      | 11-method interface over the YeRide Stripe microservice (Phase 6 turn 1) — covers customers, setup intents, payment methods, Connect, balance, payouts, balance transactions |
+| `src/shared/testing/FakeStripeServerService.ts`                                   | Programmable in-memory `StripeServerService` with seed seams, spy bookkeeping, `failNext` priming, idempotent `createCustomer` (Phase 6 turn 1)                              |
+| `src/data/dto/UserDoc.ts` + `src/data/mappers/userMapper.ts`                      | Driver doc accepts BOTH legacy nested `stripe: { id, charges_enabled, payouts_enabled }` AND canonical flat fields; mapper writes both shapes for legacy yeride co-existence |
 
 ## Build & deployment
 
@@ -746,10 +780,18 @@ Vehicle repository         → src/data/repositories/FirestoreVehicleRepository.
 Vehicle photos repository  → src/data/repositories/FirebaseStorageVehiclePhotoRepository.ts
 
 Routes service             → src/data/services/GoogleRoutesService.ts
-Cloud Functions            → src/data/services/CloudFunctionsService.ts (us-east1)
+Cloud Functions            → src/data/services/CloudFunctionsService.ts (us-east1; tipDriver added in phase 6 turn 2)
 NHTSA VIN decoder          → src/data/services/NhtsaVinDecoderService.ts (keyless vPIC + SafetyRatings)
 VehicleClassifier (domain) → src/domain/services/VehicleClassifier.ts (manual-entry classifier — phase 5 turn 3)
+StripeServerService (domain) → src/domain/services/StripeServerService.ts (interface only — phase 6 turn 1)
+StripeServerHttpAdapter    → src/data/services/StripeServerHttpAdapter.ts (phase 6 turn 2 — fetch-backed real impl)
 expo-image-picker          → expo-image-picker@~55.0.19 (phase 5 turn 4 — library picker for VehiclePhotos)
+@stripe/stripe-react-native → phase 6 turn 3 (Wallet UI — CardForm + confirmSetupIntent)
+expo-web-browser           → phase 6 turn 4 (Connect onboarding — openAuthSessionAsync)
+
+Stripe IDs (branded)       → src/domain/entities/{StripeCustomerId,StripeAccountId,PaymentMethodId}.ts
+Payment value objects      → src/domain/entities/{PaymentMethod,Payout,BalanceTransaction,StripeAccountStatus}.ts
+Payment use cases          → src/app/usecases/payment/*.ts                (12 — phase 6 turn 2)
 
 Session store              → src/presentation/stores/useSessionStore.ts
 Service-area store         → src/presentation/stores/useServiceAreaStore.ts
@@ -816,5 +858,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_4_TURN_5.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_6_TURN_1.md`),
 then ask.

@@ -11,3 +11,4 @@ export {
   type CheckManualEligibilityArgs,
 } from './VehicleClassifier';
 export type { VinDecodeResult, VinDecoderService } from './VinDecoderService';
+export type { StripeServerService } from './StripeServerService';

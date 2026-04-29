@@ -77,12 +77,28 @@ export function toDoc(user: User): UserDoc {
       stripeCustomerId: user.stripeCustomerId,
     };
   }
+  // Drivers get BOTH the flat (canonical) and legacy-nested Stripe shapes.
+  // The legacy yeride app reads `user.stripe.id` (see
+  // `src/driver/screens/Earnings.js`), so we keep writing the nested shape
+  // under `setDoc { merge: true }` to stay backward-compatible. Writing the
+  // flat fields too means the rewrite's reads stay fast (no nested
+  // traversal) and a future cleanup migration can drop the nested shape
+  // without coordinated client updates.
+  const nestedStripe =
+    user.stripeAccountId !== null
+      ? {
+          id: user.stripeAccountId,
+          charges_enabled: user.stripeChargesEnabled,
+          payouts_enabled: user.stripePayoutsEnabled,
+        }
+      : null;
   return {
     ...base,
     role: 'driver' as const,
     stripeAccountId: user.stripeAccountId,
     stripeChargesEnabled: user.stripeChargesEnabled,
     stripePayoutsEnabled: user.stripePayoutsEnabled,
+    stripe: nestedStripe,
     activeVehicleId: user.activeVehicleId,
     vehicleIds: [...user.vehicleIds],
   };
@@ -152,12 +168,25 @@ export function toDomain(
       }),
     );
   }
+
+  // Stripe Connect: prefer the rewrite's flat fields; fall back to the
+  // legacy nested `stripe` object if the flat fields aren't present.
+  // Either source can be missing — both round-trip through `null` /
+  // `false` defaults.
+  const flatAccountId = doc.stripeAccountId ?? null;
+  const nested = doc.stripe ?? null;
+  const stripeAccountId = flatAccountId ?? nested?.id ?? null;
+  const stripeChargesEnabled =
+    doc.stripeChargesEnabled ?? nested?.charges_enabled ?? false;
+  const stripePayoutsEnabled =
+    doc.stripePayoutsEnabled ?? nested?.payouts_enabled ?? false;
+
   return Result.ok(
     makeDriver({
       ...common,
-      stripeAccountId: doc.stripeAccountId ?? null,
-      stripeChargesEnabled: doc.stripeChargesEnabled ?? false,
-      stripePayoutsEnabled: doc.stripePayoutsEnabled ?? false,
+      stripeAccountId,
+      stripeChargesEnabled,
+      stripePayoutsEnabled,
       activeVehicleId: doc.activeVehicleId ?? null,
       vehicleIds: doc.vehicleIds,
     }),

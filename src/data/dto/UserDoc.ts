@@ -16,8 +16,18 @@ import { z } from 'zod';
  *   - `avatar` (URL string) — kept.
  *   - `savedPlaces[].place_id` — kept; the new `id` is an alias.
  *
+ * Legacy Stripe fields (Phase 6 reads + writes both shapes):
+ *   - Riders store the Stripe customer flat as `stripeCustomerId` (legacy
+ *     and rewrite agree — see legacy `src/auth/screens/Register.js:103` and
+ *     `Wallet.js`).
+ *   - Drivers historically store the Stripe Connect account NESTED as
+ *     `stripe: { id, charges_enabled, payouts_enabled, ... }` (legacy
+ *     spreads the full Stripe `accounts.create` response into the user
+ *     doc — see `Register.js:455` and `Earnings.js:110`). The rewrite
+ *     reads either shape, prefers the flat fields, and writes both for
+ *     legacy compatibility under `setDoc { merge: true }`.
+ *
  * Fields not yet populated in the rewrite:
- *   - Stripe customer/account/charges/payouts — Phase 6.
  *   - vehicleIds / activeVehicleId — Phase 5.
  *   - pushToken — Phase 9.
  */
@@ -51,11 +61,36 @@ const RiderDocSchema = BaseUserDocSchema.extend({
   stripeCustomerId: z.string().nullish(),
 });
 
+/**
+ * Legacy nested Stripe Connect shape produced by the original yeride
+ * Register flow. The full Stripe `accounts.create` response is spread into
+ * the user doc, so we accept the four fields the rewrite cares about and
+ * leave the rest opaque via `passthrough()` so writes don't strip them.
+ *
+ * Field names use Stripe's snake_case (`charges_enabled` /
+ * `payouts_enabled`) because that's what gets spread in.
+ */
+const LegacyStripeDriverNestedSchema = z
+  .object({
+    id: z.string().min(1),
+    charges_enabled: z.boolean().nullish(),
+    payouts_enabled: z.boolean().nullish(),
+  })
+  .passthrough();
+
+export type LegacyStripeDriverNested = z.infer<
+  typeof LegacyStripeDriverNestedSchema
+>;
+
 const DriverDocSchema = BaseUserDocSchema.extend({
   role: z.literal('driver'),
+  // Canonical (rewrite-written) flat fields:
   stripeAccountId: z.string().nullish(),
   stripeChargesEnabled: z.boolean().nullish(),
   stripePayoutsEnabled: z.boolean().nullish(),
+  // Legacy nested shape — accepted on read; mapper folds into the flat
+  // fields below if the flat fields are absent.
+  stripe: LegacyStripeDriverNestedSchema.nullish(),
   activeVehicleId: z.string().nullish(),
   vehicleIds: z.array(z.string()).default([]),
 });
