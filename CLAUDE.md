@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 28, 2026 (Phase 5 turn 2)
+**Last updated:** April 28, 2026 (Phase 5 turn 3)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -9,17 +9,22 @@ Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
 
-Phase 5 turn 2 complete. Turn 1 shipped the Vehicle domain + DTO + 3
+Phase 5 turn 3 complete. Turn 1 shipped the Vehicle domain + DTO + 3
 in-memory fakes. Turn 2 shipped real adapters
 (`FirestoreVehicleRepository`, `FirebaseStorageVehiclePhotoRepository`,
-`NhtsaVinDecoderService`), the 9 vehicle-management use cases
-(`RegisterVehicle`, `ListDriverVehicles`, `GetVehicle`,
-`SetActiveVehicle`, `UploadVehiclePhotos`, `DeleteVehicle`,
-`ApproveVehicle`, `RejectVehicle`, `DecodeVin`), and the DI +
-TestContainerProvider wiring. Phase 4 (driver UI) is complete behind
+`NhtsaVinDecoderService`), the 9 vehicle-management use cases, and the
+DI / TestContainerProvider wiring. Turn 3 shipped the driver-facing
+UI: `VehicleClassifier` domain service (manual-entry classifier +
+eligible-services map), the vehicle queries layer (decode + register +
+setActive + delete mutations), `useVehicleListViewModel` +
+`useVehicleRegistrationViewModel`, the `VehicleListScreen` +
+`VehicleRegistrationScreen` screens, four supporting components
+(`DriverVehicleCard`, `VinEntryStep`, `DecodedPreviewStep`,
+`ManualEntryStep`), and a role-gated "My vehicles" entry inside the
+shared `UserProfileScreen`. Phase 4 (driver UI) is complete behind
 this. Phase 3 shipped the full rider journey end-to-end against real
-Firebase. Phase 5 turn 3 (VehicleList + VehicleRegistration screens) is
-next.
+Firebase. Phase 5 turn 4 (VehiclePhotos + VehicleDetails + retire
+`'vehicle-stub'`) is next.
 
 | Phase     | Scope                                                                            | Status                         |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -40,8 +45,8 @@ next.
 | 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | ✅                             |
 | 5 turn 1  | Vehicle domain + DTO + mappers + in-memory fakes                                 | ✅                             |
 | 5 turn 2  | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring            | ✅                             |
-| 5 turn 3  | VehicleList + VehicleRegistration screens                                        | Next                           |
-| 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                         | —                              |
+| 5 turn 3  | VehicleList + VehicleRegistration screens                                        | ✅                             |
+| 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                         | Next                           |
 | 6         | Payments / Stripe Connect / tipping                                              | Pending                        |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
 | 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
@@ -65,6 +70,21 @@ NHTSA adapters in production builds, in-memory fakes + real keyless
 NHTSA in dev / test builds, and `InMemoryVehicleRepository` /
 `InMemoryVehiclePhotoRepository` / `FakeVinDecoderService` overridable
 via `TestContainerProvider`.
+
+End of Phase 5 turn 3 acceptance: **102 test suites / 772 tests passing**
+(+5 suites / +64 tests over Phase 5 turn 2's 97/708); typecheck, lint,
+format, and test all green. A signed-in driver can open Profile → tap
+"My vehicles" → see their list (or empty-state CTA) → tap "Add vehicle"
+→ enter a VIN → see the decoded preview (or fall through to manual
+entry on no-match / network error) → confirm → land back on the list
+with the new vehicle marked active (first-vehicle auto-active).
+Activate a non-active card by tapping it; trash + Alert-confirm
+soft-deletes. Manual-entry vehicles run through `VehicleClassifier`
+(luxury → xl → crossover → sedan compact/mid-size → wagon → coupe/
+hatchback → economy) and get the same `eligibleServices` list the
+NHTSA path produces. The `'vehicle-stub'` literal in
+`useDriverHomeViewModel` is intentionally still in place — Turn 4
+retires it once the photos UX lands.
 
 ## Tech stack
 
@@ -344,25 +364,30 @@ new app writes to it.
 
 ## Critical files
 
-| File                                                                        | Purpose                                                                                                     |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `REFACTOR_PLAN.md`                                                          | Phased migration roadmap, decisions, target architecture                                                    |
-| `docs/PHASE_1_TURN_2.md`                                                    | What shipped through Phase 1                                                                                |
-| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                         | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
-| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`          | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
-| `app.config.ts`                                                             | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
-| `scripts/patch-podfile.js`                                                  | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
-| `eslint.config.js`                                                          | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
-| `src/presentation/di/container.ts`                                          | The composition root — single place where all repo + service wiring lives                                   |
-| `src/presentation/navigation/RootNavigator.tsx`                             | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
-| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`             | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen              |
-| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`          | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                  |
-| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts` | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule            |
-| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`     | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)     |
-| `src/domain/entities/Ride.ts`                                               | The trip aggregate + state machine. Most-touched domain entity                                              |
-| `src/data/repositories/FirestoreRideRepository.ts`                          | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
-| `src/data/services/CloudFunctionsService.ts`                                | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
-| `src/shared/testing/InMemoryRideRepository.ts`                              | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
+| File                                                                              | Purpose                                                                                                     |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `REFACTOR_PLAN.md`                                                                | Phased migration roadmap, decisions, target architecture                                                    |
+| `docs/PHASE_1_TURN_2.md`                                                          | What shipped through Phase 1                                                                                |
+| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                               | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                               |
+| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`                | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                              |
+| `docs/PHASE_5_KICKOFF.md` + `docs/PHASE_5_TURN_{1,2,3}.md`                        | Phase 5 turn-by-turn record — read newest first when picking up vehicle work                                |
+| `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                         |
+| `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting) |
+| `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                  |
+| `src/presentation/di/container.ts`                                                | The composition root — single place where all repo + service wiring lives                                   |
+| `src/presentation/navigation/RootNavigator.tsx`                                   | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                              |
+| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`                   | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen              |
+| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`                | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                  |
+| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts`       | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule            |
+| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`           | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)     |
+| `src/domain/entities/Ride.ts`                                                     | The trip aggregate + state machine. Most-touched domain entity                                              |
+| `src/data/repositories/FirestoreRideRepository.ts`                                | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                               |
+| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` (us-east1)                                        |
+| `src/shared/testing/InMemoryRideRepository.ts`                                    | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                               |
+| `src/domain/entities/Vehicle.ts`                                                  | Vehicle aggregate + status state machine; VIN as identity                                                   |
+| `src/domain/services/VehicleClassifier.ts`                                        | Pure-math manual-entry classifier + `computeEligibleServices` (parity with NHTSA path)                      |
+| `src/data/repositories/FirestoreVehicleRepository.ts`                             | write-batch cross-aggregate writes + per-VIN fan-out subscribe                                              |
+| `src/presentation/features/driver/view-models/useVehicleRegistrationViewModel.ts` | Tagged-union form state machine; 400ms VIN debounce; manual / decoded / conflict branches                   |
 
 ## Build & deployment
 
@@ -640,15 +665,20 @@ Routes use cases           → src/app/usecases/route/*.ts           (2: Compute
 Ride lifecycle use cases   → src/app/usecases/ride/*.ts            (~13)
 Location use cases         → src/app/usecases/location/*.ts        (2)
 Trip-tracking use case     → src/app/usecases/trip-tracking/*.ts   (1)
+Vehicle use cases          → src/app/usecases/vehicle/*.ts         (9)
 
 Auth repository            → src/data/repositories/FirebaseAuthRepository.ts
 User repository            → src/data/repositories/FirestoreUserRepository.ts
 ServiceArea repository     → src/data/repositories/FirestoreServiceAreaRepository.ts
 Ride repository            → src/data/repositories/FirestoreRideRepository.ts (largest)
 Location repository        → src/data/repositories/FirestoreLocationRepository.ts (3-retry backoff)
+Vehicle repository         → src/data/repositories/FirestoreVehicleRepository.ts (write-batch + fan-out subscribe)
+Vehicle photos repository  → src/data/repositories/FirebaseStorageVehiclePhotoRepository.ts
 
 Routes service             → src/data/services/GoogleRoutesService.ts
 Cloud Functions            → src/data/services/CloudFunctionsService.ts (us-east1)
+NHTSA VIN decoder          → src/data/services/NhtsaVinDecoderService.ts (keyless vPIC + SafetyRatings)
+VehicleClassifier (domain) → src/domain/services/VehicleClassifier.ts (manual-entry classifier — phase 5 turn 3)
 
 Session store              → src/presentation/stores/useSessionStore.ts
 Service-area store         → src/presentation/stores/useServiceAreaStore.ts
@@ -659,7 +689,8 @@ Chat-UI store              → src/presentation/stores/useChatUiStore.ts (open f
 Root navigator             → src/presentation/navigation/RootNavigator.tsx
 Auth / VerifyEmail navs    → src/presentation/navigation/{AuthNavigator,VerifyEmailNavigator}.tsx
 Rider stack + tabs         → src/presentation/navigation/{RiderNavigator,RiderTabsNavigator}.tsx
-Driver stack               → src/presentation/navigation/DriverNavigator.tsx (placeholder for Phase 4)
+Driver stack               → src/presentation/navigation/DriverNavigator.tsx
+                              (DriverTabs, DriverDispatch, DriverMonitor, UserProfile, Vehicles, VehicleRegistration)
 
 Rider screens              → src/presentation/features/rider/screens/*.tsx
                               RiderHome, RouteSearch, RouteSelect, RideMonitor, RideReceipt,
@@ -670,15 +701,20 @@ Rider view-models          → src/presentation/features/rider/view-models/use*V
 
 Driver screens             → src/presentation/features/driver/screens/*.tsx
                               DriverHome, DriverDispatch, DriverMonitor,
-                              DriverActivityPlaceholder, DriverEarningsPlaceholder
+                              DriverActivityPlaceholder, DriverEarningsPlaceholder,
+                              VehicleList, VehicleRegistration
 Driver status-views        → src/presentation/features/driver/components/
                               {EnRouteToPickup,AtPickup,Started,PaymentRequested,
                                Completed,PaymentFailed}View.tsx
 Driver components          → src/presentation/features/driver/components/
-                              DriverRideCard, DriverRideCardStack
+                              DriverRideCard, DriverRideCardStack,
+                              DriverVehicleCard, VinEntryStep, DecodedPreviewStep, ManualEntryStep
 Driver view-models         → src/presentation/features/driver/view-models/use*ViewModel.ts
+                              (incl. useVehicleListViewModel, useVehicleRegistrationViewModel)
 Driver cancel sheet        → src/presentation/components/trip/DriverCancelReasonSheet.tsx
                               (shared by every cancel-eligible driver status view)
+Vehicle queries            → src/presentation/queries/vehicle.queries.ts
+                              (decode + register + setActive + delete; subscription goes via VM directly)
 
 Driver-status store        → src/presentation/stores/useDriverStatusStore.ts
                               (offline / online_idle / dispatched / on_trip + activeVehicleId)

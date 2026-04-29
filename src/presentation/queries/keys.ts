@@ -150,6 +150,21 @@ export const queryKeys = {
     all: () => ['location'] as const,
     byUser: (userId: UserId) => ['location', 'byUser', String(userId)] as const,
   },
+
+  // ─── Vehicles ─────────────────────────────────────────────────────
+  // The driver's vehicle list is delivered live via
+  // `useFirestoreSubscription` over `ListDriverVehicles.subscribe(...)`,
+  // so we don't keep a TanStack cache for it. The keys here are
+  // primarily for VIN-decode caching and cross-mutation invalidation.
+  vehicle: {
+    all: () => ['vehicle'] as const,
+    /**
+     * VIN decode result, keyed on the VIN string. 5-minute stale time
+     * configured at the query callsite — NHTSA data doesn't change for a
+     * given VIN, so re-decoding within a session is wasted work.
+     */
+    decode: (vin: string) => ['vehicle', 'decode', vin] as const,
+  },
 } as const;
 
 function round5(n: number): number {

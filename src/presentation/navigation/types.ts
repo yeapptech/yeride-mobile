@@ -119,6 +119,19 @@ export type DriverStackParamList = {
    * the tab bar hides while editing — same pattern as the rider stack.
    */
   UserProfile: undefined;
+  /**
+   * Driver vehicle list — reached from the Profile tab via a "Vehicles"
+   * row. Live subscription via `ListDriverVehicles`; tap a non-active
+   * card to activate, tap Delete to soft-delete (Alert-confirmed).
+   * Phase 5 turn 3.
+   */
+  Vehicles: undefined;
+  /**
+   * New-vehicle registration — reached from `Vehicles` via "+ Add
+   * vehicle". VIN decode → confirm-or-edit → manual fallback. Phase 5
+   * turn 3.
+   */
+  VehicleRegistration: undefined;
 };
 
 /**

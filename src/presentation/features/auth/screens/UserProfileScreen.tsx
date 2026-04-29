@@ -1,3 +1,4 @@
+import { useNavigation } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormField } from '@presentation/components/form/FormField';
+import type { DriverStackNavigation } from '@presentation/navigation/types';
 
 import { useUserProfileViewModel } from '../view-models/useUserProfileViewModel';
 
@@ -21,6 +23,10 @@ import { useUserProfileViewModel } from '../view-models/useUserProfileViewModel'
 export function UserProfileScreen() {
   const { user, loading, submitting, error, submit, signOut } =
     useUserProfileViewModel();
+  // Typed against DriverStackNavigation because the only role-gated route
+  // we navigate to is `Vehicles` (driver-only). Riders never see the row,
+  // so the rider-stack typing isn't needed here.
+  const navigation = useNavigation<DriverStackNavigation>();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -133,6 +139,22 @@ export function UserProfileScreen() {
               </Text>
             </View>
           </Pressable>
+
+          {user.role === 'driver' && (
+            <>
+              <View className="mt-8 mb-4 border-t border-border" />
+              <Text className="text-sm text-muted-foreground mb-2">Driver</Text>
+              <Pressable
+                onPress={() => navigation.navigate('Vehicles')}
+                accessibilityRole="button"
+                testID="profile-vehicles-link"
+                className="mb-2 flex-row items-center justify-between rounded-lg border border-border px-4 py-3"
+              >
+                <Text className="text-base text-foreground">My vehicles</Text>
+                <Text className="text-sm text-muted-foreground">›</Text>
+              </Pressable>
+            </>
+          )}
 
           <View className="mt-8 mb-4 border-t border-border" />
 
