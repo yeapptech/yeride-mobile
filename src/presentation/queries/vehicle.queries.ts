@@ -8,7 +8,8 @@ import {
 
 import type { RegisterVehicleArgs } from '@app/usecases/vehicle/RegisterVehicle';
 import type { Vehicle } from '@domain/entities/Vehicle';
-import type { Vin } from '@domain/entities/Vin';
+import type { VehiclePhotoType } from '@domain/entities/VehiclePhotoType';
+import { Vin } from '@domain/entities/Vin';
 import type {
   AuthorizationError,
   ConflictError,
@@ -20,6 +21,7 @@ import type { VinDecodeResult } from '@domain/services';
 import { useUseCases } from '@presentation/di';
 
 import { queryKeys } from './keys';
+import { useCurrentUserQuery } from './user.queries';
 
 /**
  * Vehicle-management queries + mutations. Subscriptions for the driver's
@@ -167,6 +169,125 @@ export function useDeleteVehicleMutation(): UseMutationResult<
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.user.current(),
+      });
+    },
+  });
+}
+
+/**
+ * One-shot read of a single vehicle by VIN. Consumed by
+ * `VehicleDetailsScreen` and `VehiclePhotosScreen`.
+ *
+ * Stale time is short (~30s) so a successful upload (which invalidates
+ * `vehicle.byVin`) refreshes the screen quickly. The query is gated on
+ * `vin !== null` so the hook is safe to mount before the route param has
+ * been validated through `Vin.create`.
+ */
+export function useVehicleQuery(
+  vin: Vin | null,
+): UseQueryResult<Vehicle, NotFoundError> {
+  const useCases = useUseCases();
+  return useQuery({
+    queryKey: vin
+      ? queryKeys.vehicle.byVin(String(vin))
+      : ['vehicle', 'byVin', null],
+    queryFn: async (): Promise<Vehicle> => {
+      // Unreachable when `enabled: false` — TanStack guards this — but
+      // satisfies the type checker without a non-null assertion.
+      if (!vin) throw new Error('useVehicleQuery: vin required');
+      const r = await useCases.getVehicle.execute({ vin });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    enabled: vin !== null,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * The signed-in driver's currently-active vehicle. Composes
+ * `useCurrentUserQuery` + `GetVehicle`: reads the user doc, derives
+ * `activeVehicleId`, parses it back into a `Vin`, then fetches the
+ * vehicle. Returns `null` when the driver has no active vehicle (the
+ * empty-state branch on `DriverHome`) or when the user is loading / not
+ * a driver.
+ *
+ * Why a dedicated hook instead of two chained `useVehicleQuery` calls?
+ * The composition keeps the `DriverHome` view-model honest — the screen
+ * doesn't have to coordinate two independent query lifecycles, and the
+ * cache key includes the driverId so the result repaints cleanly when
+ * the active pointer changes (mutations invalidate `user.current`,
+ * which repaints both queries via React subscription).
+ */
+export function useDriverActiveVehicleQuery(): UseQueryResult<
+  Vehicle | null,
+  NotFoundError
+> {
+  const useCases = useUseCases();
+  const userQuery = useCurrentUserQuery();
+  const driverId = userQuery.data?.role === 'driver' ? userQuery.data.id : null;
+  const activeVehicleId =
+    userQuery.data?.role === 'driver' ? userQuery.data.activeVehicleId : null;
+
+  return useQuery({
+    queryKey: driverId
+      ? queryKeys.vehicle.activeForDriver(driverId)
+      : ['vehicle', 'activeForDriver', null],
+    queryFn: async (): Promise<Vehicle | null> => {
+      if (activeVehicleId === null) return null;
+      const vinR = Vin.create(activeVehicleId);
+      // Defensive: legacy data may have a malformed VIN. Treat as "no
+      // active vehicle" rather than crashing the home screen.
+      if (!vinR.ok) return null;
+      const r = await useCases.getVehicle.execute({ vin: vinR.value });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    enabled: driverId !== null,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Upload a single vehicle photo (or several at once — but the photos UI
+ * fires per-tile).
+ *
+ * The use case handles auth + ownership + sequential upload-then-attach;
+ * the mutation just maps `Result` to a Promise and invalidates
+ * `vehicle.byVin` so the photos / details screens re-read the new URLs.
+ *
+ * Per-tile mutation isolation in `useVehiclePhotosViewModel` is achieved
+ * by maintaining an independent `useUploadVehiclePhotosMutation` per
+ * tile. Each tile's hook has its own `isPending` / `error` state so the
+ * grid can render per-tile spinners.
+ */
+export interface UploadVehiclePhotosInput {
+  readonly vin: Vin;
+  readonly photos: Partial<Record<VehiclePhotoType, string>>;
+}
+
+export function useUploadVehiclePhotosMutation(): UseMutationResult<
+  Vehicle,
+  AuthorizationError | NotFoundError | NetworkError | ValidationError,
+  UploadVehiclePhotosInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Vehicle,
+    AuthorizationError | NotFoundError | NetworkError | ValidationError,
+    UploadVehiclePhotosInput
+  >({
+    mutationFn: async (args: UploadVehiclePhotosInput): Promise<Vehicle> => {
+      const r = await useCases.uploadVehiclePhotos.execute(args);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (vehicle: Vehicle) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.vehicle.byVin(String(vehicle.vin)),
       });
     },
   });

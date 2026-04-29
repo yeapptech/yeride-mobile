@@ -18,13 +18,14 @@ import {
   TestContainerProvider,
 } from '@shared/testing';
 
-import { useVehicleListViewModel } from '../useVehicleListViewModel';
+import { useVehicleDetailsViewModel } from '../useVehicleDetailsViewModel';
 
 /* ─── Test mocks ──────────────────────────────────────────────────── */
 
 const mockNavigate = jest.fn();
+const mockGoBack = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mockNavigate }),
+  useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
 }));
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
@@ -36,11 +37,9 @@ function unwrap<T>(
   return r.value;
 }
 
-const VIN_HONDA = '1HGBH41JXMN109186'; // valid check digit
-const VIN_BMW = '5UXKR0C58JL074657'; // valid check digit
-
+const VIN_HONDA = '1HGBH41JXMN109186';
+const VIN_BMW = '5UXKR0C58JL074657';
 const FIXED_NOW = new Date('2026-04-28T12:00:00Z');
-const EARLIER = new Date('2026-04-01T12:00:00Z');
 
 function vin(value: string) {
   return unwrap(Vin.create(value));
@@ -50,29 +49,27 @@ function rsid(slug: string) {
   return unwrap(RideServiceId.create(slug));
 }
 
-interface MakeApprovedVehicleArgs {
+interface MakeVehicleArgs {
   readonly vin: string;
-  readonly make?: string;
-  readonly model?: string;
-  readonly year?: number;
+  readonly approved?: boolean;
   readonly vehicleClass?: VehicleClass;
-  readonly createdAt?: Date;
 }
 
-function makeApprovedVehicle(args: MakeApprovedVehicleArgs): Vehicle {
+function makeVehicle(args: MakeVehicleArgs): Vehicle {
   const created = unwrap(
     Vehicle.create({
       vin: vin(args.vin),
-      make: args.make ?? 'Honda',
-      model: args.model ?? 'Accord',
-      year: args.year ?? 2020,
+      make: 'Honda',
+      model: 'Accord',
+      year: 2020,
       vehicleClass: args.vehicleClass ?? 'comfort',
-      eligibleServices: [rsid('economy'), rsid('comfort'), rsid('deliver')],
+      eligibleServices: [rsid('economy'), rsid('comfort')],
       dataSource: 'vin_decoded',
-      createdAt: args.createdAt ?? FIXED_NOW,
+      createdAt: FIXED_NOW,
     }),
   );
-  return unwrap(created.approve(args.createdAt ?? FIXED_NOW));
+  if (args.approved === false) return created;
+  return unwrap(created.approve(FIXED_NOW));
 }
 
 interface SeededState {
@@ -80,16 +77,11 @@ interface SeededState {
   readonly usersRepo: InMemoryUserRepository;
   readonly vehiclesRepo: InMemoryVehicleRepository;
   readonly uid: UserId;
-  /** Re-seed the driver doc with a different `activeVehicleId`. */
-  reseedDriver: (overrides: {
-    readonly activeVehicleId: string | null;
-    readonly vehicleIds: readonly string[];
-  }) => void;
 }
 
-async function setupDriver(opts?: {
-  readonly activeVehicleId?: string | null;
-  readonly seedVehicles?: readonly Vehicle[];
+async function setupDriver(opts: {
+  readonly seedVehicle: Vehicle;
+  readonly activeVehicleId: string | null;
 }): Promise<SeededState> {
   const authRepo = new InMemoryAuthRepository();
   authRepo.seedAccount({ email: 'driver@yeapp.tech', password: 'hunter22' });
@@ -100,48 +92,27 @@ async function setupDriver(opts?: {
   const uid = (await authRepo.currentUserId()) as UserId;
 
   const usersRepo = new InMemoryUserRepository();
-
-  const seedDriverDoc = (
-    activeVehicleId: string | null,
-    vehicleIds: readonly string[],
-  ) => {
-    const driver = makeDriver({
+  usersRepo.seed(
+    makeDriver({
       id: uid,
       email: unwrap(Email.create('driver@yeapp.tech')),
       name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
       createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
-      activeVehicleId,
-      vehicleIds,
-    });
-    usersRepo.seed(driver);
-  };
-
-  seedDriverDoc(
-    opts?.activeVehicleId ?? null,
-    opts?.seedVehicles?.map((v) => String(v.vin)) ?? [],
+      activeVehicleId: opts.activeVehicleId,
+      vehicleIds: [String(opts.seedVehicle.vin)],
+    }),
   );
 
   const vehiclesRepo = new InMemoryVehicleRepository();
-  for (const v of opts?.seedVehicles ?? []) {
-    vehiclesRepo.seed(v, uid);
-  }
-  if (opts?.activeVehicleId !== undefined && opts.activeVehicleId !== null) {
+  vehiclesRepo.seed(opts.seedVehicle, uid);
+  if (opts.activeVehicleId !== null) {
     vehiclesRepo.setActiveDirect(uid, vin(opts.activeVehicleId));
   }
 
-  // Session store carries the userId that useCurrentUserQuery's `enabled`
-  // gate consults. Without this, the user query would never fire.
   useSessionStore.getState().setSignedIn(uid);
 
-  return {
-    authRepo,
-    usersRepo,
-    vehiclesRepo,
-    uid,
-    reseedDriver: ({ activeVehicleId, vehicleIds }) =>
-      seedDriverDoc(activeVehicleId, vehicleIds),
-  };
+  return { authRepo, usersRepo, vehiclesRepo, uid };
 }
 
 function withTestContainer(setup: SeededState) {
@@ -158,78 +129,111 @@ function withTestContainer(setup: SeededState) {
 
 /* ─── Tests ───────────────────────────────────────────────────────── */
 
-describe('useVehicleListViewModel', () => {
+describe('useVehicleDetailsViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    mockGoBack.mockClear();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
 
-  it('starts in loading and resolves to empty for a driver with no vehicles', async () => {
-    const setup = await setupDriver();
-    const { result } = renderHook(() => useVehicleListViewModel(), {
-      wrapper: withTestContainer(setup),
-    });
-
-    await waitFor(() => {
-      expect(result.current.state.kind).toBe('empty');
-    });
-  });
-
-  it('emits ready with the list and the active VIN when the driver has vehicles', async () => {
-    const honda = makeApprovedVehicle({ vin: VIN_HONDA, createdAt: EARLIER });
-    const bmw = makeApprovedVehicle({ vin: VIN_BMW, createdAt: FIXED_NOW });
+  it('reaches ready with isActive=true and canSetActive=false for the active vehicle', async () => {
+    const honda = makeVehicle({ vin: VIN_HONDA });
     const setup = await setupDriver({
-      seedVehicles: [honda, bmw],
+      seedVehicle: honda,
       activeVehicleId: VIN_HONDA,
     });
 
-    const { result } = renderHook(() => useVehicleListViewModel(), {
-      wrapper: withTestContainer(setup),
-    });
+    const { result } = renderHook(
+      () => useVehicleDetailsViewModel({ vin: VIN_HONDA }),
+      { wrapper: withTestContainer(setup) },
+    );
 
     await waitFor(() => {
       expect(result.current.state.kind).toBe('ready');
     });
     if (result.current.state.kind !== 'ready') throw new Error('not ready');
-    // Repo emits createdAt-desc; BMW is newer, so it lands first.
-    expect(result.current.state.vehicles.map((v) => String(v.vin))).toEqual([
-      VIN_BMW,
-      VIN_HONDA,
-    ]);
-    expect(result.current.state.activeVin).toBe(VIN_HONDA);
+    expect(result.current.state.isActive).toBe(true);
+    expect(result.current.state.canSetActive).toBe(false);
+    expect(String(result.current.state.vehicle.vin)).toBe(VIN_HONDA);
   });
 
-  it('onSelectVehicle navigates to VehicleDetails with the VIN (Phase 5 turn 4)', async () => {
-    const honda = makeApprovedVehicle({ vin: VIN_HONDA });
+  it('reaches ready with canSetActive=true for an approved non-active vehicle', async () => {
+    const bmw = makeVehicle({ vin: VIN_BMW });
     const setup = await setupDriver({
-      seedVehicles: [honda],
+      seedVehicle: bmw,
       activeVehicleId: null,
     });
 
-    const { result } = renderHook(() => useVehicleListViewModel(), {
-      wrapper: withTestContainer(setup),
+    const { result } = renderHook(
+      () => useVehicleDetailsViewModel({ vin: VIN_BMW }),
+      { wrapper: withTestContainer(setup) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.state.kind).toBe('ready');
     });
+    if (result.current.state.kind !== 'ready') throw new Error('not ready');
+    expect(result.current.state.isActive).toBe(false);
+    expect(result.current.state.canSetActive).toBe(true);
+  });
+
+  it('onSetActive fires the mutation; canSetActive=false is a no-op', async () => {
+    const bmw = makeVehicle({ vin: VIN_BMW });
+    const setup = await setupDriver({
+      seedVehicle: bmw,
+      activeVehicleId: null,
+    });
+
+    const { result } = renderHook(
+      () => useVehicleDetailsViewModel({ vin: VIN_BMW }),
+      { wrapper: withTestContainer(setup) },
+    );
 
     await waitFor(() => {
       expect(result.current.state.kind).toBe('ready');
     });
 
     act(() => {
-      result.current.onSelectVehicle(vin(VIN_HONDA));
+      result.current.onSetActive();
     });
 
-    expect(mockNavigate).toHaveBeenCalledWith('VehicleDetails', {
-      vin: VIN_HONDA,
+    await waitFor(() => {
+      expect(setup.vehiclesRepo.spies.setActive).toBe(1);
     });
-    // The list VM no longer fires setActive — that moved to
-    // `useVehicleDetailsViewModel.onSetActive`.
+    expect(setup.vehiclesRepo.spies.lastSetActive).toEqual({
+      driverId: setup.uid,
+      vin: vin(VIN_BMW),
+    });
+  });
+
+  it('onSetActive is a no-op when vehicle is not approved', async () => {
+    const honda = makeVehicle({ vin: VIN_HONDA, approved: false });
+    const setup = await setupDriver({
+      seedVehicle: honda,
+      activeVehicleId: null,
+    });
+
+    const { result } = renderHook(
+      () => useVehicleDetailsViewModel({ vin: VIN_HONDA }),
+      { wrapper: withTestContainer(setup) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.state.kind).toBe('ready');
+    });
+    if (result.current.state.kind !== 'ready') throw new Error('not ready');
+    expect(result.current.state.canSetActive).toBe(false);
+
+    act(() => {
+      result.current.onSetActive();
+    });
     expect(setup.vehiclesRepo.spies.setActive).toBe(0);
   });
 
-  it('onDelete pops Alert; tapping Delete fires the soft-delete mutation', async () => {
-    const honda = makeApprovedVehicle({ vin: VIN_HONDA });
+  it('onDelete pops Alert; tap Delete fires soft-delete and pops back', async () => {
+    const honda = makeVehicle({ vin: VIN_HONDA });
     const setup = await setupDriver({
-      seedVehicles: [honda],
+      seedVehicle: honda,
       activeVehicleId: VIN_HONDA,
     });
 
@@ -237,50 +241,61 @@ describe('useVehicleListViewModel', () => {
       // no-op
     });
 
-    const { result } = renderHook(() => useVehicleListViewModel(), {
-      wrapper: withTestContainer(setup),
-    });
+    const { result } = renderHook(
+      () => useVehicleDetailsViewModel({ vin: VIN_HONDA }),
+      { wrapper: withTestContainer(setup) },
+    );
 
     await waitFor(() => {
       expect(result.current.state.kind).toBe('ready');
     });
 
     act(() => {
-      result.current.onDelete(vin(VIN_HONDA), '2020 Honda Accord');
+      result.current.onDelete();
     });
 
     expect(alertSpy).toHaveBeenCalledTimes(1);
     const [, , buttons] = alertSpy.mock.calls[0] ?? [];
-    expect(Array.isArray(buttons)).toBe(true);
-
-    // Tap "Delete" → mutation fires.
     const deleteButton = (
       buttons as { text: string; onPress?: () => void }[]
     ).find((b) => b.text === 'Delete');
     expect(deleteButton).toBeDefined();
+
     await act(async () => {
       deleteButton?.onPress?.();
-      // Yield so the mutation's mutationFn runs.
       await Promise.resolve();
     });
 
     await waitFor(() => {
       expect(setup.vehiclesRepo.spies.softDelete).toBe(1);
     });
+    await waitFor(() => {
+      expect(mockGoBack).toHaveBeenCalledTimes(1);
+    });
 
     alertSpy.mockRestore();
   });
 
-  it('onAddVehicle navigates to the registration screen', async () => {
-    const setup = await setupDriver();
-    const { result } = renderHook(() => useVehicleListViewModel(), {
-      wrapper: withTestContainer(setup),
+  it('onEditPhotos navigates to VehiclePhotos with the VIN', async () => {
+    const honda = makeVehicle({ vin: VIN_HONDA });
+    const setup = await setupDriver({
+      seedVehicle: honda,
+      activeVehicleId: VIN_HONDA,
+    });
+
+    const { result } = renderHook(
+      () => useVehicleDetailsViewModel({ vin: VIN_HONDA }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.state.kind).toBe('ready');
     });
 
     act(() => {
-      result.current.onAddVehicle();
+      result.current.onEditPhotos();
     });
-
-    expect(mockNavigate).toHaveBeenCalledWith('VehicleRegistration');
+    expect(mockNavigate).toHaveBeenCalledWith('VehiclePhotos', {
+      vin: VIN_HONDA,
+    });
   });
 });

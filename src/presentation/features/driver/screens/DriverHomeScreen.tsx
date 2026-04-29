@@ -1,4 +1,4 @@
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Map, type MapMarkerProps } from '@presentation/components/map';
@@ -123,6 +123,64 @@ export default function DriverHomeScreen() {
             </Text>
           )}
 
+          {/* No active vehicle: empty-state prompt instead of online toggle. */}
+          {vm.noActiveVehicle && (
+            <View testID="driver-home-no-vehicle-prompt">
+              <Text className="text-base font-semibold text-foreground">
+                Register a vehicle to start
+              </Text>
+              <Text className="mt-1 mb-3 text-xs text-muted-foreground">
+                You need an active vehicle before you can accept rides.
+              </Text>
+              <Pressable
+                onPress={vm.onRegisterVehicle}
+                accessibilityRole="button"
+                accessibilityLabel="Register a vehicle"
+                testID="driver-home-register-vehicle"
+                className="items-center rounded-xl bg-primary px-4 py-4"
+              >
+                <Text className="text-base font-semibold text-primary-foreground">
+                  Register a vehicle
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Active vehicle: surface stock photo + thumbnail above toggle. */}
+          {!vm.noActiveVehicle && vm.activeVehicle !== null && !isOnline && (
+            <View
+              className="mb-3 flex-row items-center"
+              testID="driver-home-active-vehicle"
+            >
+              <View className="mr-3 h-12 w-16 overflow-hidden rounded-lg bg-muted">
+                {(vm.activeVehicle.stockPhoto ??
+                  vm.activeVehicle.photos.front) !== null && (
+                  <Image
+                    source={{
+                      uri:
+                        vm.activeVehicle.stockPhoto ??
+                        vm.activeVehicle.photos.front ??
+                        '',
+                    }}
+                    className="h-full w-full"
+                    resizeMode={
+                      vm.activeVehicle.stockPhoto !== null ? 'contain' : 'cover'
+                    }
+                  />
+                )}
+              </View>
+              <View className="flex-1">
+                <Text className="text-xs text-muted-foreground">
+                  Active vehicle
+                </Text>
+                <Text className="text-sm font-medium text-foreground">
+                  {String(vm.activeVehicle.year)} {vm.activeVehicle.make}{' '}
+                  {vm.activeVehicle.model}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {isOnline && (
             <View className="mb-3">
               <DriverRideCardStack
@@ -133,29 +191,31 @@ export default function DriverHomeScreen() {
             </View>
           )}
 
-          <Pressable
-            onPress={vm.onToggleOnline}
-            disabled={!canToggle}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canToggle }}
-            accessibilityLabel={isOnline ? 'Go offline' : 'Go online'}
-            className={`items-center rounded-xl px-4 py-4 ${
-              !canToggle ? 'bg-muted' : isOnline ? 'bg-muted' : 'bg-primary'
-            }`}
-            testID="driver-home-online-toggle"
-          >
-            <Text
-              className={`text-base font-semibold ${
-                !canToggle
-                  ? 'text-muted-foreground'
-                  : isOnline
-                    ? 'text-foreground'
-                    : 'text-primary-foreground'
+          {!vm.noActiveVehicle && (
+            <Pressable
+              onPress={vm.onToggleOnline}
+              disabled={!canToggle}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canToggle }}
+              accessibilityLabel={isOnline ? 'Go offline' : 'Go online'}
+              className={`items-center rounded-xl px-4 py-4 ${
+                !canToggle ? 'bg-muted' : isOnline ? 'bg-muted' : 'bg-primary'
               }`}
+              testID="driver-home-online-toggle"
             >
-              {isOnline ? 'Go offline' : 'Go online'}
-            </Text>
-          </Pressable>
+              <Text
+                className={`text-base font-semibold ${
+                  !canToggle
+                    ? 'text-muted-foreground'
+                    : isOnline
+                      ? 'text-foreground'
+                      : 'text-primary-foreground'
+                }`}
+              >
+                {isOnline ? 'Go offline' : 'Go online'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
     </View>

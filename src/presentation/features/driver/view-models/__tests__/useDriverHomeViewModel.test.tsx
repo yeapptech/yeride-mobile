@@ -22,6 +22,8 @@ import { ServiceArea } from '@domain/entities/ServiceArea';
 import { ServiceAreaId } from '@domain/entities/ServiceAreaId';
 import { makeDriver } from '@domain/entities/User';
 import { UserId } from '@domain/entities/UserId';
+import { Vehicle } from '@domain/entities/Vehicle';
+import { Vin } from '@domain/entities/Vin';
 import {
   useDriverStatusStore,
   useServiceAreaStore,
@@ -32,6 +34,7 @@ import {
   InMemoryRideRepository,
   InMemoryServiceAreaRepository,
   InMemoryUserRepository,
+  InMemoryVehicleRepository,
   TestContainerProvider,
 } from '@shared/testing';
 
@@ -158,11 +161,43 @@ function makeAwaitingRide(args: { id: string }): Ride {
   );
 }
 
-async function setupSeededState(): Promise<{
+// A valid 17-char VIN with correct check digit (legacy fixture).
+const VALID_VIN = '1HGBH41JXMN109186';
+
+function makeApprovedHonda(): Vehicle {
+  const created = unwrap(
+    Vehicle.create({
+      vin: unwrap(Vin.create(VALID_VIN)),
+      make: 'Honda',
+      model: 'Accord',
+      year: 2020,
+      vehicleClass: 'comfort',
+      eligibleServices: [unwrap(RideServiceId.create('comfort'))],
+      dataSource: 'vin_decoded',
+      stockPhoto: 'https://nhtsa.example/honda-accord-2020.png',
+      createdAt: new Date(),
+    }),
+  );
+  return unwrap(created.approve(new Date()));
+}
+
+async function setupSeededState(opts?: {
+  /**
+   * Override the driver's `activeVehicleId`. Pass `null` to model the
+   * empty-state branch (Phase 5 turn 4 — `noActiveVehicle === true`).
+   */
+  readonly activeVehicleId?: string | null;
+  /**
+   * Optionally seed a Vehicle aggregate keyed by `activeVehicleId` so
+   * `useDriverActiveVehicleQuery` resolves to a real entity.
+   */
+  readonly seedVehicle?: Vehicle;
+}): Promise<{
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
   serviceAreasRepo: InMemoryServiceAreaRepository;
   ridesRepo: InMemoryRideRepository;
+  vehiclesRepo: InMemoryVehicleRepository;
   uid: UserId;
 }> {
   const authRepo = new InMemoryAuthRepository();
@@ -171,6 +206,10 @@ async function setupSeededState(): Promise<{
     password: 'pw1234',
   });
   const uid = unwrap(signUpR);
+
+  const activeVehicleId =
+    opts?.activeVehicleId !== undefined ? opts.activeVehicleId : VALID_VIN;
+  const vehicleIds = activeVehicleId !== null ? [activeVehicleId] : [];
 
   const usersRepo = new InMemoryUserRepository();
   const driver = makeDriver({
@@ -186,8 +225,8 @@ async function setupSeededState(): Promise<{
     stripeAccountId: null,
     stripeChargesEnabled: false,
     stripePayoutsEnabled: false,
-    activeVehicleId: 'vehicle-real-1',
-    vehicleIds: ['vehicle-real-1'],
+    activeVehicleId,
+    vehicleIds,
   });
   await usersRepo.create(driver);
 
@@ -198,11 +237,22 @@ async function setupSeededState(): Promise<{
   });
 
   const ridesRepo = new InMemoryRideRepository();
+  const vehiclesRepo = new InMemoryVehicleRepository();
+  if (opts?.seedVehicle) {
+    vehiclesRepo.seed(opts.seedVehicle, uid);
+  }
 
   // Production wires this in AppContent's auth observer; test emulates it.
   useSessionStore.getState().setSignedIn(uid);
 
-  return { authRepo, usersRepo, serviceAreasRepo, ridesRepo, uid };
+  return {
+    authRepo,
+    usersRepo,
+    serviceAreasRepo,
+    ridesRepo,
+    vehiclesRepo,
+    uid,
+  };
 }
 
 function withTestContainer(opts: {
@@ -210,6 +260,7 @@ function withTestContainer(opts: {
   usersRepo: InMemoryUserRepository;
   serviceAreasRepo: InMemoryServiceAreaRepository;
   ridesRepo: InMemoryRideRepository;
+  vehiclesRepo: InMemoryVehicleRepository;
 }) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
@@ -217,6 +268,7 @@ function withTestContainer(opts: {
       users={opts.usersRepo}
       serviceAreas={opts.serviceAreasRepo}
       rides={opts.ridesRepo}
+      vehicles={opts.vehiclesRepo}
     >
       {children}
     </TestContainerProvider>
@@ -272,7 +324,54 @@ describe('useDriverHomeViewModel', () => {
     });
 
     expect(result.current.mode).toBe('online_idle');
-    expect(result.current.activeVehicleId).toBe('vehicle-real-1');
+    expect(result.current.activeVehicleId).toBe(VALID_VIN);
+  });
+
+  it('noActiveVehicle is true when the driver has no active vehicle', async () => {
+    const setup = await setupSeededState({ activeVehicleId: null });
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+
+    expect(result.current.noActiveVehicle).toBe(true);
+
+    // onToggleOnline is a no-op in this branch (defense in depth — the
+    // screen also hides the toggle).
+    act(() => {
+      result.current.onToggleOnline();
+    });
+    expect(result.current.mode).toBe('offline');
+
+    // onRegisterVehicle pushes the Vehicles screen.
+    act(() => {
+      result.current.onRegisterVehicle();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('Vehicles');
+  });
+
+  it('exposes the active vehicle from useDriverActiveVehicleQuery (stock photo surfacing)', async () => {
+    const honda = makeApprovedHonda();
+    const setup = await setupSeededState({
+      activeVehicleId: VALID_VIN,
+      seedVehicle: honda,
+    });
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    await waitFor(() => {
+      expect(result.current.activeVehicle).not.toBeNull();
+    });
+    expect(result.current.activeVehicle?.make).toBe('Honda');
+    expect(result.current.activeVehicle?.stockPhoto).toBe(
+      'https://nhtsa.example/honda-accord-2020.png',
+    );
+    expect(result.current.noActiveVehicle).toBe(false);
   });
 
   it('exposes available rides once online with a seeded ride nearby', async () => {

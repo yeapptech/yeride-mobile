@@ -3,7 +3,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
 import DriverDispatchScreen from '@presentation/features/driver/screens/DriverDispatchScreen';
 import DriverMonitorScreen from '@presentation/features/driver/screens/DriverMonitorScreen';
+import VehicleDetailsScreen from '@presentation/features/driver/screens/VehicleDetailsScreen';
 import VehicleListScreen from '@presentation/features/driver/screens/VehicleListScreen';
+import VehiclePhotosScreen from '@presentation/features/driver/screens/VehiclePhotosScreen';
 import VehicleRegistrationScreen from '@presentation/features/driver/screens/VehicleRegistrationScreen';
 
 import { DriverTabsNavigator } from './DriverTabsNavigator';
@@ -59,6 +61,16 @@ export function DriverNavigator() {
         name="VehicleRegistration"
         component={VehicleRegistrationScreen}
         options={{ title: 'Register vehicle' }}
+      />
+      <Stack.Screen
+        name="VehicleDetails"
+        component={VehicleDetailsScreen}
+        options={{ title: 'Vehicle' }}
+      />
+      <Stack.Screen
+        name="VehiclePhotos"
+        component={VehiclePhotosScreen}
+        options={{ title: 'Vehicle photos' }}
       />
     </Stack.Navigator>
   );

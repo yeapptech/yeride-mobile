@@ -6,7 +6,7 @@ import type { Vin } from '@domain/entities/Vin';
 interface DriverVehicleCardProps {
   readonly vehicle: Vehicle;
   readonly isActive: boolean;
-  readonly onActivate: (vin: Vin) => void;
+  readonly onSelect: (vin: Vin) => void;
   readonly onDelete: (vin: Vin, vehicleLabel: string) => void;
 }
 
@@ -16,9 +16,9 @@ interface DriverVehicleCardProps {
  * year/make/model line, status badge, ACTIVE indicator, eligible-services
  * chips, and a trash button on the right.
  *
- * Interactions:
- *   - Tapping the card body activates the vehicle (no-op if already active
- *     or not approved). Mirrors legacy `Set Active`.
+ * Interactions (Phase 5 turn 4):
+ *   - Tapping the card body navigates to `VehicleDetails` (set-active
+ *     happens there). The active highlight is informational only.
  *   - Tapping the trash icon dispatches `onDelete(vin, label)`. The parent
  *     view-model wraps that in an `Alert.alert` confirmation.
  *
@@ -28,21 +28,18 @@ interface DriverVehicleCardProps {
 export function DriverVehicleCard({
   vehicle,
   isActive,
-  onActivate,
+  onSelect,
   onDelete,
 }: DriverVehicleCardProps) {
   const label = `${String(vehicle.year)} ${vehicle.make} ${vehicle.model}`;
   const photoUri = vehicle.stockPhoto ?? vehicle.photos.front;
-  const isApproved = vehicle.status === 'approved';
 
   return (
     <Pressable
-      onPress={() => {
-        if (!isActive && isApproved) onActivate(vehicle.vin);
-      }}
+      onPress={() => onSelect(vehicle.vin)}
       accessibilityRole="button"
       accessibilityLabel={`Vehicle ${label}`}
-      accessibilityState={{ selected: isActive, disabled: !isApproved }}
+      accessibilityState={{ selected: isActive }}
       testID={`vehicle-card-${String(vehicle.vin)}`}
       className={`mb-3 rounded-xl bg-card p-4 ${
         isActive ? 'border-2 border-primary' : 'border border-border'

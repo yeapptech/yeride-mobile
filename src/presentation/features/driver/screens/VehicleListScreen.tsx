@@ -85,7 +85,7 @@ export default function VehicleListScreen() {
                 vm.state.activeVin !== null &&
                 String(item.vin) === vm.state.activeVin
               }
-              onActivate={vm.onActivate}
+              onSelect={vm.onSelectVehicle}
               onDelete={vm.onDelete}
             />
           )}

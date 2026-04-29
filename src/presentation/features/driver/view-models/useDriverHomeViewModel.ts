@@ -7,6 +7,7 @@ import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { ServiceArea } from '@domain/entities/ServiceArea';
 import type { User } from '@domain/entities/User';
 import { UserLocation } from '@domain/entities/UserLocation';
+import type { Vehicle } from '@domain/entities/Vehicle';
 import { useCurrentLocation } from '@presentation/hooks';
 import type {
   LocationPermission,
@@ -17,6 +18,7 @@ import {
   useActiveServiceAreaQuery,
   useAvailableRidesQuery,
   useCurrentUserQuery,
+  useDriverActiveVehicleQuery,
   useInProgressDriverRideQuery,
   useRideServicesQuery,
   useUpdateLocationMutation,
@@ -62,8 +64,6 @@ export type DriverHomeStatus =
   | 'out_of_coverage'
   | 'ready';
 
-const VEHICLE_STUB_ID = 'vehicle-stub';
-
 export interface UseDriverHomeViewModel {
   readonly status: DriverHomeStatus;
   readonly user: User | null;
@@ -71,15 +71,34 @@ export interface UseDriverHomeViewModel {
   readonly activeServiceArea: ServiceArea | null;
   readonly mode: ReturnType<typeof useDriverMode>;
   readonly activeVehicleId: string | null;
+  /**
+   * The driver's active Vehicle aggregate, resolved via
+   * `useDriverActiveVehicleQuery`. `null` when no active vehicle is
+   * registered (the empty-state branch) or while the read is in flight.
+   * Powers the DriverHome stock-photo header.
+   */
+  readonly activeVehicle: Vehicle | null;
+  /**
+   * True when the driver has no active vehicle registered. The
+   * DriverHome screen surfaces an empty-state prompt routing to
+   * `Vehicles` instead of the online toggle.
+   */
+  readonly noActiveVehicle: boolean;
   readonly availableRides: readonly Ride[];
   readonly inProgressRide: Ride | null;
   readonly permissionStatus: LocationPermission;
-  /** Toggle online ↔ offline. Seeds vehicle id on going online. */
+  /**
+   * Toggle online ↔ offline. No-op when `noActiveVehicle === true` —
+   * the screen guards the affordance, but the VM is the authoritative
+   * gate (defense in depth).
+   */
   onToggleOnline: () => void;
   /** Tap a ride card → push DriverDispatch with that rideId. */
   onSelectRide: (rideId: string) => void;
   /** Resume an in-progress ride — pushes DriverMonitor with the rideId. */
   onResumeInProgress: (rideId: string) => void;
+  /** Push the Vehicles screen so the driver can register their first vehicle. */
+  onRegisterVehicle: () => void;
   /** Re-request location permission and re-read. */
   refreshLocation: () => Promise<void>;
 }
@@ -97,6 +116,7 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
   const inProgressRideQuery = useInProgressDriverRideQuery(
     userQuery.data?.id ?? null,
   );
+  const activeVehicleQuery = useDriverActiveVehicleQuery();
   const updateLocationMutation = useUpdateLocationMutation();
   const setReady = useServiceAreaStore((s) => s.setReady);
   const setActiveArea = useServiceAreaStore((s) => s.setActiveArea);
@@ -179,20 +199,27 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     }, [inProgressRide, navigation]),
   );
 
+  // Phase 5 turn 4: the `activeVehicleId` is now real — drivers must
+  // register a vehicle before going online. The legacy `'vehicle-stub'`
+  // fallback is gone. When no active vehicle is registered, the screen
+  // hides the online toggle entirely; the VM additionally guards the
+  // callback so a stale press handler can't sneak through.
   const onToggleOnline = useCallback(() => {
     if (mode === 'offline') {
-      // Driver entity carries `activeVehicleId` (Phase 5 wires the real
-      // selection UI). Until then, fall back to a stub so the online
-      // toggle works for testers without a registered vehicle.
-      const seedId =
-        user && user.role === 'driver' && user.activeVehicleId
-          ? user.activeVehicleId
-          : VEHICLE_STUB_ID;
-      goOnline(seedId);
+      if (!user || user.role !== 'driver' || user.activeVehicleId === null) {
+        // Defense in depth: the screen should hide the toggle in this
+        // case, but never trust the UI to be the only gate.
+        return;
+      }
+      goOnline(user.activeVehicleId);
     } else {
       goOffline();
     }
   }, [mode, user, goOnline, goOffline]);
+
+  const onRegisterVehicle = useCallback(() => {
+    navigation.navigate('Vehicles');
+  }, [navigation]);
 
   const onSelectRide = useCallback(
     (rideId: string) => {
@@ -235,6 +262,9 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     activeAreaQuery.isFetched,
   ]);
 
+  const noActiveVehicle =
+    user !== null && user.role === 'driver' && user.activeVehicleId === null;
+
   return {
     status,
     user,
@@ -242,12 +272,15 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     activeServiceArea,
     mode,
     activeVehicleId,
+    activeVehicle: activeVehicleQuery.data ?? null,
+    noActiveVehicle,
     availableRides,
     inProgressRide,
     permissionStatus: currentLocation.permissionStatus,
     onToggleOnline,
     onSelectRide,
     onResumeInProgress,
+    onRegisterVehicle,
     refreshLocation: currentLocation.refresh,
   };
 }

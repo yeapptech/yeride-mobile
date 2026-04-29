@@ -155,7 +155,8 @@ export const queryKeys = {
   // The driver's vehicle list is delivered live via
   // `useFirestoreSubscription` over `ListDriverVehicles.subscribe(...)`,
   // so we don't keep a TanStack cache for it. The keys here are
-  // primarily for VIN-decode caching and cross-mutation invalidation.
+  // primarily for VIN-decode caching, single-vehicle reads consumed by
+  // VehicleDetails / VehiclePhotos, and cross-mutation invalidation.
   vehicle: {
     all: () => ['vehicle'] as const,
     /**
@@ -164,6 +165,21 @@ export const queryKeys = {
      * given VIN, so re-decoding within a session is wasted work.
      */
     decode: (vin: string) => ['vehicle', 'decode', vin] as const,
+    /**
+     * Single-vehicle read keyed on the VIN. Consumed by
+     * `VehicleDetailsScreen` and `VehiclePhotosScreen`. Stale time short
+     * (~30s) so UI sees fresh photo URLs after `UploadVehiclePhotos`
+     * invalidates this key.
+     */
+    byVin: (vin: string) => ['vehicle', 'byVin', vin] as const,
+    /**
+     * The signed-in driver's currently-active vehicle, derived from
+     * `user.activeVehicleId` then resolved via `GetVehicle`. Powers the
+     * `DriverHome` stock-photo header. Keyed on driverId so cache
+     * separates per-driver in dev / multi-account testing.
+     */
+    activeForDriver: (driverId: UserId) =>
+      ['vehicle', 'activeForDriver', String(driverId)] as const,
   },
 } as const;
 

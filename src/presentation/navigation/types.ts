@@ -121,8 +121,8 @@ export type DriverStackParamList = {
   UserProfile: undefined;
   /**
    * Driver vehicle list — reached from the Profile tab via a "Vehicles"
-   * row. Live subscription via `ListDriverVehicles`; tap a non-active
-   * card to activate, tap Delete to soft-delete (Alert-confirmed).
+   * row. Live subscription via `ListDriverVehicles`; tap a card to push
+   * `VehicleDetails`; tap Delete to soft-delete (Alert-confirmed).
    * Phase 5 turn 3.
    */
   Vehicles: undefined;
@@ -132,6 +132,19 @@ export type DriverStackParamList = {
    * turn 3.
    */
   VehicleRegistration: undefined;
+  /**
+   * Read-only single-vehicle detail surface — reached from `Vehicles`
+   * via a card tap. Hosts the "Set as active" / "Edit photos" / Delete
+   * actions. Phase 5 turn 4.
+   */
+  VehicleDetails: { vin: string };
+  /**
+   * Five-tile vehicle-photo upload surface — reached from
+   * `VehicleDetails` via "Add photos" / "Update photos". Photos are
+   * uploaded per-tile; empty tiles are allowed (legacy parity).
+   * Phase 5 turn 4.
+   */
+  VehiclePhotos: { vin: string };
 };
 
 /**

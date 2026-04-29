@@ -118,6 +118,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           'Allow YeRide Next to use your location so we can show nearby drivers and plan your ride.',
       },
     ],
+    [
+      'expo-image-picker',
+      {
+        // Phase 5 turn 4: drivers attach 5 vehicle photos
+        // (front/back/left/right/interior) via the platform image picker.
+        // Library is the primary path; camera is reachable via the
+        // picker's media-source toggle. iOS hard-fails (RCTFatal) on the
+        // first picker call if these strings are missing — see legacy
+        // CLAUDE.md image-picker permission troubleshooting note.
+        photosPermission:
+          'Allow YeRide Next to access your photos so you can attach photos of your vehicle for rider identification.',
+        cameraPermission:
+          'Allow YeRide Next to use your camera so you can take photos of your vehicle.',
+      },
+    ],
     // Google Maps API keys → AndroidManifest meta-data + iOS GMSApiKey.
     // No-ops when the env vars aren't set (dev convenience: the runtime
     // falls back to FakeRoutesService in that case).

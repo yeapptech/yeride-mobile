@@ -25,7 +25,11 @@ export { useUpdateLocationMutation } from './location.queries';
 export { useCurrentUserQuery } from './user.queries';
 export {
   useDeleteVehicleMutation,
+  useDriverActiveVehicleQuery,
   useRegisterVehicleMutation,
   useSetActiveVehicleMutation,
+  useUploadVehiclePhotosMutation,
+  useVehicleQuery,
   useVinDecodeQuery,
+  type UploadVehiclePhotosInput,
 } from './vehicle.queries';

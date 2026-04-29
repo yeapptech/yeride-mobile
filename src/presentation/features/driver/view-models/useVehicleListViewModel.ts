@@ -15,7 +15,6 @@ import type { DriverStackNavigation } from '@presentation/navigation/types';
 import {
   useCurrentUserQuery,
   useDeleteVehicleMutation,
-  useSetActiveVehicleMutation,
 } from '@presentation/queries';
 import { LOG } from '@shared/logger';
 
@@ -31,12 +30,15 @@ const logger = LOG.extend('VehicleListVM');
  *     — live list of the driver's vehicles. The repo emits the current
  *     state synchronously on subscribe so we paint without an extra
  *     fetch round-trip. Sorted by `createdAt desc` at the repo layer.
- *   - `useSetActiveVehicleMutation` — flips active pointer; invalidates
- *     `user.current` so the active highlight repaints.
- *   - `useDeleteVehicleMutation` — soft-deletes; same invalidation. We
- *     wrap the call in `Alert.alert` confirmation per legacy parity
- *     (legacy `VehicleList.js:63-76`). The mutation only fires after
- *     the user taps "Delete".
+ *   - `useDeleteVehicleMutation` — soft-deletes; invalidates
+ *     `user.current` so the active highlight repaints. Wrapped in
+ *     `Alert.alert` confirmation per legacy parity (legacy
+ *     `VehicleList.js:63-76`). The mutation only fires after the user
+ *     taps "Delete".
+ *
+ * Card tap behavior (Phase 5 turn 4): pushes `VehicleDetails` with the
+ * VIN. Set-active moved to the detail screen. The list card's active
+ * highlight is now informational only.
  *
  * State machine is a tagged union — same shape pattern as the driver
  * status-router VMs:
@@ -65,10 +67,13 @@ export type VehicleListState =
 
 export interface UseVehicleListViewModel {
   readonly state: VehicleListState;
-  /** True when a setActive or delete mutation is in flight. */
+  /** True when the delete mutation is in flight. */
   readonly isMutating: boolean;
-  /** Activate the named vehicle. No-op if the VIN is already active. */
-  onActivate: (vin: Vin) => void;
+  /**
+   * Tap a vehicle row → push `VehicleDetails` with the VIN. Set-active
+   * happens from the detail screen now (turn 4 split).
+   */
+  onSelectVehicle: (vin: Vin) => void;
   /**
    * Delete a vehicle. Pops a confirmation Alert before firing the
    * mutation; the user must explicitly tap "Delete". `onDelete` is wired
@@ -84,7 +89,6 @@ export function useVehicleListViewModel(): UseVehicleListViewModel {
   const navigation = useNavigation<DriverStackNavigation>();
   const useCases = useUseCases();
   const userQuery = useCurrentUserQuery();
-  const setActiveMutation = useSetActiveVehicleMutation();
   const deleteMutation = useDeleteVehicleMutation();
 
   const driverId = userQuery.data?.role === 'driver' ? userQuery.data.id : null;
@@ -112,19 +116,11 @@ export function useVehicleListViewModel(): UseVehicleListViewModel {
   const activeVin =
     userQuery.data?.role === 'driver' ? userQuery.data.activeVehicleId : null;
 
-  const onActivate = useCallback(
+  const onSelectVehicle = useCallback(
     (vin: Vin) => {
-      if (String(vin) === activeVin) return;
-      setActiveMutation.mutate(
-        { vin },
-        {
-          onError: (error) => {
-            logger.warn('setActive mutation failed', error);
-          },
-        },
-      );
+      navigation.navigate('VehicleDetails', { vin: String(vin) });
     },
-    [activeVin, setActiveMutation],
+    [navigation],
   );
 
   const onDelete = useCallback(
@@ -176,12 +172,12 @@ export function useVehicleListViewModel(): UseVehicleListViewModel {
     state = { kind: 'ready', vehicles, activeVin };
   }
 
-  const isMutating = setActiveMutation.isPending || deleteMutation.isPending;
+  const isMutating = deleteMutation.isPending;
 
   return {
     state,
     isMutating,
-    onActivate,
+    onSelectVehicle,
     onDelete,
     onAddVehicle,
   };
