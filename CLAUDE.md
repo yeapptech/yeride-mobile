@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 30, 2026 (Phase 7 turn 2 — `useGpsLifecycle` + AppContent integration + pickup geofence)
+**Last updated:** April 30, 2026 (Phase 7 turn 3 — RideMonitor + DriverMonitor swap-ins + Phase 7 close)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,51 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 7 closed.** Across three turns Phase 7 brought the full
+background-GPS pipeline online: the single SDK seam
+(`BackgroundGeolocationClient` + 11-method fake) + Android Maven
+plugin patch (turn 1) → AppContent-only `useGpsLifecycle` hook +
+`useGpsStore` Zustand mirror + pickup-geofence registration driven
+by a live `observeRide` overlay (turn 2) → rider banner event-driven
+off `useGpsLastGeofenceEvent`, driver `arrivedAtPickup` derived from
+`useGpsIsInsidePickupGeofence()`, real-odometer reads from
+`useGpsCurrentOdometer()` powering Start ride + Request payment
+(turn 3). Net delta across the phase: **+6 suites / +78 tests**
+(146 → 152, 1093 → 1171). Legacy footguns avoided: synchronous
+unsubscribe (no async cleanup), listener-level dedup of the SDK's
+2-3× delivery, deferred view-model swap-ins until the lifecycle
+contract was stable.
+
+**Phase 7 turn 3 shipped.** The two view-models that have been
+carrying placeholder geofence / odometer plumbing since Phase 3
+(rider) and Phase 4 (driver) are now fully wired to the live GPS
+pipeline. `useRideMonitorViewModel`'s `EvaluateExitWarning`
+foreground-tick is gone; in its place a single `useEffect` keyed on
+`useGpsLastGeofenceEvent()` flips
+`useGeofenceUiStore.pickupExitWarningVisible` based on
+`'pickup'`-identifier ENTER / EXIT events, with a `timestampMs`-keyed
+`useRef` replay guard and a status gate that only fires while
+`status === 'dispatched'`. `useDriverMonitorViewModel.arrivedAtPickup`
+is now derived: `useGpsIsInsidePickupGeofence() || manualOverride`.
+The manual override stays as resilience (GPS drift, cellular dead
+zones) and sticks across a subsequent EXIT once flipped, so a
+transient drift mid-pickup doesn't bounce the UI back to en-route;
+the override resets when the ride leaves `'dispatched'`. The
+`stubOdometerMeters` helper is retired — `useGpsCurrentOdometer()`
+feeds both `Start ride` and `Request payment` mutations, so the
+Cloud Function's fare math sees real GPS distance instead of
+`pickup + 1`. The `useCurrentLocation` foreground hook stays in
+place (RiderHome / DriverHome / RouteSearch still use it for the
+initial map centre); the rider VM just no longer imports it.
+Documented deferral: the driver VM's own `lastWrittenCoordsRef`-
+deduped foreground location push (lines 218-248) now overlaps with
+the lifecycle hook's per-delivery write — a harmless double-write
+that Phase 9 polish can clean up after field telemetry on the
+SDK-driven path lands. Phase 7 turn 3 delta: **+0 suites / +9
+tests** (both swaps land in existing test files), lands at
+**152 suites / 1171 tests** (Turn 2 close 152/1162 → Turn 3
+152/1171).
 
 **Phase 7 turn 2 shipped.** The single GPS-aware presentation hook
 (`useGpsLifecycle`) is mounted exactly once at AppContent. The
@@ -142,7 +187,8 @@ pending (Turn 5).
 | Phase 6 turn 5 | Tip flow on RideReceipt + Phase 6 cleanup            | ✅     |
 | Phase 7 turn 1 | `BackgroundGeolocationClient` adapter + fake + DI    | ✅     |
 | Phase 7 turn 2 | `useGpsLifecycle` + AppContent integration           | ✅     |
-| Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close | Next   |
+| Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close | ✅     |
+| Phase 8 turn 1 | `NavigationSdkClient` adapter + fake + DI wiring     | Next   |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -202,10 +248,40 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)   | ✅                             |
 | 7 turn 1  | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch            | ✅                             |
 | 7 turn 2  | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation         | ✅                             |
-| 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | Next                           |
-| 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
+| 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | ✅                             |
+| 8         | Google Navigation SDK (driver in-app navigation)                                 | Next                           |
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
+
+End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
+/ 1171 tests passing** (+9 tests over Turn 2's 152/1162; suite count
+unchanged because both view-model swaps land in existing test
+files); typecheck, lint, format, and test all green. The rewrite's
+two GPS-aware view-models are now fully composed against the live
+SDK pipeline. A signed-in rider on a `'dispatched'` ride who walks
+out of the pickup area sees the "you've left your pickup area"
+banner trigger from a real `BackgroundGeolocation.onGeofence` EXIT
+event (no foreground poll); walking back in dismisses the banner
+automatically. A signed-in driver who accepts a ride and drives
+into the 200m pickup geofence sees `AtPickupView` automatically
+replace `EnRouteToPickupView` — no manual button tap required (the
+button retained as a resilience override; once tapped, sticks
+across a subsequent EXIT to absorb GPS drift). When the driver
+taps `Start ride` or `Request payment`, the entity-level transitions
+receive real GPS-derived odometer values from
+`useGpsCurrentOdometer()` (sourced from
+`useGpsLifecycle`'s SDK location subscription), so the Cloud
+Function's server-side fare math runs against actual trip distance
+instead of the legacy `pickup + 1` placeholder. The
+`useCurrentLocation` foreground hook stays in place (still used by
+RiderHome / DriverHome / RouteSearch for initial map centre); the
+rider VM just no longer imports it. The driver VM's own
+`lastWrittenCoordsRef`-deduped foreground location push remains as
+a documented Phase 9 cleanup item — currently a harmless
+double-write with the lifecycle hook's per-delivery write to the
+same `locations/{userId}` Firestore doc. Phase 8 (Google Navigation
+SDK driver in-app navigation) is the next phase; kickoff staged at
+`docs/PHASE_8_KICKOFF.md`.
 
 End of Phase 4 acceptance: **81 test suites / 568 tests passing**;
 typecheck + lint + format + test all green. Driver can sign in → go
@@ -705,10 +781,10 @@ a status-router: a single switch on `Ride.status` selects which
 bottom-sheet view component renders. Rider views: `AwaitingDriverView`,
 `DispatchedView`, `StartedView`, `CompletedView`, `PaymentFailedView`.
 Driver views (Turn 4a): `EnRouteToPickupView`, `AtPickupView`. The
-driver side adds a thin client-side `arrivedAtPickup` boolean to split
-server status `'dispatched'` into the en-route ↔ at-pickup distinction
-— UI-only, no server write. Phase 7's geofence-entry event will
-auto-flip it. Each view is independently
+driver side splits server status `'dispatched'` into the en-route ↔
+at-pickup distinction via a derived `arrivedAtPickup` value
+(`useGpsIsInsidePickupGeofence() || manualOverride`, Phase 7 turn 3)
+— UI-only, no server write. Each view is independently
 testable, gets the `Ride` + callbacks as props, and never reads from
 the store directly. Adding a new ride status = add a `RideStatus`
 literal + add one component + extend the router. Don't grow a single
@@ -1026,23 +1102,35 @@ the four driver status views.
   the VM. `cancelled` always maps to `'online_idle'` (driver re-joins
   the queue); `started` / `payment_requested` / `payment_failed` /
   `completed` all map to `'on_trip'`.
-- **Client-side `arrivedAtPickup` flag.** Server status `'dispatched'`
-  is split into UI states `'en_route_to_pickup'` and `'at_pickup'` via
-  a single client-side bool inside `useDriverMonitorViewModel`. The
-  legacy app does the same — there's no server-side `at_pickup` state.
-  Phase 7's geofence-entry event will auto-flip the flag; until then
-  the driver taps "Arrived at pickup" manually. The flag resets on
-  every status that isn't `'dispatched'` so a defensive re-render in a
-  later state can't render a stale at-pickup view.
-- **Stub odometer at start / request-payment.** The VM derives a stub
-  `pickupTiming.odometerMeters ?? 0` + 1 metre and passes it to both
-  `useStartRideMutation` and `useRequestPaymentMutation`. This passes
-  the entity's monotonicity check (`requestPayment` rejects an
-  odometer below `pickupTiming.odometerMeters`) without dragging GPS
-  into the test surface. Phase 7 swaps `stubOdometerMeters` for a real
-  GPS reading from `useGpsLifecycle` — that's the single edit-site.
-  Don't pass odometer in from the screen; the VM owns the derivation
-  so the prop surface stays stable across the GPS migration.
+- **Client-side `arrivedAtPickup` derivation (Phase 7 turn 3).**
+  Server status `'dispatched'` is split into UI states
+  `'en_route_to_pickup'` and `'at_pickup'` via a derived value in
+  `useDriverMonitorViewModel`:
+  `useGpsIsInsidePickupGeofence() || manualOverride`. The geofence
+  half is event-driven by `useGpsLifecycle`'s pickup-geofence
+  registration (mounted at AppContent). The manual override
+  (`onArriveAtPickup` / `onBackToEnRoute`) remains as resilience for
+  GPS drift / cellular dead zones; once tapped, sticks across a
+  subsequent EXIT so a transient drift mid-pickup doesn't bounce the
+  UI back to en-route. The override resets when the ride leaves
+  `'dispatched'`. There's no server-side `at_pickup` state — UI-only
+  (legacy parity). Don't reintroduce a stored
+  `useState<boolean>` for `arrivedAtPickup` — the OR-derivation is
+  the canonical pattern.
+- **Real odometer at start / request-payment (Phase 7 turn 3).** The
+  VM reads `useGpsCurrentOdometer()` (a cheap `useGpsStore` selector
+  hook) and passes the value to both `useStartRideMutation` and
+  `useRequestPaymentMutation`. The Cloud Function's server-side fare
+  math now sees real GPS distance. Pre-first-delivery default is
+  `0`; the entity's `Ride.start({odometerMeters: 0})` accepts that
+  (any non-negative finite reading is a valid first odometer); the
+  monotonicity check on `Ride.requestPayment` requires
+  `odometerMeters >= pickupTiming.odometerMeters` — in practice the
+  SDK has fired multiple deliveries between Start ride and Request
+  payment so the values ratchet upward. Don't call
+  `bgGeolocation.getOdometer()` at click time — the staleness of
+  the store value (≤200m / ~30s old per the SDK's `distanceFilter`)
+  is preferred over an `await` on the user-facing tap.
 - **Terminal-redirect rule.** `useDriverMonitorViewModel` resets the
   stack to `DriverTabs` on `'cancelled'` and `'completed'`.
   `'payment_failed'` intentionally does NOT redirect — the driver

@@ -16,7 +16,11 @@ import {
   useStartRideMutation,
   useUpdateLocationMutation,
 } from '@presentation/queries';
-import { useDriverStatusStore } from '@presentation/stores';
+import {
+  useDriverStatusStore,
+  useGpsCurrentOdometer,
+  useGpsIsInsidePickupGeofence,
+} from '@presentation/stores';
 import { useCurrentUserId } from '@presentation/stores/useSessionStore';
 import { LOG } from '@shared/logger';
 
@@ -51,11 +55,18 @@ const logger = LOG.extend('DriverMonitorVM');
  *        - `cancelled`              → 'online_idle' (driver re-joins
  *                                     the queue)
  *
- *   5. `arrivedAtPickup` UI flag with `onArriveAtPickup()` /
- *      `onBackToEnRoute()`. Bridges server status `'dispatched'` to the
- *      UI's `'en_route_to_pickup'` ↔ `'at_pickup'` distinction. Phase 7
- *      will auto-flip from a real geofence-entry event; for now it's a
- *      manual button tap.
+ *   5. `arrivedAtPickup` UI flag, derived (Phase 7 turn 3) from
+ *      `useGpsIsInsidePickupGeofence() || manualOverride`. The geofence
+ *      half is event-driven by `useGpsLifecycle`'s pickup-geofence
+ *      registration (mounted at AppContent). The manual override
+ *      remains for resilience when GPS reports outside the area
+ *      despite the driver having arrived (cellular dead zones, GPS
+ *      drift). `onArriveAtPickup()` flips the override; once set it
+ *      sticks until `'dispatched'` is left, so a transient EXIT
+ *      doesn't bounce the UI back to en-route mid-pickup. Bridges
+ *      server status `'dispatched'` to the UI's
+ *      `'en_route_to_pickup'` ↔ `'at_pickup'` distinction (no server
+ *      write — UI-only).
  *
  *   6. Three Cloud-Function-or-direct-write mutations:
  *
@@ -63,14 +74,15 @@ const logger = LOG.extend('DriverMonitorVM');
  *          `useCancelRideAsDriverMutation` (driver-allowed code set
  *          enforced by the use case; `'driver_no_show'` is rejected
  *          with `cancellation_reason_not_driver_allowed`).
- *        - `onStartRide()` — wraps `useStartRideMutation`. The view-
- *          model derives a stub odometer (`pickupTiming.odometerMeters
- *          ?? 0` + 1) so the screen stays prop-thin. Phase 7 swaps the
- *          derivation for a real GPS-derived odometer in this one
- *          place.
- *        - `requestPayment()` — wraps `useRequestPaymentMutation`. Same
- *          stub-odometer derivation. Routes through the `completeTrip`
- *          Cloud Function for server-side fare math.
+ *        - `onStartRide()` — wraps `useStartRideMutation`. The
+ *          odometer is read from `useGpsCurrentOdometer()` (Phase 7
+ *          turn 3), set by `useGpsLifecycle`'s location subscription
+ *          per SDK delivery. Replaces the legacy
+ *          `pickupTiming.odometerMeters ?? 0` + 1 stub.
+ *        - `requestPayment()` — wraps `useRequestPaymentMutation`.
+ *          Same `useGpsCurrentOdometer()` read. Routes through the
+ *          `completeTrip` Cloud Function for server-side fare math
+ *          (now against real GPS distance).
  *
  *   7. Terminal redirects on `cancelled` AND `completed`: both fire
  *      `navigation.reset({ index: 0, routes: [{ name: 'DriverTabs' }] })`.
@@ -115,17 +127,17 @@ export interface UseDriverMonitorViewModel {
    * Persist server status `dispatched → started`. Returns `true` on
    * success. Surface errors via `startError`.
    *
-   * Stub odometer note: until Phase 7 wires real GPS-derived odometer,
-   * the VM uses a synthetic `pickupTiming.odometerMeters ?? 0` + 1 so
-   * the entity's monotonicity check passes. The legacy backend
-   * tolerated missing odometer here; Phase 7 swaps in real readings.
+   * Odometer source (Phase 7 turn 3): `useGpsCurrentOdometer()`, fed
+   * by `useGpsLifecycle`'s SDK location subscription. Defaults to `0`
+   * before the first delivery — the entity accepts that value at
+   * start (any non-negative reading is a valid first-odometer).
    */
   onStartRide: () => Promise<boolean>;
   /**
    * Persist server status `started → payment_requested` via the
    * `completeTrip` Cloud Function. Returns `true` on success. Surface
-   * errors via `requestPaymentError`. Same stub-odometer note as
-   * `onStartRide`.
+   * errors via `requestPaymentError`. Same `useGpsCurrentOdometer()`
+   * source as `onStartRide`.
    */
   requestPayment: () => Promise<boolean>;
   /** Cancel the ride with the driver-allowed reason. */
@@ -172,17 +184,29 @@ export function useDriverMonitorViewModel(
     [],
   );
 
-  // ── arrivedAtPickup UI flag ────────────────────────────────────
-  const [arrivedAtPickup, setArrivedAtPickup] = useState<boolean>(false);
-  const onArriveAtPickup = useCallback(() => setArrivedAtPickup(true), []);
-  const onBackToEnRoute = useCallback(() => setArrivedAtPickup(false), []);
+  // ── arrivedAtPickup (Phase 7 turn 3) ───────────────────────────
+  // The display flag is now derived: `(geofence inside) || (manual
+  // override)`. `useGpsLifecycle` (mounted at AppContent) registers a
+  // pickup geofence on `'dispatched'` and pushes ENTER / EXIT events
+  // into `useGpsStore`; this VM reads `useGpsIsInsidePickupGeofence()`
+  // for the GPS half. The manual override remains for resilience —
+  // GPS drift, cellular dead zones, or the geofence reporting
+  // outside-when-actually-arrived. Once the driver taps the manual
+  // button, the override sticks even if GPS subsequently reports
+  // outside (so a transient EXIT during pickup-area tasks doesn't
+  // bounce the UI back to en-route).
+  //
+  // The override is reset when the ride leaves `'dispatched'` so a
+  // fresh trip (or a re-render after a status flip) starts clean.
+  const fromGps = useGpsIsInsidePickupGeofence();
+  const [manualOverride, setManualOverride] = useState<boolean>(false);
+  const arrivedAtPickup = fromGps || manualOverride;
+  const onArriveAtPickup = useCallback(() => setManualOverride(true), []);
+  const onBackToEnRoute = useCallback(() => setManualOverride(false), []);
 
-  // Reset the flag whenever the underlying ride leaves `dispatched`. If
-  // the trip transitions to `started` server-side and then somehow rolls
-  // back (it doesn't, but defensive), we want a clean slate.
   useEffect(() => {
     if (ride && ride.status !== 'dispatched') {
-      setArrivedAtPickup(false);
+      setManualOverride(false);
     }
   }, [ride]);
 
@@ -247,19 +271,21 @@ export function useDriverMonitorViewModel(
     });
   }, [driverId, driverLocation, updateLocationMutation]);
 
-  // ── Stub odometer derivation ───────────────────────────────────
-  // Phase 7 replaces this single helper with a real GPS-derived reading
-  // from `useGpsLifecycle`. Centralizing it here keeps the screen prop-
-  // thin and gives us a single edit-site when the real source lands.
+  // ── Real odometer (Phase 7 turn 3) ─────────────────────────────
+  // `useGpsLifecycle` (mounted at AppContent) drives
+  // `useGpsStore.currentOdometerMeters` from the SDK's per-delivery
+  // location events. We read it via the cheap selector hook and pass
+  // it to `Start ride` / `Request payment` mutations at the moment of
+  // tap. The entity's monotonicity check (`requestPayment` requires
+  // `odometerMeters >= pickupTiming.odometerMeters`) now runs against
+  // real GPS data instead of the legacy `pickup + 1` stub.
   //
-  // The +1 ensures monotonicity: the entity's `requestPayment` rejects
-  // an odometer < `pickupTiming.odometerMeters`; using `pickup + 1` is
-  // a deterministic, always-valid stub. Real distance during the trip
-  // will be measured by Phase 7's GPS pipeline.
-  const stubOdometerMeters = (currentRide: Ride | null): number => {
-    const pickup = currentRide?.pickupTiming.odometerMeters ?? 0;
-    return pickup + 1;
-  };
+  // Staleness note: the value is the most-recent SDK delivery, which
+  // is gated by `distanceFilter: 200` (≤200m / ~30s old). We
+  // deliberately don't call `bgGeolocation.getOdometer()` at click
+  // time to avoid an `await` on the user-facing tap; field telemetry
+  // can revisit if the staleness matters (Phase 9 polish).
+  const currentOdometerMeters = useGpsCurrentOdometer();
 
   // ── Cancel ─────────────────────────────────────────────────────
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -300,7 +326,7 @@ export function useDriverMonitorViewModel(
     try {
       await startMutation.mutateAsync({
         rideId,
-        odometerMeters: stubOdometerMeters(ride),
+        odometerMeters: currentOdometerMeters,
       });
       return true;
     } catch (e: unknown) {
@@ -312,7 +338,7 @@ export function useDriverMonitorViewModel(
       );
       return false;
     }
-  }, [startMutation, rideId, ride]);
+  }, [startMutation, rideId, currentOdometerMeters]);
 
   // ── Request payment ────────────────────────────────────────────
   const [requestPaymentError, setRequestPaymentError] = useState<string | null>(
@@ -323,7 +349,7 @@ export function useDriverMonitorViewModel(
     try {
       await requestPaymentMutation.mutateAsync({
         rideId,
-        odometerMeters: stubOdometerMeters(ride),
+        odometerMeters: currentOdometerMeters,
       });
       return true;
     } catch (e: unknown) {
@@ -335,7 +361,7 @@ export function useDriverMonitorViewModel(
       );
       return false;
     }
-  }, [requestPaymentMutation, rideId, ride]);
+  }, [requestPaymentMutation, rideId, currentOdometerMeters]);
 
   // ── Status derivation ──────────────────────────────────────────
   const status = useMemo<DriverMonitorStatus>(() => {

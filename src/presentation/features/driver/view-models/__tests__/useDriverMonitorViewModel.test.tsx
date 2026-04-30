@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import type {
+  BgGeofenceEvent,
+  BgLocationEvent,
+} from '@data/services/BackgroundGeolocationClient';
 import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import {
@@ -20,7 +24,7 @@ import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
 import { NetworkError } from '@domain/errors';
-import { useDriverStatusStore } from '@presentation/stores';
+import { useDriverStatusStore, useGpsStore } from '@presentation/stores';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import {
   InMemoryLocationRepository,
@@ -212,12 +216,45 @@ function withTestContainer(setup: SeededState) {
   );
 }
 
+/**
+ * Build a `BgLocationEvent` for seeding `useGpsStore.setLocation` —
+ * Phase 7 turn 3 swapped `useDriverMonitorViewModel`'s stub odometer
+ * for `useGpsCurrentOdometer()`, so any test that exercises
+ * `onStartRide` / `requestPayment` against the entity's monotonicity
+ * check needs a high-enough odometer seeded first.
+ */
+let bgLocationTick = 1_000;
+function bgLocationEvent(odometerMeters: number): BgLocationEvent {
+  return {
+    coords: DRIVER_LOC,
+    speed: null,
+    odometerMeters,
+    timestampMs: ++bgLocationTick,
+    isMoving: false,
+  };
+}
+
+let bgGeofenceTick = 2_000;
+function bgGeofenceEvent(
+  action: 'ENTER' | 'EXIT',
+  identifier: 'pickup' | string = 'pickup',
+): BgGeofenceEvent {
+  return {
+    identifier,
+    action,
+    rideId: null,
+    coords: null,
+    timestampMs: ++bgGeofenceTick,
+  };
+}
+
 describe('useDriverMonitorViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockReplace.mockClear();
     mockReset.mockClear();
     useDriverStatusStore.getState().reset();
+    useGpsStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
 
@@ -283,6 +320,13 @@ describe('useDriverMonitorViewModel', () => {
 
   it("onStartRide() persists 'started' and status flips to 'started'", async () => {
     const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+    // Seed a real GPS odometer so the test exercises the post-Phase-7
+    // path (start no longer reads from `pickupTiming.odometerMeters ??
+    // 0`; it reads from `useGpsCurrentOdometer()`).
+    act(() => {
+      useGpsStore.getState().setLocation(bgLocationEvent(2_500));
+    });
+
     const { result } = renderHook(
       () =>
         useDriverMonitorViewModel({
@@ -302,11 +346,13 @@ describe('useDriverMonitorViewModel', () => {
 
     expect(ok).toBe(true);
     expect(setup.ridesRepo.spies.update).toBeGreaterThanOrEqual(1);
-    // Persisted ride is now 'started'.
+    // Persisted ride is now 'started' and the GPS odometer landed in
+    // pickupTiming — proves real GPS data, not the stub.
     const persisted = await setup.ridesRepo.getById(RIDE_ID);
     expect(persisted.ok).toBe(true);
     if (persisted.ok) {
       expect(persisted.value.status).toBe('started');
+      expect(persisted.value.pickupTiming.odometerMeters).toBe(2_500);
     }
     // Live subscription delivered → VM status flipped → store mirrors it.
     await waitFor(() => {
@@ -318,6 +364,14 @@ describe('useDriverMonitorViewModel', () => {
 
   it("requestPayment() persists 'payment_requested' and status flips", async () => {
     const setup = setupSeededState({ seedRide: makeStartedRide() });
+    // Seed the GPS-store odometer to clear the entity's monotonicity
+    // floor (start was at 1_000m). Without this seed
+    // `useGpsCurrentOdometer()` would return `0` and the entity would
+    // reject the requestPayment.
+    act(() => {
+      useGpsStore.getState().setLocation(bgLocationEvent(6_000));
+    });
+
     const { result } = renderHook(
       () =>
         useDriverMonitorViewModel({
@@ -341,6 +395,9 @@ describe('useDriverMonitorViewModel', () => {
     expect(persisted.ok).toBe(true);
     if (persisted.ok) {
       expect(persisted.value.status).toBe('payment_requested');
+      // The seeded GPS odometer flowed all the way through to the
+      // entity's dropoffTiming — proves real GPS data, not the stub.
+      expect(persisted.value.dropoffTiming.odometerMeters).toBe(6_000);
     }
     await waitFor(() => {
       expect(result.current.status).toBe('payment_requested');
@@ -568,5 +625,138 @@ describe('useDriverMonitorViewModel', () => {
     expect(useDriverStatusStore.getState().mode).toBe('on_trip');
     // No terminal redirect.
     expect(mockReset).not.toHaveBeenCalled();
+  });
+
+  describe('arrivedAtPickup auto-flip (Phase 7 turn 3)', () => {
+    it('pickup-geofence ENTER auto-flips arrivedAtPickup to true', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('en_route_to_pickup');
+      });
+      expect(result.current.arrivedAtPickup).toBe(false);
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('ENTER'));
+      });
+
+      await waitFor(() => {
+        expect(result.current.arrivedAtPickup).toBe(true);
+      });
+      expect(result.current.status).toBe('at_pickup');
+      // No server write — at-pickup stays UI-only.
+      expect(setup.ridesRepo.spies.update).toBe(0);
+    });
+
+    it('pickup-geofence EXIT (no manual override) flips arrivedAtPickup back to false', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('en_route_to_pickup');
+      });
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('ENTER'));
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('at_pickup');
+      });
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('EXIT'));
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('en_route_to_pickup');
+      });
+      expect(result.current.arrivedAtPickup).toBe(false);
+    });
+
+    it('manual override holds across a subsequent geofence EXIT', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('en_route_to_pickup');
+      });
+
+      // Driver taps "Arrived at pickup" without GPS reporting inside.
+      act(() => {
+        result.current.onArriveAtPickup();
+      });
+      expect(result.current.status).toBe('at_pickup');
+      expect(result.current.arrivedAtPickup).toBe(true);
+
+      // GPS subsequently reports EXIT (cellular dead zone, GPS drift).
+      // The override should hold the at-pickup view.
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('EXIT'));
+      });
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(result.current.status).toBe('at_pickup');
+      expect(result.current.arrivedAtPickup).toBe(true);
+    });
+
+    it('status leaving dispatched resets the manual override', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('en_route_to_pickup');
+      });
+
+      // Manual override on.
+      act(() => {
+        result.current.onArriveAtPickup();
+      });
+      expect(result.current.arrivedAtPickup).toBe(true);
+
+      // Server-side flip to 'started' — manual override should reset
+      // so a future re-entry into 'dispatched' (theoretical) starts
+      // clean. Mostly defensive — production server doesn't roll a
+      // ride backward from 'started'.
+      act(() => {
+        useGpsStore.getState().setLocation(bgLocationEvent(2_000));
+      });
+      let ok = false;
+      await act(async () => {
+        ok = await result.current.onStartRide();
+      });
+      expect(ok).toBe(true);
+      await waitFor(() => {
+        expect(result.current.status).toBe('started');
+      });
+
+      // The at-pickup display flag flips to `false` because the status
+      // is no longer `'dispatched'` (the router returns 'started'
+      // regardless of `arrivedAtPickup`).
+      expect(result.current.status).toBe('started');
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import type { BgGeofenceEvent } from '@data/services/BackgroundGeolocationClient';
 import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
@@ -16,6 +17,7 @@ import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { UserId } from '@domain/entities/UserId';
 import { NetworkError } from '@domain/errors';
+import { useGeofenceUiStore, useGpsStore } from '@presentation/stores';
 import { InMemoryRideRepository, TestContainerProvider } from '@shared/testing';
 
 import { useRideMonitorViewModel } from '../useRideMonitorViewModel';
@@ -31,21 +33,10 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
-// expo-location: mock the foreground read used by useCurrentLocation,
-// which the view-model composes for the geofence tick. Default returns
-// a coordinate inside the pickup geofence so tests don't accidentally
-// trigger the exit-warning side effect.
-const mockLocationRef = { current: { latitude: 25.7617, longitude: -80.1918 } };
-jest.mock('expo-location', () => ({
-  __esModule: true,
-  Accuracy: { Balanced: 3 },
-  requestForegroundPermissionsAsync: jest.fn(async () => ({
-    status: 'granted',
-  })),
-  getCurrentPositionAsync: jest.fn(async () => ({
-    coords: mockLocationRef.current,
-  })),
-}));
+// Phase 7 turn 3: the rider VM no longer calls `useCurrentLocation` for
+// the geofence path — `useGpsLifecycle` (mounted at AppContent) is the
+// producer, and the VM reads via `useGpsLastGeofenceEvent`. No
+// `expo-location` mock needed.
 
 // react-native-toast-message: mock so the chat-stub doesn't throw when
 // the global Toast host isn't mounted in tests. The library exports a
@@ -134,6 +125,47 @@ function makeAwaitingRide(): Ride {
   );
 }
 
+/**
+ * Build a `'dispatched'` ride directly via `Ride.fromProps` to bypass
+ * the entity transitions (which would require a full `DriverSnapshot` +
+ * pickup `Route`). The rider geofence banner only cares about
+ * `ride.status === 'dispatched'`; constructing the driver snapshot
+ * here would add noise.
+ */
+function makeDispatchedRide(): Ride {
+  const awaiting = makeAwaitingRide();
+  return unwrap(
+    Ride.fromProps({
+      id: awaiting.id,
+      status: 'dispatched',
+      passenger: awaiting.passenger,
+      driver: null,
+      rideService: awaiting.rideService,
+      pickup: awaiting.pickup,
+      dropoff: awaiting.dropoff,
+      createdAt: awaiting.createdAt,
+      pickupTiming: awaiting.pickupTiming,
+      dropoffTiming: awaiting.dropoffTiming,
+      cancellation: null,
+      routePreference: null,
+    }),
+  );
+}
+
+let bgGeofenceTick = 1_000;
+function bgGeofenceEvent(
+  action: 'ENTER' | 'EXIT',
+  identifier: 'pickup' | string = 'pickup',
+): BgGeofenceEvent {
+  return {
+    identifier,
+    action,
+    rideId: null,
+    coords: null,
+    timestampMs: ++bgGeofenceTick,
+  };
+}
+
 function withTestContainer(opts: { ridesRepo: InMemoryRideRepository }) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider rides={opts.ridesRepo}>
@@ -147,6 +179,10 @@ describe('useRideMonitorViewModel', () => {
     mockNavigate.mockClear();
     mockReset.mockClear();
     mockReplace.mockClear();
+    // Module-scoped Zustand stores need an explicit per-test reset so
+    // the rider geofence path starts clean.
+    useGpsStore.getState().reset();
+    useGeofenceUiStore.getState().reset();
   });
 
   it('emits null while the ride is still loading', () => {
@@ -401,5 +437,164 @@ describe('useRideMonitorViewModel', () => {
     });
     expect(mockToastShow).toHaveBeenCalledTimes(1);
     expect(mockToastShow.mock.calls[0]?.[0]?.text1).toMatch(/messaging/i);
+  });
+
+  describe('pickup geofence banner (Phase 7 turn 3)', () => {
+    it('EXIT event during dispatched flips pickupExitWarningVisible to true', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+      // Sanity: banner starts hidden after store reset.
+      expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+        false,
+      );
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('EXIT'));
+      });
+
+      await waitFor(() => {
+        expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+          true,
+        );
+      });
+    });
+
+    it('ENTER event after EXIT dismisses the banner', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('EXIT'));
+      });
+      await waitFor(() => {
+        expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+          true,
+        );
+      });
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('ENTER'));
+      });
+      await waitFor(() => {
+        expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+          false,
+        );
+      });
+    });
+
+    it('EXIT event during awaiting_driver does NOT show the banner (status gate)', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      await ridesRepo.create(makeAwaitingRide());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('awaiting_driver');
+      });
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('EXIT'));
+      });
+
+      // Give the effect a tick to (incorrectly) fire.
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+        false,
+      );
+    });
+
+    it('status leaving dispatched dismisses a visible banner', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      const dispatched = makeDispatchedRide();
+      ridesRepo.seed(dispatched);
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+
+      act(() => {
+        useGpsStore.getState().setGeofenceEvent(bgGeofenceEvent('EXIT'));
+      });
+      await waitFor(() => {
+        expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+          true,
+        );
+      });
+
+      // Server-side flip into 'started' (rider boarded). The banner is
+      // irrelevant from this point — defensive dismiss.
+      const started = unwrap(
+        Ride.fromProps({
+          id: dispatched.id,
+          status: 'started',
+          passenger: dispatched.passenger,
+          driver: null,
+          rideService: dispatched.rideService,
+          pickup: dispatched.pickup,
+          dropoff: dispatched.dropoff,
+          createdAt: dispatched.createdAt,
+          pickupTiming: dispatched.pickupTiming,
+          dropoffTiming: dispatched.dropoffTiming,
+          cancellation: null,
+          routePreference: null,
+        }),
+      );
+      await ridesRepo.update(started);
+
+      await waitFor(() => {
+        expect(result.current.status).toBe('started');
+      });
+      expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+        false,
+      );
+    });
+
+    it('non-pickup identifier event is ignored', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+
+      act(() => {
+        // Future-proof: a 'dropoff' geofence we might register in a
+        // later phase shouldn't drive the pickup banner.
+        useGpsStore
+          .getState()
+          .setGeofenceEvent(bgGeofenceEvent('EXIT', 'dropoff'));
+      });
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(useGeofenceUiStore.getState().pickupExitWarningVisible).toBe(
+        false,
+      );
+    });
   });
 });

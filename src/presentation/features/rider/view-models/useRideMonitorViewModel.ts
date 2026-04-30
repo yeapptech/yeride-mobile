@@ -2,7 +2,6 @@ import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toast from 'react-native-toast-message';
 
-import { EvaluateExitWarning } from '@app/usecases/trip-tracking/EvaluateExitWarning';
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { ChatMessage } from '@domain/entities/ChatMessage';
 import type { Ride } from '@domain/entities/Ride';
@@ -10,13 +9,14 @@ import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { useUseCases } from '@presentation/di';
-import {
-  useCurrentLocation,
-  useFirestoreSubscription,
-} from '@presentation/hooks';
+import { useFirestoreSubscription } from '@presentation/hooks';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useCancelRideAsRiderMutation } from '@presentation/queries';
-import { useChatUiStore, useGeofenceUiStore } from '@presentation/stores';
+import {
+  useChatUiStore,
+  useGeofenceUiStore,
+  useGpsLastGeofenceEvent,
+} from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RideMonitorVM');
@@ -44,12 +44,18 @@ const logger = LOG.extend('RideMonitorVM');
  *        - `payment_failed` stays on RideMonitor (the rider sees the
  *          retry surface — actual retry mutation is Phase 6).
  *
- *   5. Geofence tick (turn 3.4b): during `dispatched`, evaluate
- *      `EvaluateExitWarning(currentLocation, pickup)` whenever a fresh
- *      foreground location read lands; flip the
- *      `useGeofenceUiStore.pickupExitWarningVisible` flag based on the
- *      signal. Phase 4 swaps `useCurrentLocation` for the
- *      background-aware `useGpsLifecycle`.
+ *   5. Geofence banner (Phase 7 turn 3): during `'dispatched'`, the
+ *      pickup-area exit warning is **event-driven** off
+ *      `useGpsLastGeofenceEvent()` — `useGpsLifecycle` (mounted at
+ *      AppContent) is the producer; this VM is one of many consumers.
+ *      An EXIT event flips `useGeofenceUiStore.pickupExitWarningVisible`
+ *      to `true`; an ENTER event dismisses it. A `useRef` keyed on the
+ *      event's `timestampMs` guards against re-handling the same event
+ *      across re-renders. When `status` leaves `'dispatched'` the
+ *      banner is dismissed unconditionally — defensive against stale
+ *      visibility surviving a status flip. (Replaces the legacy
+ *      foreground-poll path that ran `EvaluateExitWarning` against a
+ *      `useCurrentLocation` tick.)
  *
  *   6. Chat stub (turn 3.4b): subscribes to `ObserveLatestMessage`
  *      (Phase-3-stub returns null) and exposes `unreadCount: 0` for
@@ -59,8 +65,6 @@ const logger = LOG.extend('RideMonitorVM');
  * job — keeping animation state out of the view-model means tests don't
  * need a bottom-sheet host to exercise status transitions.
  */
-
-const evaluateExitWarning = new EvaluateExitWarning();
 
 export interface UseRideMonitorViewModel {
   readonly ride: Ride | null;
@@ -125,40 +129,51 @@ export function useRideMonitorViewModel(args: {
 
   const status = ride?.status ?? null;
 
-  // ── Geofence tick (turn 3.4b) ──────────────────────────────────
-  // Drive `useGeofenceUiStore.pickupExitWarningVisible` from the
-  // foreground location read against the pickup endpoint. Only ticks
-  // during 'dispatched' — once the rider boards the car, the warning
-  // is irrelevant. Phase 4 swaps the source for `useGpsLifecycle`.
-  const currentLocation = useCurrentLocation();
+  // ── Geofence banner (Phase 7 turn 3) ───────────────────────────
+  // Event-driven off `useGpsLifecycle`'s pickup-geofence subscription.
+  // `useGpsLifecycle` (mounted at AppContent) registers / deregisters
+  // the geofence based on the active ride's status; this VM only reads
+  // the resulting events. The legacy foreground-poll path
+  // (`EvaluateExitWarning` against `useCurrentLocation`) is retired.
+  //
+  // Guards:
+  //   - Status gate: only react while `status === 'dispatched'`. Other
+  //     statuses dismiss the banner (defensive — covers a stale `true`
+  //     surviving a server-side flip out of dispatched).
+  //   - Identifier gate: only `'pickup'` events drive the banner.
+  //   - Action gate: ENTER → dismiss; EXIT → show.
+  //   - Replay guard: a `useRef` keyed on `timestampMs` prevents
+  //     re-handling the same event across re-renders. Cleared when the
+  //     status leaves dispatched so a re-entry into dispatched on a
+  //     subsequent ride starts fresh.
+  const lastGeofenceEvent = useGpsLastGeofenceEvent();
   const showPickupExitWarning = useGeofenceUiStore(
     (s) => s.showPickupExitWarning,
   );
   const dismissPickupExitWarning = useGeofenceUiStore(
     (s) => s.dismissPickupExitWarning,
   );
+  const lastHandledGeofenceTsRef = useRef<number | null>(null);
   useEffect(() => {
     if (status !== 'dispatched') {
-      // Always clear when not in dispatched — defensive against stale
-      // banner state when the user backgrounds + foregrounds across
-      // status transitions.
       dismissPickupExitWarning();
+      lastHandledGeofenceTsRef.current = null;
       return;
     }
-    if (!ride || !currentLocation.coordinates) return;
-    const result = evaluateExitWarning.execute({
-      current: currentLocation.coordinates,
-      anchor: ride.pickup.location,
-    });
-    if (result.signal === 'exited') {
+    if (!lastGeofenceEvent) return;
+    if (lastGeofenceEvent.identifier !== 'pickup') return;
+    if (lastHandledGeofenceTsRef.current === lastGeofenceEvent.timestampMs) {
+      return;
+    }
+    lastHandledGeofenceTsRef.current = lastGeofenceEvent.timestampMs;
+    if (lastGeofenceEvent.action === 'EXIT') {
       showPickupExitWarning();
     } else {
       dismissPickupExitWarning();
     }
   }, [
     status,
-    ride,
-    currentLocation.coordinates,
+    lastGeofenceEvent,
     showPickupExitWarning,
     dismissPickupExitWarning,
   ]);
