@@ -1,4 +1,14 @@
 export { TestContainerProvider } from './TestContainerProvider';
+export { FakeBackgroundGeolocationClient } from './FakeBackgroundGeolocationClient';
+export type {
+  BgGeofenceAction,
+  BgGeofenceEvent,
+  BgLocationEvent,
+  BgPermissionStatus,
+  FakeBgGeofenceRecord,
+  FakeBgMethod,
+  FakeBgSpies,
+} from './FakeBackgroundGeolocationClient';
 export { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
 export type {
   CloudFunctionsMethod,

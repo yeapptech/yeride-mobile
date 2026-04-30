@@ -46,6 +46,7 @@
     "react": "19.2.0",
     "react-hook-form": "^7.74.0",
     "react-native": "0.83.6",
+    "react-native-background-geolocation": "^4.19.4",
     "react-native-gesture-handler": "~2.30.0",
     "react-native-google-places-autocomplete": "2.6.4",
     "react-native-maps": "1.24.0",

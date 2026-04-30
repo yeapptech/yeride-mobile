@@ -92,6 +92,28 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: BUNDLE_BY_ENV[APP_ENV],
     supportsTablet: false,
     ...(iosFirebaseConfig ? { googleServicesFile: iosFirebaseConfig } : {}),
+    infoPlist: {
+      // Phase 7: background-mode entitlements + Transistor BGTask identifiers
+      // required by `react-native-background-geolocation`. The SDK's iOS
+      // background-fetch hook will refuse to schedule the OS task without the
+      // identifiers below; `UIBackgroundModes` `location` + `fetch` are the
+      // entitlements the OS checks to allow GPS callbacks while the app is
+      // backgrounded. The motion-usage description is required because the
+      // SDK reads CMMotionActivityManager to gate the moving/stationary
+      // state machine.
+      //
+      // Foreground location-permission strings (`NSLocationWhenInUseUsageDescription`
+      // + `NSLocationAlwaysAndWhenInUseUsageDescription`) are emitted by the
+      // existing `expo-location` plugin block below, so we don't restate them
+      // here.
+      UIBackgroundModes: ['location', 'fetch'],
+      BGTaskSchedulerPermittedIdentifiers: [
+        'com.transistorsoft.fetch',
+        'com.transistorsoft.customtask',
+      ],
+      NSMotionUsageDescription:
+        'YeRide Next uses motion-activity data to detect when your trip starts and stops, improving battery life.',
+    },
   },
   android: {
     package: BUNDLE_BY_ENV[APP_ENV],
@@ -133,6 +155,26 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           'Allow YeRide Next to use your camera so you can take photos of your vehicle.',
       },
     ],
+    [
+      // Phase 7: background-aware location + geofence pipeline. The SDK's
+      // Expo plugin (a) writes the iOS `BGTaskSchedulerPermittedIdentifiers`
+      // helper config and patches Android `AndroidManifest.xml` with the
+      // foreground-service permissions / notification channel scaffolding,
+      // and (b) bakes the license key into the native bundle. The license is
+      // consumed at BUILD time only — there is no runtime read. Without the
+      // env var set, the SDK runs in time-limited debug mode (fine for dev,
+      // blocks release builds). `npm run prebuild` is required after this
+      // plugin lands so the native config takes effect.
+      'react-native-background-geolocation',
+      { license: process.env.BG_GEOLOCATION_LICENSE_KEY ?? '' },
+    ],
+    // The SDK's own plugin only registers a maven URL for its own libs/.
+    // `react-native-background-fetch` is a sibling peer dep with its own
+    // flatdir AAR (`tsbackgroundfetch:1.0.4`); without this extra repo
+    // entry, Gradle's `:app:processDebugResources` fails with "Could not
+    // find com.transistorsoft:tsbackgroundfetch:1.0.4". Must run AFTER
+    // the SDK plugin so the merge anchor lands inside the same repos block.
+    './plugins/withBackgroundFetchMaven.js',
     [
       // Phase 6 turn 3: in-app card collection via Stripe's React Native
       // SDK. The Expo plugin (a) writes the Apple Pay merchant identifier

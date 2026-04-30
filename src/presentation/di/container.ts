@@ -63,6 +63,7 @@ import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@da
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
 import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } from '@data/repositories/FirestoreVehicleRepository';
+import type { BackgroundGeolocationClient as BackgroundGeolocationClientType } from '@data/services/BackgroundGeolocationClient';
 import type { CloudFunctionsService as CloudFunctionsServiceType } from '@data/services/CloudFunctionsService';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
 import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
@@ -85,6 +86,7 @@ import type {
 import { getGoogleMapsApiKey, getStripeServerConfig } from '@shared/env';
 import { LOG } from '@shared/logger';
 import type {
+  FakeBackgroundGeolocationClient as FakeBackgroundGeolocationClientType,
   FakeCloudFunctionsService as FakeCloudFunctionsServiceType,
   FakeRoutesService as FakeRoutesServiceType,
   FakeStripeServerService as FakeStripeServerServiceType,
@@ -209,6 +211,24 @@ export interface UseCases {
 
 export interface Container {
   useCases: UseCases;
+  /**
+   * Phase 7 turn 1: the background-geolocation seam. Exposed alongside
+   * `useCases` rather than wrapped in a use case because `useGpsLifecycle`
+   * (Turn 2) drives the SDK directly — its responsibilities (permission
+   * flow, listener-level dedup, geofence registration) don't fit the
+   * stateless-use-case shape used by every other domain.
+   *
+   * The presentation layer reaches it via `useUseCases().bgGeolocation` is
+   * NOT the convention — `useGpsLifecycle` will read from a sibling
+   * `useBackgroundGeolocation()` hook in Turn 2 that pulls from the
+   * Container directly.
+   *
+   * Tests inject a `FakeBackgroundGeolocationClient` via
+   * `TestContainerProvider`'s optional `bgGeolocation` prop.
+   */
+  bgGeolocation:
+    | BackgroundGeolocationClientType
+    | FakeBackgroundGeolocationClientType;
 }
 
 /**
@@ -380,6 +400,13 @@ export function buildContainer(): Container {
   // pattern as routes: real adapter when env keys present, fake otherwise.
   const stripeServer = buildStripeServerService();
 
+  // Phase 7 turn 1: BackgroundGeolocation. Unconditional in production —
+  // the SDK degrades to time-limited debug mode without a license, which
+  // is fine for dev / stage smokes. Tests inject the fake via
+  // `TestContainerProvider`; this branch is never hit under jest because
+  // the module is mocked globally in `jest.setup.ts`.
+  const bgGeolocation = buildBackgroundGeolocationClient();
+
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
       FirebaseAuthRepository: new () => FirebaseAuthRepositoryType;
@@ -413,7 +440,7 @@ export function buildContainer(): Container {
     const paymentCallable: PaymentCallableService =
       new dataCloudFunctions.CloudFunctionsService();
     LOG.info(
-      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories + StripeServer + CloudFunctions',
+      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories + StripeServer + CloudFunctions + BackgroundGeolocationClient',
     );
     return {
       useCases: makeUseCases({
@@ -430,6 +457,7 @@ export function buildContainer(): Container {
         stripeServer,
         paymentCallable,
       }),
+      bgGeolocation,
     };
   }
 
@@ -461,7 +489,29 @@ export function buildContainer(): Container {
       stripeServer,
       paymentCallable: new testing.FakeCloudFunctionsService(),
     }),
+    bgGeolocation,
   };
+}
+
+/**
+ * Build the real `BackgroundGeolocationClient`. Unconditional in
+ * production — the Transistor SDK degrades to time-limited debug mode
+ * without a license, which is acceptable for dev / stage smokes.
+ *
+ * Lazy-required so a fakes-only build that never reaches the runtime
+ * Container construction (e.g. a unit test that imports a use case
+ * directly) doesn't pull the SDK into the bundle.
+ *
+ * Tests use `TestContainerProvider`'s `bgGeolocation` override slot to
+ * inject `FakeBackgroundGeolocationClient` directly — this builder is
+ * not exercised under jest because `react-native-background-geolocation`
+ * is mocked globally in `jest.setup.ts`.
+ */
+function buildBackgroundGeolocationClient(): BackgroundGeolocationClientType {
+  const dataBg = require('@data/services/BackgroundGeolocationClient') as {
+    BackgroundGeolocationClient: new () => BackgroundGeolocationClientType;
+  };
+  return new dataBg.BackgroundGeolocationClient();
 }
 
 /**

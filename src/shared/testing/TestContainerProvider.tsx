@@ -8,6 +8,7 @@ import {
   type UseCases,
 } from '@presentation/di';
 
+import { FakeBackgroundGeolocationClient } from './FakeBackgroundGeolocationClient';
 import { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
 import { FakeRoutesService } from './FakeRoutesService';
 import { FakeStripeServerService } from './FakeStripeServerService';
@@ -55,6 +56,7 @@ export function TestContainerProvider({
   vinDecoder,
   stripeServer,
   cloudFunctions,
+  bgGeolocation,
   useCases,
   children,
 }: {
@@ -69,6 +71,7 @@ export function TestContainerProvider({
   vinDecoder?: FakeVinDecoderService;
   stripeServer?: FakeStripeServerService;
   cloudFunctions?: FakeCloudFunctionsService;
+  bgGeolocation?: FakeBackgroundGeolocationClient;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
@@ -85,6 +88,8 @@ export function TestContainerProvider({
   const stripeServerService = stripeServer ?? new FakeStripeServerService();
   const cloudFunctionsService =
     cloudFunctions ?? new FakeCloudFunctionsService();
+  const bgGeolocationClient =
+    bgGeolocation ?? new FakeBackgroundGeolocationClient();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
@@ -99,7 +104,10 @@ export function TestContainerProvider({
     paymentCallable: cloudFunctionsService,
   });
   const merged: UseCases = { ...base, ...useCases };
-  const container: Container = { useCases: merged };
+  const container: Container = {
+    useCases: merged,
+    bgGeolocation: bgGeolocationClient,
+  };
 
   // Every view-model test needs a QueryClientProvider — view-models
   // compose TanStack queries / mutations as of Phase 3 turn 3. Make a
