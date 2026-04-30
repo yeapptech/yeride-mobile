@@ -1,19 +1,9 @@
-import { Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
 /**
- * Phase 6 placeholder. Real wallet (payment methods + Stripe customer
- * surface) lands then.
+ * Deprecated as of Phase 6 turn 3. The real Wallet screen lives in
+ * `WalletScreen.tsx` and is mounted on the rider tab in
+ * `RiderTabsNavigator`. This file is retained as an empty module only
+ * because the sandboxed dev environment cannot delete files; the next
+ * developer working in a regular checkout should `rm` it outright.
  */
-export default function WalletPlaceholderScreen() {
-  return (
-    <SafeAreaView className="flex-1 bg-background px-6">
-      <View className="flex-1 items-center justify-center">
-        <Text className="mb-2 text-2xl font-bold text-foreground">Wallet</Text>
-        <Text className="text-center text-sm text-muted-foreground">
-          Payment methods and ride history will live here. Lands in Phase 6.
-        </Text>
-      </View>
-    </SafeAreaView>
-  );
-}
+
+export {};

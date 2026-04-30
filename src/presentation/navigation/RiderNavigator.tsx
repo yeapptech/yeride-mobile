@@ -1,6 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
+import AddPaymentMethodScreen from '@presentation/features/rider/screens/AddPaymentMethodScreen';
 import RideMonitorScreen from '@presentation/features/rider/screens/RideMonitorScreen';
 import RideReceiptScreen from '@presentation/features/rider/screens/RideReceiptScreen';
 import RouteSearchScreen from '@presentation/features/rider/screens/RouteSearchScreen';
@@ -58,6 +59,11 @@ export function RiderNavigator() {
         name="UserProfile"
         component={UserProfileScreen}
         options={{ title: 'Profile' }}
+      />
+      <Stack.Screen
+        name="AddPaymentMethod"
+        component={AddPaymentMethodScreen}
+        options={{ title: 'Add card', presentation: 'modal' }}
       />
     </Stack.Navigator>
   );

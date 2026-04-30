@@ -33,3 +33,10 @@ export {
   useVinDecodeQuery,
   type UploadVehiclePhotosInput,
 } from './vehicle.queries';
+export {
+  useCreateSetupIntentMutation,
+  useDetachPaymentMethodMutation,
+  useEnsureStripeCustomerMutation,
+  useListPaymentMethodsQuery,
+  useSetDefaultPaymentMethodMutation,
+} from './payment.queries';

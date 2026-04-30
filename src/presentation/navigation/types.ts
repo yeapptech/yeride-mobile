@@ -73,6 +73,14 @@ export type RiderStackParamList = {
    * familiarity until turn 3.5 finalizes the layout.
    */
   UserProfile: undefined;
+  /**
+   * Add-card modal reachable from the Wallet tab. Pushed with
+   * `presentation: 'modal'` so it slides over the tab bar. The screen's
+   * view-model lazily fires `EnsureStripeCustomer` then `CreateSetupIntent`
+   * before handing off to Stripe's native `confirmSetupIntent`. Phase 6
+   * turn 3.
+   */
+  AddPaymentMethod: undefined;
 };
 
 /**

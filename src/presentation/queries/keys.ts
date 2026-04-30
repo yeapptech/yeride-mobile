@@ -1,6 +1,7 @@
 import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { ServiceAreaId } from '@domain/entities/ServiceAreaId';
+import type { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import type { UserId } from '@domain/entities/UserId';
 
 /**
@@ -25,7 +26,7 @@ import type { UserId } from '@domain/entities/UserId';
  *
  * Naming: top-level domains are scoped after the entity they serve
  * (`ride`, `user`, `serviceArea`, `route`, `location`, `tripEvent`,
- * `payment`). Each scope exposes:
+ * `vehicle`, `payment`). Each scope exposes:
  *   - `all()` — root prefix, useful for sweeping invalidation
  *   - `lists()` / `list(filters)` — collection-shaped queries
  *   - `byId(id)` / `details(id)` — single-resource queries
@@ -180,6 +181,23 @@ export const queryKeys = {
      */
     activeForDriver: (driverId: UserId) =>
       ['vehicle', 'activeForDriver', String(driverId)] as const,
+  },
+
+  // ─── Payments / Stripe ────────────────────────────────────────────
+  // Phase 6 turn 3 keys for the rider Wallet surface. Driver-side keys
+  // (Connect account / balance / payouts) land in turn 4.
+  //
+  // Methods are scoped on the rider's `stripeCustomerId` rather than
+  // their `UserId`. Reason: `StripeCustomerId` is the identity Stripe
+  // itself uses for the resource, and gating the query on
+  // `customerId !== null` (`enabled: customerId !== null` at the call
+  // site) means the cache key is never observed for a rider who hasn't
+  // ensured a customer record yet.
+  payment: {
+    all: () => ['payment'] as const,
+    /** Saved payment methods for one Stripe customer. */
+    methodsByCustomer: (customerId: StripeCustomerId) =>
+      ['payment', 'methodsByCustomer', String(customerId)] as const,
   },
 } as const;
 

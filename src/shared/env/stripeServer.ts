@@ -47,3 +47,33 @@ export function getStripeServerConfig(): StripeServerConfig | null {
 export function isStripeServerConfigured(): boolean {
   return getStripeServerConfig() !== null;
 }
+
+/**
+ * Read the Stripe publishable key out of `expo-constants`'s `extra` bag
+ * (set by `app.config.ts` from the `STRIPE_PUBLISHABLE_KEY` env var at
+ * build time).
+ *
+ * Returns `null` when the key is missing — the rewrite degrades gracefully:
+ * `App.tsx` skips mounting `<StripeProvider/>`, the rider Wallet view-model
+ * surfaces an `'unconfigured'` UI state, and the rest of the app boots
+ * normally. This mirrors the `getGoogleMapsApiKey()` → `FakeRoutesService`
+ * fallback pattern.
+ *
+ * The publishable key is PUBLIC by design — Stripe intends it to ship in
+ * the client. Even so we read it via `extra` (NOT `EXPO_PUBLIC_*`) for
+ * consistency with the other Stripe env vars and to keep it out of the
+ * bundled string blob.
+ *
+ * Lazy `require` of `expo-constants` so the helper is callable from test
+ * environments where Expo native modules don't load.
+ */
+export function getStripePublishableKey(): string | null {
+  const Constants = require('expo-constants') as {
+    default?: { expoConfig?: { extra?: Record<string, unknown> } };
+  };
+  const extra = Constants.default?.expoConfig?.extra;
+  if (!extra) return null;
+  const key = extra['stripePublishableKey'];
+  if (typeof key !== 'string' || key.length === 0) return null;
+  return key;
+}

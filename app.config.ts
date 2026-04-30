@@ -133,6 +133,24 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           'Allow YeRide Next to use your camera so you can take photos of your vehicle.',
       },
     ],
+    [
+      // Phase 6 turn 3: in-app card collection via Stripe's React Native
+      // SDK. The Expo plugin (a) writes the Apple Pay merchant identifier
+      // into the iOS entitlements plist and (b) toggles the Google Pay
+      // meta-data flag in AndroidManifest.xml. Apple Pay / Google Pay are
+      // NOT enabled this phase — `enableGooglePay` and `includeOnramp`
+      // default to false; the merchantIdentifier is a placeholder so the
+      // plugin schema is satisfied. Phase 9 polish can flip these on.
+      //
+      // Card data never touches our app or our server: Stripe tokenizes
+      // inside the native SDK. The publishable key is consumed by
+      // `<StripeProvider/>` (mounted in App.tsx) — see the `extra` block
+      // below.
+      '@stripe/stripe-react-native',
+      {
+        merchantIdentifier: 'merchant.tech.yeapp.yeridenext.dev',
+      },
+    ],
     // Google Maps API keys → AndroidManifest meta-data + iOS GMSApiKey.
     // No-ops when the env vars aren't set (dev convenience: the runtime
     // falls back to FakeRoutesService in that case).
@@ -204,6 +222,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // falls back to `FakeStripeServerService`.
     stripeServerUrl: process.env.STRIPE_SERVER_URL ?? null,
     stripeServerApiKey: process.env.STRIPE_SERVER_API_KEY ?? null,
+    // Stripe publishable key (Phase 6 turn 3). Public-by-design — Stripe
+    // intends this key to ship in the client. Read at app boot by
+    // `<StripeProvider/>` via `getStripePublishableKey()`. NOT prefixed
+    // `EXPO_PUBLIC_*` for consistency with the other Stripe env vars
+    // (build-time resolution → runtime read keeps the value out of the
+    // bundled string blob even when public). Without this set, the Wallet
+    // surface renders an `'unconfigured'` empty state with a loud error.
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? null,
   },
   experiments: {
     typedRoutes: false,
