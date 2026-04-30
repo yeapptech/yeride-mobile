@@ -156,12 +156,20 @@ module.exports = [
   // providers.
   // src/presentation/di/container.ts is the composition root — by
   // architectural convention it's allowed to wire every layer together.
+  // Phase 7 turn 2: useGpsLifecycle.ts and useGpsStore.ts are the
+  // presentation-layer seam over the BackgroundGeolocationClient SDK
+  // adapter. They import the adapter's `Bg*Event` / `BgPermissionStatus`
+  // domain-shaped types so the rest of the presentation layer never has
+  // to know the SDK exists. Same architectural exception as the DI
+  // container: a single composition file allowed to cross layers.
   {
     files: [
       '**/__tests__/**/*.{ts,tsx}',
       '**/*.test.{ts,tsx}',
       'src/shared/testing/**/*.{ts,tsx}',
       'src/presentation/di/container.ts',
+      'src/presentation/hooks/useGpsLifecycle.ts',
+      'src/presentation/stores/useGpsStore.ts',
     ],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

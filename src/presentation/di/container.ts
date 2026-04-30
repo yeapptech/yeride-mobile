@@ -218,10 +218,9 @@ export interface Container {
    * flow, listener-level dedup, geofence registration) don't fit the
    * stateless-use-case shape used by every other domain.
    *
-   * The presentation layer reaches it via `useUseCases().bgGeolocation` is
-   * NOT the convention — `useGpsLifecycle` will read from a sibling
-   * `useBackgroundGeolocation()` hook in Turn 2 that pulls from the
-   * Container directly.
+   * Phase 7 turn 2 reaches the adapter via the sibling
+   * `useBackgroundGeolocation()` hook (alongside `useUseCases()`).
+   * `useGpsLifecycle` is the single consumer.
    *
    * Tests inject a `FakeBackgroundGeolocationClient` via
    * `TestContainerProvider`'s optional `bgGeolocation` prop.

@@ -175,6 +175,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // find com.transistorsoft:tsbackgroundfetch:1.0.4". Must run AFTER
     // the SDK plugin so the merge anchor lands inside the same repos block.
     './plugins/withBackgroundFetchMaven.js',
+    // Phase 7 turn 2 (post-device-smoke fix): pin
+    // `playServicesLocationVersion = "21.0.1"` so the SDK selects the
+    // `tslocationmanager-v21` AAR (binary-compatible with
+    // `FusedLocationProviderClient` as an interface). Without this pin,
+    // the SDK defaults to 20.0.0 and pulls the legacy AAR that expects
+    // `FusedLocationProviderClient` to be a CLASS — at runtime,
+    // dependencies (Firebase, expo-location, etc.) drag in a newer
+    // play-services-location where `FusedLocationProviderClient` is an
+    // INTERFACE, and `TSLocationManager.stop()` crashes with
+    // `IncompatibleClassChangeError`. Legacy yeride applies the same
+    // pin in its `android/build.gradle`'s top-level `ext { }` block.
+    './plugins/withPlayServicesLocationVersion.js',
     [
       // Phase 6 turn 3: in-app card collection via Stripe's React Native
       // SDK. The Expo plugin (a) writes the Apple Pay merchant identifier

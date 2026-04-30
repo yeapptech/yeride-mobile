@@ -33,6 +33,15 @@ export {
   usePickupExitWarningVisible,
 } from './useGeofenceUiStore';
 export {
+  useGpsCurrentLocation,
+  useGpsCurrentOdometer,
+  useGpsCurrentSpeed,
+  useGpsIsInsidePickupGeofence,
+  useGpsLastGeofenceEvent,
+  useGpsPermissionStatus,
+  useGpsStore,
+} from './useGpsStore';
+export {
   useChatIsOpen,
   useChatLastReadAt,
   useChatUiStore,

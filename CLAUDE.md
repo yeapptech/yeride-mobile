@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 30, 2026 (Phase 7 turn 1 — `BackgroundGeolocationClient` adapter + fake + DI wiring)
+**Last updated:** April 30, 2026 (Phase 7 turn 2 — `useGpsLifecycle` + AppContent integration + pickup geofence)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,39 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 7 turn 2 shipped.** The single GPS-aware presentation hook
+(`useGpsLifecycle`) is mounted exactly once at AppContent. The
+SDK lifecycle (init / permission / start / stop), the location and
+geofence subscriptions, the pickup-geofence (re-)registration, and
+the synchronous chain-ordered teardown all live inside one
+`AppContent.tsx`-only hook. View-models read GPS state via cheap
+`useGpsStore` selector hooks (`useGpsCurrentLocation`,
+`useGpsCurrentOdometer`, `useGpsLastGeofenceEvent`,
+`useGpsIsInsidePickupGeofence`, `useGpsPermissionStatus`). The
+`enabled` predicate mirrors the legacy `gpsStart(200)` gate: rider
+with `defaultPaymentMethodId !== null`, driver with
+`stripeChargesEnabled && stripePayoutsEnabled`. Location events fan
+out to `useUpdateLocationMutation.mutate(UserLocation)` (no JS-side
+debounce — SDK's `distanceFilter: 200` is the rate limiter). A new
+sibling `useActiveRideForGeofence(user)` hook discovers the active
+ride via the role-appropriate `useInProgressRideQuery` /
+`useInProgressDriverRideQuery` and overlays a live `observeRide`
+subscription so a status flip (`'dispatched' → 'started'`)
+reactively swaps the geofence in / out. Sign-out resets
+`useGpsStore` (canonical reset point). The new `useBackgroundGeolocation()`
+hook in `@presentation/di` is the sibling of `useUseCases()` —
+exclusively consumed by `useGpsLifecycle`. ESLint boundaries-rule
+override extended to include the two presentation-layer SDK seams
+(`useGpsLifecycle.ts` + `useGpsStore.ts`) alongside the existing
+`presentation/di/container.ts` exception. Phase 7 turn 2 delta:
+**+4 suites / +38 tests**, lands at **152 suites / 1162 tests**
+(Turn 1 close 148/1124 → Turn 2 152/1162). No view-model swap-ins
+this turn — Turn 3 swaps `useRideMonitorViewModel`'s foreground
+geofence tick for `useGpsLastGeofenceEvent()`, auto-flips
+`useDriverMonitorViewModel.arrivedAtPickup` from
+`useGpsIsInsidePickupGeofence()`, and replaces `stubOdometerMeters`
+with `useGpsCurrentOdometer()`.
 
 **Phase 7 turn 1 shipped.** The single SDK seam over
 `react-native-background-geolocation@4.19.4` is in. Eleven methods
@@ -37,9 +70,7 @@ A — no runtime read; SDK degrades to time-limited debug mode without).
 **`npm run android` succeeds** on a Pixel 10 Pro emulator post-prebuild
 with the new plugin block + Maven plugin patch in place. Phase 7
 turn 1 delta: **+2 suites / +31 tests**, lands at **148 suites / 1124
-tests** (Phase 6 close 146/1093 → Turn 1 148/1124). No view-model
-changes this turn — Turn 2 builds `useGpsLifecycle` on top of the
-adapter.
+tests** (Phase 6 close 146/1093 → Turn 1 148/1124).
 
 **Phase 6 closed.** Across five turns Phase 6 added the entire
 payments / Stripe Connect / tipping surface: branded Stripe IDs +
@@ -105,13 +136,13 @@ unstable object reference). Express dashboard reach via
 sandbox virtiofs blocks `unlink()`. Tip flow on RideReceipt remains
 pending (Turn 5).
 
-| Phase          | Scope                                                | Status  |
-| -------------- | ---------------------------------------------------- | ------- |
-| Phase 6 turn 4 | Driver Earnings + Stripe Connect onboarding          | ✅      |
-| Phase 6 turn 5 | Tip flow on RideReceipt + Phase 6 cleanup            | ✅      |
-| Phase 7 turn 1 | `BackgroundGeolocationClient` adapter + fake + DI    | ✅      |
-| Phase 7 turn 2 | `useGpsLifecycle` + AppContent integration           | Next    |
-| Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close | Pending |
+| Phase          | Scope                                                | Status |
+| -------------- | ---------------------------------------------------- | ------ |
+| Phase 6 turn 4 | Driver Earnings + Stripe Connect onboarding          | ✅     |
+| Phase 6 turn 5 | Tip flow on RideReceipt + Phase 6 cleanup            | ✅     |
+| Phase 7 turn 1 | `BackgroundGeolocationClient` adapter + fake + DI    | ✅     |
+| Phase 7 turn 2 | `useGpsLifecycle` + AppContent integration           | ✅     |
+| Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close | Next   |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -170,8 +201,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)        | ✅                             |
 | 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)   | ✅                             |
 | 7 turn 1  | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch            | ✅                             |
-| 7 turn 2  | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation         | Next                           |
-| 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | Pending                        |
+| 7 turn 2  | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation         | ✅                             |
+| 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | Next                           |
 | 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
@@ -267,6 +298,57 @@ helpers added (`setStripeCustomerId`, `setDefaultPaymentMethodId`,
 `setStripeAccountId`, `setStripeAccountFlags`). `userMapper`
 gracefully falls back to `null` (with `LOG.warn`) on malformed Stripe
 ids — never crashes hydration on a single bad doc.
+
+End of Phase 7 turn 2 acceptance: **152 test suites / 1162 tests passing**
+(+4 suites / +38 tests over Phase 7 turn 1's 148/1124 — at the high
+end of the kickoff's "≥20 tests" estimate band but every test maps
+to a documented behavior); typecheck, lint, format, and test all
+green. `useGpsStore` (the Zustand mirror of the SDK's location +
+geofence streams) ships with six fields, five action methods, and
+six selector hooks (`useGpsCurrentLocation`, `useGpsCurrentOdometer`,
+`useGpsCurrentSpeed`, `useGpsLastGeofenceEvent`,
+`useGpsIsInsidePickupGeofence`, `useGpsPermissionStatus`). The
+`useGpsLifecycle` hook (mounted exactly once at AppContent — never
+in a screen / VM) owns the SDK lifecycle: idempotent
+`init({ distanceFilter: 200, debug: __DEV__ })` on first
+`enabled === true`, one-shot `requestAuthorizationIfNeeded()`,
+`start()` / `stop()` per `enabled`, location subscription that fans
+into `useGpsStore.setLocation` AND fires
+`useUpdateLocationMutation.mutate(UserLocation)` per delivery,
+geofence subscription that pushes into `useGpsStore.setGeofenceEvent`
+(which derives `isInsidePickupGeofence` from `event.action`),
+synchronous chain-ordered teardown
+`stop → removeAllGeofences → removeAllListeners` on unmount. Pickup
+geofence registration: `useActiveRideForGeofence(user)` resolves the
+active ride via `useInProgressRideQuery` /
+`useInProgressDriverRideQuery` (per role) plus a live `observeRide`
+overlay so a `'dispatched' → 'started'` flip reactively swaps the
+geofence in / out; AppContent passes the result to
+`useGpsLifecycle.activeRideForGeofence`. The `enabled` predicate
+mirrors the legacy `gpsStart(200)` gate: rider with
+`defaultPaymentMethodId !== null`, driver with
+`stripeChargesEnabled && stripePayoutsEnabled`. Sign-out resets
+`useGpsStore` (canonical reset point — the lifecycle hook's
+`enabled === false` path stops the SDK but leaves the store alone
+so a brief flicker doesn't drop the user's last known location).
+The new `useBackgroundGeolocation()` hook in `@presentation/di` is
+the sibling of `useUseCases()`; `useGpsLifecycle` is its sole
+consumer. **No JS-side debounce** on location writes (kickoff
+decision 4 — SDK's `distanceFilter: 200` is the canonical rate
+limiter; the `FirestoreLocationRepository`'s 3-retry backoff handles
+transient failures). ESLint boundaries-rule override extended to
+include `useGpsLifecycle.ts` + `useGpsStore.ts` alongside
+`presentation/di/container.ts` — these are the presentation-layer
+SDK seams (kickoff decisions 2 + 3, architectural exception
+documented inline). No view-model swap-ins this turn — Turn 3
+swaps `useRideMonitorViewModel`'s foreground geofence tick for
+`useGpsLastGeofenceEvent()`, auto-flips
+`useDriverMonitorViewModel.arrivedAtPickup` from
+`useGpsIsInsidePickupGeofence()`, and replaces
+`stubOdometerMeters` with `useGpsCurrentOdometer()`. **No native
+config changes** this turn (Turn 1's prebuild already landed
+everything); a fresh `npm run prebuild` is not required to ship
+Turn 2.
 
 End of Phase 7 turn 1 acceptance: **148 test suites / 1124 tests passing**
 (+2 suites / +31 tests over Phase 6's close at 146/1093 — slightly above
@@ -718,6 +800,12 @@ new app writes to it.
 | `plugins/withBackgroundFetchMaven.js`                                             | Phase 7 turn 1 — custom Expo config plugin. Injects `${project(':react-native-background-fetch').projectDir}/libs` into `android/build.gradle`'s `allprojects.repositories`. Required because the SDK's own plugin only registers its own libs/, and modern npm hoists the sibling `react-native-background-fetch` to top-level `node_modules/`. Without it, `app:processDebugResources` fails with "Could not find com.transistorsoft:tsbackgroundfetch:1.0.4". Idempotent via `mergeContents` tag |
 | `jest.setup.ts`                                                                   | Phase 7 turn 1 — also mocks `react-native-background-geolocation` globally with `mock`-prefixed names (Jest hoisting rule). Per-bucket listener registry + `__emitLocation` / `__emitGeofence` / `__reset` test helpers. SDK constants exposed (`DESIRED_ACCURACY_HIGH`, `LOG_LEVEL_*`, `AUTHORIZATION_STATUS_*`) so the adapter's import-time references resolve cleanly                                                                                                                           |
 | `app.config.ts`                                                                   | Phase 7 turn 1 — adds the `react-native-background-geolocation` Expo plugin block (license consumed at BUILD time only via `BG_GEOLOCATION_LICENSE_KEY`), the new `withBackgroundFetchMaven` plugin entry, and the iOS infoPlist additions (`UIBackgroundModes: ['location','fetch']`, `BGTaskSchedulerPermittedIdentifiers`, `NSMotionUsageDescription`). `npm run prebuild` required after edits                                                                                                  |
+| `src/presentation/stores/useGpsStore.ts`                                          | Phase 7 turn 2 — Zustand mirror of the SDK's location + geofence streams. Six fields (permissionStatus, currentLocation, currentSpeed, currentOdometerMeters, lastGeofenceEvent, isInsidePickupGeofence). `setGeofenceEvent` auto-derives `isInsidePickupGeofence` from `event.action`; `setIsInsidePickupGeofence(false)` is the deregistration escape hatch. Six selector hooks. Mounting rule: `useGpsLifecycle` is the only writer; everyone else reads via the selector hooks                  |
+| `src/presentation/hooks/useGpsLifecycle.ts`                                       | Phase 7 turn 2 — single GPS-aware presentation hook, AppContent-only. Five effects: SDK lifecycle (init/permission/start/stop), location subscription → store + `useUpdateLocationMutation`, geofence subscription → store, pickup-geofence (re-)registration via `activeRideForGeofence`, synchronous chain-ordered teardown `stop → removeAllGeofences → removeAllListeners`. `useRef`-guarded init + permission flags. No JS-side debounce — SDK's `distanceFilter: 200` is the rate limiter     |
+| `src/presentation/hooks/useActiveRideForGeofence.ts`                              | Phase 7 turn 2 — pure read-only resolver for the geofence target. Two-stage: discovery via the role-appropriate `useInProgressRideQuery` / `useInProgressDriverRideQuery`, live overlay via `observeRide` so a `'dispatched' → 'started'` flip reactively swaps the geofence in / out. Returns `{rideId, pickupCoords}` only when `ride.status === 'dispatched'`                                                                                                                                    |
+| `src/presentation/AppContent.tsx`                                                 | Phase 7 turn 2 — also mounts `useGpsLifecycle` once. Computes `enabled` via `isRegistrationComplete(user)` (rider needs `defaultPaymentMethodId !== null`; driver needs `stripeChargesEnabled && stripePayoutsEnabled` — mirrors the legacy `computeTargetRoute` gate). Resolves `activeRideForGeofence` via `useActiveRideForGeofence(user)`. Resets `useGpsStore` on `'unauthenticated'` transition (canonical reset point)                                                                       |
+| `src/presentation/di/ContainerProvider.tsx`                                       | Phase 7 turn 2 — adds the sibling `useBackgroundGeolocation()` hook alongside `useUseCases()`. Same throw-outside-provider contract. `useGpsLifecycle` is the sole consumer                                                                                                                                                                                                                                                                                                                         |
+| `eslint.config.js`                                                                | Phase 7 turn 2 — boundaries-rule override extended to include `useGpsLifecycle.ts` + `useGpsStore.ts` alongside `presentation/di/container.ts`. These are the presentation-layer SDK seams (kickoff decisions 2 + 3) — same architectural exception as the DI composition root                                                                                                                                                                                                                      |
 
 ## Build & deployment
 
@@ -1093,7 +1181,11 @@ Session store              → src/presentation/stores/useSessionStore.ts
 Service-area store         → src/presentation/stores/useServiceAreaStore.ts
 Trip-draft store           → src/presentation/stores/useTripDraftStore.ts (pre-CreateRide draft)
 Geofence-UI store          → src/presentation/stores/useGeofenceUiStore.ts (banner visibility)
+GPS store                  → src/presentation/stores/useGpsStore.ts (phase 7 turn 2 — SDK location/geofence mirror; selector hooks for VMs)
 Chat-UI store              → src/presentation/stores/useChatUiStore.ts (open flag, lastReadAt)
+GPS lifecycle hook         → src/presentation/hooks/useGpsLifecycle.ts (phase 7 turn 2 — AppContent-only; init/permission/start/stop + location+geofence subs + chain teardown)
+Active-ride-for-geofence   → src/presentation/hooks/useActiveRideForGeofence.ts (phase 7 turn 2 — discovers + live-overlays the dispatched ride)
+useBackgroundGeolocation   → src/presentation/di/ContainerProvider.tsx (phase 7 turn 2 — sibling of useUseCases())
 
 Root navigator             → src/presentation/navigation/RootNavigator.tsx
 Auth / VerifyEmail navs    → src/presentation/navigation/{AuthNavigator,VerifyEmailNavigator}.tsx

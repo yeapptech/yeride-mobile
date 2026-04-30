@@ -41,3 +41,29 @@ export function useUseCases(): UseCases {
   }
   return ctx.useCases;
 }
+
+/**
+ * Hook returning the background-geolocation seam. Sibling of
+ * `useUseCases()` because `useGpsLifecycle` (Phase 7 turn 2) drives the
+ * SDK lifecycle directly — its responsibilities (permission flow,
+ * listener-level dedup, geofence registration) don't fit the
+ * stateless-use-case shape used by every other domain.
+ *
+ * Throws if used outside of a ContainerProvider — same contract as
+ * `useUseCases()`.
+ *
+ * Mounting rule:
+ *   - This hook is consumed exclusively by `useGpsLifecycle`. Screens
+ *     and view-models read GPS state via `useGpsStore`'s selector hooks
+ *     (`useGpsCurrentLocation`, `useGpsCurrentOdometer`, …) — they
+ *     never reach into the SDK directly.
+ */
+export function useBackgroundGeolocation(): Container['bgGeolocation'] {
+  const ctx = useContext(ContainerContext);
+  if (ctx === null) {
+    throw new Error(
+      'useBackgroundGeolocation() called outside <ContainerProvider/>. Wrap your tree in <ContainerProvider/>.',
+    );
+  }
+  return ctx.bgGeolocation;
+}

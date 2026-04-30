@@ -1,4 +1,8 @@
-export { ContainerProvider, useUseCases } from './ContainerProvider';
+export {
+  ContainerProvider,
+  useBackgroundGeolocation,
+  useUseCases,
+} from './ContainerProvider';
 export {
   buildContainer,
   makeUseCases,
