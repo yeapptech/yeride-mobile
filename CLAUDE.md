@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 30, 2026 (Phase 6 turn 3 — Wallet + AddPaymentMethod modal)
+**Last updated:** April 30, 2026 (Phase 6 turn 4 — Driver Earnings + Stripe Connect onboarding)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,40 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 6 turn 4 shipped.** The driver Earnings tab is real now.
+`expo-web-browser@~55.0.14` joined the dep set. A new
+`getDeepLinkScheme()` / `buildDeepLink()` helper in `@shared/env` reads
+`Constants.expoConfig?.scheme` so the Stripe Connect `returnUrl`
+(`{scheme}://stripe-return`) is env-aware. The `payment` query-key
+scope grew three new factories (`balance`, `payouts`,
+`balanceTransactions` — all keyed on `StripeAccountId`); seven new
+TanStack hooks landed in the same `payment.queries.ts` file (the
+kickoff Q3 confirmation: keep co-located rather than fork into
+`connect.queries.ts`). The new `useStripeConnectOnboarding` hook lives
+in a freshly-created `src/presentation/features/driver/hooks/` directory
+and orchestrates the multi-step `EnsureConnectAccount → CreateLink →
+WebBrowser.openAuthSessionAsync → RefreshConnectAccountStatus` flow,
+firing a Toast success on the `pending → enabled` flip. The driver
+Earnings tab is now `DriverEarningsScreen` consuming the new
+`useDriverEarningsViewModel`'s six-arm tagged-union state
+(unconfigured / loading / no_account / pending / enabled / error); the
+`'disabled'` arm is intentionally folded into `'pending'` per the
+kickoff Q1 confirmation (no backend disabled detection yet). Refresh
+strategy: `useFocusEffect` + `AppState 'change' → 'active'` listener +
+manual pull-to-refresh, with a `useRef`-stabilized callback to avoid an
+infinite update loop under the test mock for `useFocusEffect` (and as
+the right invariant in production where `useMutation` returns an
+unstable object reference). Express dashboard reach via
+`useCreateAccountLoginLinkMutation` + `WebBrowser.openBrowserAsync`.
+`DriverEarningsPlaceholderScreen` retained as a deprecation stub —
+sandbox virtiofs blocks `unlink()`. Tip flow on RideReceipt remains
+pending (Turn 5).
+
+| Phase          | Scope                                      | Status |
+| -------------- | ------------------------------------------ | ------ |
+| Phase 6 turn 4 | Rider Earnings + Stripe Connect onboarding | ✅     |
+| Phase 6 turn 5 | Tip flow on RideReceipt + Phase 6 cleanup  | Next   |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -63,8 +97,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 6 turn 1  | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake        | ✅                             |
 | 6 turn 2  | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring      | ✅                             |
 | 6 turn 3  | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)     | ✅                             |
-| 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)        | Next                           |
-| 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup                                        | Pending                        |
+| 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)        | ✅                             |
+| 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup                                        | Next                           |
 | 7         | Background GPS + geofence-exit warnings                                          | Pending                        |
 | 8         | Google Navigation SDK (driver in-app navigation)                                 | Pending                        |
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
@@ -161,6 +195,35 @@ helpers added (`setStripeCustomerId`, `setDefaultPaymentMethodId`,
 `setStripeAccountId`, `setStripeAccountFlags`). `userMapper`
 gracefully falls back to `null` (with `LOG.warn`) on malformed Stripe
 ids — never crashes hydration on a single bad doc.
+
+End of Phase 6 turn 4 acceptance: **143 test suites / 1068 tests passing**
+(+6 suites / +37 tests over Phase 6 turn 3's 137/1031, in line with the
+kickoff's "+5 to +6 suites, +35 to +45 tests" target band); 1 suite
+intentionally skipped (sandbox-leftover scratch). typecheck, lint,
+format, and test all green. `expo-web-browser@~55.0.14` joins the dep
+set; auto-linked, no Expo plugin block. The new `getDeepLinkScheme()` /
+`buildDeepLink()` env helper reads `Constants.expoConfig?.scheme` so
+the Stripe Connect `returnUrl` is env-aware. The `payment` query-key
+scope adds `balance(accountId)`, `payouts(accountId, days, limit)`,
+`balanceTransactions(accountId, days, limit)`; seven new TanStack hooks
+land in the same `payment.queries.ts` file. The new
+`useStripeConnectOnboarding` side-effect-launcher hook lives in
+`src/presentation/features/driver/hooks/` and orchestrates the full
+onboarding flow (`EnsureConnectAccount → CreateLink → openAuthSession
+→ RefreshStatus`), firing a `Toast.show` success on the
+`pending → enabled` flip. The Earnings tab is now `DriverEarningsScreen`
+consuming `useDriverEarningsViewModel`'s six-arm tagged-union state.
+Refresh strategy: `useFocusEffect` + `AppState 'change' → 'active'` +
+manual pull-to-refresh, with a `useRef`-stabilized refresh callback to
+prevent an infinite update loop under unstable `useMutation` return
+identity. Express-dashboard reach via `useCreateAccountLoginLinkMutation`
+
+- `WebBrowser.openBrowserAsync`. The `'disabled'` status arm is
+  intentionally folded into `'pending'` (no backend disabled detection
+  yet — future scope). `DriverEarningsPlaceholderScreen` retained as a
+  deprecation stub. **`npm run prebuild` is not strictly required for
+  `expo-web-browser` alone** (auto-linked); the Stripe SDK plugin's
+  prebuild requirement from Turn 3 still stands.
 
 End of Phase 6 turn 3 acceptance: **137 test suites / 1031 tests passing**
 (+5 suites / +31 tests over Phase 6 turn 2's 132/1000); typecheck,
@@ -486,51 +549,56 @@ new app writes to it.
 
 ## Critical files
 
-| File                                                                              | Purpose                                                                                                                                                                                                          |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REFACTOR_PLAN.md`                                                                | Phased migration roadmap, decisions, target architecture                                                                                                                                                         |
-| `docs/PHASE_1_TURN_2.md`                                                          | What shipped through Phase 1                                                                                                                                                                                     |
-| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                               | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                                                                                                                                    |
-| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`                | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                                                                                                                                   |
-| `docs/PHASE_5_KICKOFF.md` + `docs/PHASE_5_TURN_{1,2,3,4}.md`                      | Phase 5 turn-by-turn record — read newest first when picking up vehicle work                                                                                                                                     |
-| `docs/PHASE_6_KICKOFF.md` + `docs/PHASE_6_TURN_{1,…}.md`                          | Phase 6 turn-by-turn record — read newest first when picking up payments / Stripe / tipping work                                                                                                                 |
-| `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                                                                                                                              |
-| `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting)                                                                                                      |
-| `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                                                                                                                       |
-| `src/presentation/di/container.ts`                                                | The composition root — single place where all repo + service wiring lives                                                                                                                                        |
-| `src/presentation/navigation/RootNavigator.tsx`                                   | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                                                                                                                                   |
-| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`                   | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen                                                                                                                   |
-| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`                | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                                                                                                                       |
-| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts`       | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule                                                                                                                 |
-| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`           | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)                                                                                                          |
-| `src/domain/entities/Ride.ts`                                                     | The trip aggregate + state machine. Most-touched domain entity                                                                                                                                                   |
-| `src/data/repositories/FirestoreRideRepository.ts`                                | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                                                                                                                                    |
-| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` / `tipDriver` (us-east1)                                                                                                                               |
-| `src/data/services/StripeServerHttpAdapter.ts`                                    | Phase 6 turn 2 — fetch-based 11-method Stripe microservice adapter; Bearer-authed; Idempotency-Key on `createCustomer`; retry-with-backoff on 5xx + transport throws                                             |
-| `src/data/services/_shared/retryWithBackoff.ts`                                   | Phase 6 turn 2 — generic retry helper with `{attempts, delaysMs, shouldRetry, sleep?}` policy. Inject `sleep` in tests to skip wall-clock                                                                        |
-| `src/domain/services/PaymentCallableService.ts`                                   | Phase 6 turn 2 — domain seam over server-side payment callables. Just `tipDriver` for now; `CloudFunctionsService` + `FakeCloudFunctionsService` both satisfy structurally                                       |
-| `src/app/usecases/payment/ProcessTip.ts`                                          | Phase 6 turn 2 — Money → dollars at the boundary, $1 floor, whole-dollar requirement, passenger-ownership check                                                                                                  |
-| `src/shared/testing/FakeCloudFunctionsService.ts`                                 | Phase 6 turn 2 — programmable fake covering `completeTrip` / `cancelTrip` / `tipDriver` with seed/spy/failNext seams                                                                                             |
-| `src/shared/env/stripeServer.ts`                                                  | Phase 6 turn 2 — `getStripeServerConfig()` reads `STRIPE_SERVER_URL` + `STRIPE_SERVER_API_KEY` from `extra`; both required as a unit                                                                             |
-| `src/shared/testing/InMemoryRideRepository.ts`                                    | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                                                                                                                                    |
-| `src/domain/entities/Vehicle.ts`                                                  | Vehicle aggregate + status state machine; VIN as identity                                                                                                                                                        |
-| `src/domain/services/VehicleClassifier.ts`                                        | Pure-math manual-entry classifier + `computeEligibleServices` (parity with NHTSA path)                                                                                                                           |
-| `src/data/repositories/FirestoreVehicleRepository.ts`                             | write-batch cross-aggregate writes + per-VIN fan-out subscribe                                                                                                                                                   |
-| `src/presentation/features/driver/view-models/useVehicleRegistrationViewModel.ts` | Tagged-union form state machine; 400ms VIN debounce; manual / decoded / conflict branches                                                                                                                        |
-| `src/presentation/features/driver/view-models/useVehiclePhotosViewModel.ts`       | Per-tile upload state machine — `inFlight` / `errors` keyed on `VehiclePhotoType` + `useUploadVehiclePhotosMutation` via `mutateAsync`                                                                           |
-| `src/presentation/features/driver/view-models/useVehicleDetailsViewModel.ts`      | Read-only detail VM — composes `useVehicleQuery` + setActive / delete mutations + `Alert.alert` confirmation                                                                                                     |
-| `src/presentation/queries/vehicle.queries.ts`                                     | All vehicle TanStack hooks — VIN decode + register / setActive / delete / upload mutations + byVin / activeForDriver reads                                                                                       |
-| `src/domain/services/StripeServerService.ts`                                      | 11-method interface over the YeRide Stripe microservice (Phase 6 turn 1) — covers customers, setup intents, payment methods, Connect, balance, payouts, balance transactions                                     |
-| `src/shared/testing/FakeStripeServerService.ts`                                   | Programmable in-memory `StripeServerService` with seed seams, spy bookkeeping, `failNext` priming, idempotent `createCustomer` (Phase 6 turn 1)                                                                  |
-| `src/data/dto/UserDoc.ts` + `src/data/mappers/userMapper.ts`                      | Driver doc accepts BOTH legacy nested `stripe: { id, charges_enabled, payouts_enabled }` AND canonical flat fields; mapper writes both shapes for legacy yeride co-existence                                     |
-| `src/presentation/App.tsx`                                                        | Phase 6 turn 3 — `MaybeStripeProvider` wraps the navigator above `<QueryClientProvider/>`; no-ops when publishable key is unset                                                                                  |
-| `src/presentation/queries/payment.queries.ts`                                     | Phase 6 turn 3 — five rider-side hooks (`useEnsureStripeCustomerMutation`, `useCreateSetupIntentMutation`, `useListPaymentMethodsQuery`, `useSetDefaultPaymentMethodMutation`, `useDetachPaymentMethodMutation`) |
-| `src/presentation/features/rider/view-models/useWalletViewModel.ts`               | Phase 6 turn 3 — six-arm tagged-union (unconfigured / loading / no_customer / empty / ready / error) + per-card inFlight Sets + Alert-confirmed delete with three message variants                               |
-| `src/presentation/features/rider/view-models/useAddPaymentMethodViewModel.ts`     | Phase 6 turn 3 — orchestrates EnsureStripeCustomer → CreateSetupIntent → confirmSetupIntent. `Canceled` is silent; `card_declined` / `network` / `unknown` error arms via `mapStripeError`                       |
-| `src/presentation/features/rider/screens/WalletScreen.tsx`                        | Phase 6 turn 3 — view-model-driven; pull-to-refresh; replaces `WalletPlaceholderScreen` (retained as a stub since virtiofs blocks unlink)                                                                        |
-| `src/presentation/features/rider/screens/AddPaymentMethodScreen.tsx`              | Phase 6 turn 3 — modal route; `<CardForm/>` + Save CTA + inline error banner with dismiss                                                                                                                        |
-| `src/presentation/features/rider/components/WalletCardRow.tsx`                    | Phase 6 turn 3 — text-only `BrandBadge` + last4 + optional expiry + default-checkmark + trash. Per-row in-flight via parent props                                                                                |
-| `jest.setup.ts`                                                                   | Wires `@stripe/stripe-react-native/jest/mock` globally so view-model tests can `(useStripe as jest.MockedFunction<typeof useStripe>).mockReturnValue(...)` per test                                              |
+| File                                                                              | Purpose                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REFACTOR_PLAN.md`                                                                | Phased migration roadmap, decisions, target architecture                                                                                                                                                                                                                            |
+| `docs/PHASE_1_TURN_2.md`                                                          | What shipped through Phase 1                                                                                                                                                                                                                                                        |
+| `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                               | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                                                                                                                                                                                                       |
+| `docs/PHASE_4_KICKOFF.md` + `docs/PHASE_4_TURN_{1,2,3,4A,4B,5}.md`                | Phase 4 turn-by-turn record — read newest first when picking up driver/UI work                                                                                                                                                                                                      |
+| `docs/PHASE_5_KICKOFF.md` + `docs/PHASE_5_TURN_{1,2,3,4}.md`                      | Phase 5 turn-by-turn record — read newest first when picking up vehicle work                                                                                                                                                                                                        |
+| `docs/PHASE_6_KICKOFF.md` + `docs/PHASE_6_TURN_{1,…}.md`                          | Phase 6 turn-by-turn record — read newest first when picking up payments / Stripe / tipping work                                                                                                                                                                                    |
+| `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                                                                                                                                                                                                 |
+| `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting)                                                                                                                                                                         |
+| `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                                                                                                                                                                                          |
+| `src/presentation/di/container.ts`                                                | The composition root — single place where all repo + service wiring lives                                                                                                                                                                                                           |
+| `src/presentation/navigation/RootNavigator.tsx`                                   | Top-level switch between Auth/VerifyEmail/Rider/Driver based on session + role                                                                                                                                                                                                      |
+| `src/presentation/features/rider/screens/RideMonitorScreen.tsx`                   | Live-trip surface (rider side); map + bottom-sheet status-router. Most-touched rider UI screen                                                                                                                                                                                      |
+| `src/presentation/features/driver/screens/DriverMonitorScreen.tsx`                | Live-trip surface (driver side); same status-router pattern. Most-touched driver UI screen                                                                                                                                                                                          |
+| `src/presentation/features/driver/view-models/useDriverMonitorViewModel.ts`       | Status-router state machine + Start / RequestPayment / Cancel mutations + terminal-redirect rule                                                                                                                                                                                    |
+| `src/presentation/components/trip/{Cancel,DriverCancelReason}Sheet.tsx`           | Per-reason cancel pickers — rider-allowed vs. driver-allowed code sets (`isRiderCode` / `isDriverCode`)                                                                                                                                                                             |
+| `src/domain/entities/Ride.ts`                                                     | The trip aggregate + state machine. Most-touched domain entity                                                                                                                                                                                                                      |
+| `src/data/repositories/FirestoreRideRepository.ts`                                | Largest data adapter — direct writes + Cloud Function delegation + geo-filter                                                                                                                                                                                                       |
+| `src/data/services/CloudFunctionsService.ts`                                      | `httpsCallable` wrapper for `completeTrip` / `cancelTrip` / `tipDriver` (us-east1)                                                                                                                                                                                                  |
+| `src/data/services/StripeServerHttpAdapter.ts`                                    | Phase 6 turn 2 — fetch-based 11-method Stripe microservice adapter; Bearer-authed; Idempotency-Key on `createCustomer`; retry-with-backoff on 5xx + transport throws                                                                                                                |
+| `src/data/services/_shared/retryWithBackoff.ts`                                   | Phase 6 turn 2 — generic retry helper with `{attempts, delaysMs, shouldRetry, sleep?}` policy. Inject `sleep` in tests to skip wall-clock                                                                                                                                           |
+| `src/domain/services/PaymentCallableService.ts`                                   | Phase 6 turn 2 — domain seam over server-side payment callables. Just `tipDriver` for now; `CloudFunctionsService` + `FakeCloudFunctionsService` both satisfy structurally                                                                                                          |
+| `src/app/usecases/payment/ProcessTip.ts`                                          | Phase 6 turn 2 — Money → dollars at the boundary, $1 floor, whole-dollar requirement, passenger-ownership check                                                                                                                                                                     |
+| `src/shared/testing/FakeCloudFunctionsService.ts`                                 | Phase 6 turn 2 — programmable fake covering `completeTrip` / `cancelTrip` / `tipDriver` with seed/spy/failNext seams                                                                                                                                                                |
+| `src/shared/env/stripeServer.ts`                                                  | Phase 6 turn 2 — `getStripeServerConfig()` reads `STRIPE_SERVER_URL` + `STRIPE_SERVER_API_KEY` from `extra`; both required as a unit                                                                                                                                                |
+| `src/shared/testing/InMemoryRideRepository.ts`                                    | Full-fidelity fake with seed/spy seams + Haversine geo-filter                                                                                                                                                                                                                       |
+| `src/domain/entities/Vehicle.ts`                                                  | Vehicle aggregate + status state machine; VIN as identity                                                                                                                                                                                                                           |
+| `src/domain/services/VehicleClassifier.ts`                                        | Pure-math manual-entry classifier + `computeEligibleServices` (parity with NHTSA path)                                                                                                                                                                                              |
+| `src/data/repositories/FirestoreVehicleRepository.ts`                             | write-batch cross-aggregate writes + per-VIN fan-out subscribe                                                                                                                                                                                                                      |
+| `src/presentation/features/driver/view-models/useVehicleRegistrationViewModel.ts` | Tagged-union form state machine; 400ms VIN debounce; manual / decoded / conflict branches                                                                                                                                                                                           |
+| `src/presentation/features/driver/view-models/useVehiclePhotosViewModel.ts`       | Per-tile upload state machine — `inFlight` / `errors` keyed on `VehiclePhotoType` + `useUploadVehiclePhotosMutation` via `mutateAsync`                                                                                                                                              |
+| `src/presentation/features/driver/view-models/useVehicleDetailsViewModel.ts`      | Read-only detail VM — composes `useVehicleQuery` + setActive / delete mutations + `Alert.alert` confirmation                                                                                                                                                                        |
+| `src/presentation/queries/vehicle.queries.ts`                                     | All vehicle TanStack hooks — VIN decode + register / setActive / delete / upload mutations + byVin / activeForDriver reads                                                                                                                                                          |
+| `src/domain/services/StripeServerService.ts`                                      | 11-method interface over the YeRide Stripe microservice (Phase 6 turn 1) — covers customers, setup intents, payment methods, Connect, balance, payouts, balance transactions                                                                                                        |
+| `src/shared/testing/FakeStripeServerService.ts`                                   | Programmable in-memory `StripeServerService` with seed seams, spy bookkeeping, `failNext` priming, idempotent `createCustomer` (Phase 6 turn 1)                                                                                                                                     |
+| `src/data/dto/UserDoc.ts` + `src/data/mappers/userMapper.ts`                      | Driver doc accepts BOTH legacy nested `stripe: { id, charges_enabled, payouts_enabled }` AND canonical flat fields; mapper writes both shapes for legacy yeride co-existence                                                                                                        |
+| `src/presentation/App.tsx`                                                        | Phase 6 turn 3 — `MaybeStripeProvider` wraps the navigator above `<QueryClientProvider/>`; no-ops when publishable key is unset                                                                                                                                                     |
+| `src/presentation/queries/payment.queries.ts`                                     | Phase 6 turn 3 — five rider-side hooks (`useEnsureStripeCustomerMutation`, `useCreateSetupIntentMutation`, `useListPaymentMethodsQuery`, `useSetDefaultPaymentMethodMutation`, `useDetachPaymentMethodMutation`)                                                                    |
+| `src/presentation/features/rider/view-models/useWalletViewModel.ts`               | Phase 6 turn 3 — six-arm tagged-union (unconfigured / loading / no_customer / empty / ready / error) + per-card inFlight Sets + Alert-confirmed delete with three message variants                                                                                                  |
+| `src/presentation/features/rider/view-models/useAddPaymentMethodViewModel.ts`     | Phase 6 turn 3 — orchestrates EnsureStripeCustomer → CreateSetupIntent → confirmSetupIntent. `Canceled` is silent; `card_declined` / `network` / `unknown` error arms via `mapStripeError`                                                                                          |
+| `src/presentation/features/rider/screens/WalletScreen.tsx`                        | Phase 6 turn 3 — view-model-driven; pull-to-refresh; replaces `WalletPlaceholderScreen` (retained as a stub since virtiofs blocks unlink)                                                                                                                                           |
+| `src/presentation/features/rider/screens/AddPaymentMethodScreen.tsx`              | Phase 6 turn 3 — modal route; `<CardForm/>` + Save CTA + inline error banner with dismiss                                                                                                                                                                                           |
+| `src/presentation/features/rider/components/WalletCardRow.tsx`                    | Phase 6 turn 3 — text-only `BrandBadge` + last4 + optional expiry + default-checkmark + trash. Per-row in-flight via parent props                                                                                                                                                   |
+| `jest.setup.ts`                                                                   | Wires `@stripe/stripe-react-native/jest/mock` globally so view-model tests can `(useStripe as jest.MockedFunction<typeof useStripe>).mockReturnValue(...)` per test                                                                                                                 |
+| `src/shared/env/scheme.ts`                                                        | Phase 6 turn 4 — `getDeepLinkScheme()` / `buildDeepLink(path)` reads `Constants.expoConfig?.scheme` for env-aware Stripe Connect `returnUrl` (`{scheme}://stripe-return`). Lazy-require pattern, mockable in tests                                                                  |
+| `src/presentation/features/driver/hooks/useStripeConnectOnboarding.ts`            | Phase 6 turn 4 — multi-step onboarding launcher: `EnsureConnectAccount → buildDeepLink → CreateConnectOnboardingLink → WebBrowser.openAuthSessionAsync → RefreshConnectAccountStatus`. Toast on `pending→enabled` flip. `'success'`/`'cancel'` refresh; `'dismiss'` silent          |
+| `src/presentation/features/driver/view-models/useDriverEarningsViewModel.ts`      | Phase 6 turn 4 — six-arm tagged-union (unconfigured / loading / no_account / pending / enabled / error). `useRef`-stabilized refresh callback prevents infinite update loop under unstable `useMutation` identity. `useFocusEffect` + `AppState` 'active' + pull-to-refresh fan-out |
+| `src/presentation/features/driver/screens/DriverEarningsScreen.tsx`               | Phase 6 turn 4 — view-model-driven layout per arm. Pull-to-refresh on `pending`/`enabled`; loud error block on `unconfigured`. Replaces `DriverEarningsPlaceholderScreen` (retained as a deprecation stub since virtiofs blocks unlink)                                             |
+| `src/presentation/features/driver/utils/formatMoney.ts`                           | Phase 6 turn 4 — `Intl.NumberFormat`-based USD formatter. Handles negatives with leading minus (per kickoff decision 6)                                                                                                                                                             |
 
 ## Build & deployment
 
@@ -922,24 +990,35 @@ Rider status-views         → src/presentation/features/rider/components/
 Rider view-models          → src/presentation/features/rider/view-models/use*ViewModel.ts
                               (incl. useWalletViewModel, useAddPaymentMethodViewModel — phase 6 turn 3)
 Payment queries            → src/presentation/queries/payment.queries.ts
-                              (5 hooks — phase 6 turn 3: useEnsureStripeCustomerMutation,
+                              Rider-side (5 hooks — phase 6 turn 3): useEnsureStripeCustomerMutation,
                                useCreateSetupIntentMutation, useListPaymentMethodsQuery,
-                               useSetDefaultPaymentMethodMutation, useDetachPaymentMethodMutation)
+                               useSetDefaultPaymentMethodMutation, useDetachPaymentMethodMutation
+                              Driver-side (7 hooks — phase 6 turn 4): useEnsureStripeConnectAccountMutation,
+                               useCreateConnectOnboardingLinkMutation, useRefreshConnectAccountStatusMutation,
+                               useDriverBalanceQuery, useDriverPayoutsQuery, useBalanceTransactionsQuery,
+                               useCreateAccountLoginLinkMutation
 
 Driver screens             → src/presentation/features/driver/screens/*.tsx
                               DriverHome, DriverDispatch, DriverMonitor,
-                              DriverActivityPlaceholder, DriverEarningsPlaceholder,
+                              DriverActivityPlaceholder, DriverEarnings (phase 6 turn 4),
                               VehicleList, VehicleRegistration, VehicleDetails, VehiclePhotos
+                              (DriverEarningsPlaceholderScreen retained as a deprecation stub)
 Driver status-views        → src/presentation/features/driver/components/
                               {EnRouteToPickup,AtPickup,Started,PaymentRequested,
                                Completed,PaymentFailed}View.tsx
 Driver components          → src/presentation/features/driver/components/
                               DriverRideCard, DriverRideCardStack,
                               DriverVehicleCard, VinEntryStep, DecodedPreviewStep, ManualEntryStep,
-                              VehiclePhotoTile, VehiclePhotoGrid
+                              VehiclePhotoTile, VehiclePhotoGrid,
+                              PayoutRow, BalanceTransactionRow (phase 6 turn 4)
+Driver hooks               → src/presentation/features/driver/hooks/*.ts (phase 6 turn 4)
+                              useStripeConnectOnboarding (multi-step onboarding launcher)
+Driver utils               → src/presentation/features/driver/utils/*.ts (phase 6 turn 4)
+                              formatMoney (USD-only Intl.NumberFormat helper)
 Driver view-models         → src/presentation/features/driver/view-models/use*ViewModel.ts
                               (incl. useVehicleListViewModel, useVehicleRegistrationViewModel,
-                               useVehicleDetailsViewModel, useVehiclePhotosViewModel)
+                               useVehicleDetailsViewModel, useVehiclePhotosViewModel,
+                               useDriverEarningsViewModel — phase 6 turn 4)
 Driver cancel sheet        → src/presentation/components/trip/DriverCancelReasonSheet.tsx
                               (shared by every cancel-eligible driver status view)
 Vehicle queries            → src/presentation/queries/vehicle.queries.ts

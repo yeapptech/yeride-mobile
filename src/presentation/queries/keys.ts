@@ -1,6 +1,7 @@
 import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { ServiceAreaId } from '@domain/entities/ServiceAreaId';
+import type { StripeAccountId } from '@domain/entities/StripeAccountId';
 import type { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import type { UserId } from '@domain/entities/UserId';
 
@@ -184,8 +185,8 @@ export const queryKeys = {
   },
 
   // ─── Payments / Stripe ────────────────────────────────────────────
-  // Phase 6 turn 3 keys for the rider Wallet surface. Driver-side keys
-  // (Connect account / balance / payouts) land in turn 4.
+  // Rider-side keys landed in Phase 6 turn 3. Phase 6 turn 4 adds the
+  // driver-side balance / payouts / balance-transactions keys.
   //
   // Methods are scoped on the rider's `stripeCustomerId` rather than
   // their `UserId`. Reason: `StripeCustomerId` is the identity Stripe
@@ -193,11 +194,40 @@ export const queryKeys = {
   // `customerId !== null` (`enabled: customerId !== null` at the call
   // site) means the cache key is never observed for a rider who hasn't
   // ensured a customer record yet.
+  //
+  // The driver-side reads are scoped on `StripeAccountId` for the same
+  // reason — Stripe's resource identity. The Connect-account state itself
+  // (`stripeAccountId`, `chargesEnabled`, `payoutsEnabled`) lives on the
+  // user doc, so we don't keep a separate `connectAccount(driverId)` key
+  // — every Connect-account refresh routes through `user.current`
+  // invalidation. Days/limit are part of the payouts /
+  // balance-transactions keys so the cache can hold "last 7 days" and
+  // "last 30 days" separately for the same account when the future drill-
+  // down screens land.
   payment: {
     all: () => ['payment'] as const,
     /** Saved payment methods for one Stripe customer. */
     methodsByCustomer: (customerId: StripeCustomerId) =>
       ['payment', 'methodsByCustomer', String(customerId)] as const,
+    /** Available + pending balance for one Connect account. */
+    balance: (accountId: StripeAccountId) =>
+      ['payment', 'balance', String(accountId)] as const,
+    /** Recent payouts for one Connect account, scoped on lookback window. */
+    payouts: (accountId: StripeAccountId, days: number, limit: number) =>
+      ['payment', 'payouts', String(accountId), days, limit] as const,
+    /** Recent balance-transaction ledger rows for one Connect account. */
+    balanceTransactions: (
+      accountId: StripeAccountId,
+      days: number,
+      limit: number,
+    ) =>
+      [
+        'payment',
+        'balanceTransactions',
+        String(accountId),
+        days,
+        limit,
+      ] as const,
   },
 } as const;
 

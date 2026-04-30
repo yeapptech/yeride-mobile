@@ -2,8 +2,11 @@ import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 /**
- * Phase 6 placeholder. Real earnings (Stripe Connect balance + payouts)
- * lands then.
+ * @deprecated Phase 6 turn 4 shipped `DriverEarningsScreen.tsx` —
+ * `DriverTabsNavigator` no longer mounts this placeholder. The file is
+ * retained as a deprecation stub because the sandbox virtiofs blocks
+ * `unlink()`; safe to remove in any non-sandbox checkout. Don't import
+ * this from new code.
  */
 export default function DriverEarningsPlaceholderScreen() {
   return (
@@ -13,8 +16,8 @@ export default function DriverEarningsPlaceholderScreen() {
           Earnings
         </Text>
         <Text className="text-center text-sm text-muted-foreground">
-          Your Stripe Connect balance and payouts will live here. Lands in Phase
-          6.
+          Deprecated placeholder — see DriverEarningsScreen.tsx (Phase 6 turn
+          4).
         </Text>
       </View>
     </SafeAreaView>

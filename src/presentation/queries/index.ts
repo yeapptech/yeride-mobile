@@ -34,9 +34,16 @@ export {
   type UploadVehiclePhotosInput,
 } from './vehicle.queries';
 export {
+  useBalanceTransactionsQuery,
+  useCreateAccountLoginLinkMutation,
+  useCreateConnectOnboardingLinkMutation,
   useCreateSetupIntentMutation,
   useDetachPaymentMethodMutation,
+  useDriverBalanceQuery,
+  useDriverPayoutsQuery,
+  useEnsureStripeConnectAccountMutation,
   useEnsureStripeCustomerMutation,
   useListPaymentMethodsQuery,
+  useRefreshConnectAccountStatusMutation,
   useSetDefaultPaymentMethodMutation,
 } from './payment.queries';

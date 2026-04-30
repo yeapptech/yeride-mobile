@@ -7,3 +7,8 @@ coverage/
 *.lock
 package-lock.json
 yarn.lock
+
+# Phase kickoff prompts: ephemeral session-starting prompts. Don't
+# reformat them — the original prompt layout is part of the artifact.
+docs/PHASE_*_KICKOFF.md
+docs/PHASE_*_TURN_*_KICKOFF.md

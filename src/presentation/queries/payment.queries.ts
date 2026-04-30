@@ -6,8 +6,12 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 
+import type { BalanceTransaction } from '@domain/entities/BalanceTransaction';
+import type { Money } from '@domain/entities/Money';
 import type { PaymentMethod } from '@domain/entities/PaymentMethod';
 import type { PaymentMethodId } from '@domain/entities/PaymentMethodId';
+import type { Payout } from '@domain/entities/Payout';
+import type { StripeAccountId } from '@domain/entities/StripeAccountId';
 import type { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import type {
   AuthorizationError,
@@ -20,11 +24,13 @@ import { useUseCases } from '@presentation/di';
 import { queryKeys } from './keys';
 
 /**
- * Payment / Stripe queries + mutations (Phase 6 turn 3 — rider-side only).
+ * Payment / Stripe queries + mutations.
  *
- * The driver-side Connect / balance / payouts hooks land in turn 4.
+ * Phase 6 turn 3 shipped the rider-side hooks (Wallet + AddPaymentMethod).
+ * Phase 6 turn 4 adds the driver-side Connect / balance / payouts hooks
+ * for the Earnings tab.
  *
- * Cache invalidation contract:
+ * Cache invalidation contract (rider-side, turn 3):
  *   - `useEnsureStripeCustomerMutation` — invalidates `user.current` so
  *     the next render sees the new `stripeCustomerId` and the Wallet VM
  *     transitions out of the `'no_customer'` state.
@@ -44,6 +50,30 @@ import { queryKeys } from './keys';
  *     `user.current` (the default may have cleared if the detached card
  *     was the default — `DetachPaymentMethod` does this server-side)
  *     AND `payment.methodsByCustomer(customerId)` so the row disappears.
+ *
+ * Cache invalidation contract (driver-side, turn 4):
+ *   - `useEnsureStripeConnectAccountMutation` — invalidates `user.current`
+ *     so the next render sees the new `stripeAccountId` and the Earnings
+ *     VM transitions out of the `'no_account'` state.
+ *   - `useCreateConnectOnboardingLinkMutation` — no invalidation; the
+ *     URL feeds `WebBrowser.openAuthSessionAsync`. Each tap mints a
+ *     fresh URL because Stripe's account links are single-use.
+ *   - `useRefreshConnectAccountStatusMutation` — invalidates BOTH
+ *     `user.current` (the canonical source of `chargesEnabled` /
+ *     `payoutsEnabled`) AND `payment.balance(accountId)` (a charges-
+ *     enabled flip changes balance reachability — refetch even if the
+ *     immediate balance number is unchanged).
+ *   - `useDriverBalanceQuery` — gated `enabled: accountId !== null`;
+ *     `staleTime: 30_000` so the screen stays fresh without spamming
+ *     Stripe between refresh-on-focus + manual pull-to-refresh ticks.
+ *   - `useDriverPayoutsQuery` / `useBalanceTransactionsQuery` — same
+ *     gating + stale-time as balance. Defaults match the legacy
+ *     Earnings.js: payouts last 7 days / 10 rows; balance txns last 7
+ *     days / 25 rows.
+ *   - `useCreateAccountLoginLinkMutation` — no invalidation; result
+ *     opens via `WebBrowser.openBrowserAsync` (no auth-session contract
+ *     here, just a URL). Each tap mints a fresh single-use URL because
+ *     Stripe's login links are single-use.
  */
 
 /**
@@ -231,5 +261,283 @@ export function useDetachPaymentMethodMutation(args: {
         queryKey: queryKeys.payment.methodsByCustomer(customerId),
       });
     },
+  });
+}
+
+/* ─── Driver-side Connect + balance + payouts (Phase 6 turn 4) ─── */
+
+const PAYOUTS_DEFAULT_DAYS = 7;
+const PAYOUTS_DEFAULT_LIMIT = 10;
+const BALANCE_TXNS_DEFAULT_DAYS = 7;
+const BALANCE_TXNS_DEFAULT_LIMIT = 25;
+const ACCOUNT_QUERY_STALE_MS = 30_000;
+
+/**
+ * Idempotently ensure the signed-in driver has a Stripe Connect account.
+ * Returns the resolved `StripeAccountId`.
+ *
+ * Called by `useStripeConnectOnboarding` lazily on the first "Set up
+ * payouts" / "Continue setup" tap — drivers without a Connect account
+ * don't round-trip Stripe just to look at the empty Earnings tab.
+ */
+export function useEnsureStripeConnectAccountMutation(): UseMutationResult<
+  StripeAccountId,
+  AuthorizationError | NotFoundError | NetworkError | ValidationError,
+  void
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    StripeAccountId,
+    AuthorizationError | NotFoundError | NetworkError | ValidationError,
+    void
+  >({
+    mutationFn: async (): Promise<StripeAccountId> => {
+      const r = await useCases.ensureStripeConnectAccount.execute();
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.user.current(),
+      });
+    },
+  });
+}
+
+/**
+ * Mint a single-use Stripe-hosted URL the driver opens in
+ * `WebBrowser.openAuthSessionAsync` to complete (or continue) Connect KYC
+ * onboarding. Each tap of "Set up payouts" mints a fresh URL because
+ * Stripe's account links are single-use server-side.
+ *
+ * No cache invalidation — the resulting URL is consumed by
+ * `WebBrowser.openAuthSessionAsync` directly. The post-onboarding state
+ * refresh is owned by `useStripeConnectOnboarding`.
+ */
+export function useCreateConnectOnboardingLinkMutation(): UseMutationResult<
+  { readonly url: string; readonly expiresAt: Date },
+  AuthorizationError | NotFoundError | NetworkError | ValidationError,
+  {
+    readonly accountId: StripeAccountId;
+    readonly refreshUrl: string;
+    readonly returnUrl: string;
+  }
+> {
+  const useCases = useUseCases();
+  return useMutation<
+    { readonly url: string; readonly expiresAt: Date },
+    AuthorizationError | NotFoundError | NetworkError | ValidationError,
+    {
+      readonly accountId: StripeAccountId;
+      readonly refreshUrl: string;
+      readonly returnUrl: string;
+    }
+  >({
+    mutationFn: async (input: {
+      readonly accountId: StripeAccountId;
+      readonly refreshUrl: string;
+      readonly returnUrl: string;
+    }): Promise<{ readonly url: string; readonly expiresAt: Date }> => {
+      const r = await useCases.createConnectOnboardingLink.execute({
+        accountId: input.accountId,
+        refreshUrl: input.refreshUrl,
+        returnUrl: input.returnUrl,
+      });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+  });
+}
+
+/**
+ * Re-fetch the driver's Connect account flags from Stripe and persist
+ * them on the user doc. Called by `useStripeConnectOnboarding` after the
+ * `WebBrowser` session returns, AND by the Earnings VM on screen focus
+ * + app foreground.
+ *
+ * Invalidates `user.current` so the canonical `chargesEnabled /
+ * payoutsEnabled` flags repaint. Also invalidates
+ * `payment.balance(accountId)` because a charges-enabled flip changes
+ * balance reachability — refetch even if the immediate balance number
+ * is unchanged.
+ */
+export function useRefreshConnectAccountStatusMutation(): UseMutationResult<
+  { readonly chargesEnabled: boolean; readonly payoutsEnabled: boolean },
+  AuthorizationError | NotFoundError | NetworkError | ValidationError,
+  { readonly accountId: StripeAccountId }
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    { readonly chargesEnabled: boolean; readonly payoutsEnabled: boolean },
+    AuthorizationError | NotFoundError | NetworkError | ValidationError,
+    { readonly accountId: StripeAccountId }
+  >({
+    mutationFn: async (input: {
+      readonly accountId: StripeAccountId;
+    }): Promise<{
+      readonly chargesEnabled: boolean;
+      readonly payoutsEnabled: boolean;
+    }> => {
+      const r = await useCases.refreshConnectAccountStatus.execute({
+        accountId: input.accountId,
+      });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.user.current(),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.payment.balance(variables.accountId),
+      });
+    },
+  });
+}
+
+/**
+ * Mint a single-use Stripe-hosted URL into the driver's Express
+ * dashboard. Surfaces behind a "View Express dashboard" affordance on
+ * the enabled-state Earnings tab. Opens via `WebBrowser.openBrowserAsync`
+ * (no auth-session contract — we just open the URL, no callback).
+ */
+export function useCreateAccountLoginLinkMutation(): UseMutationResult<
+  { readonly url: string },
+  AuthorizationError | NotFoundError | NetworkError | ValidationError,
+  { readonly accountId: StripeAccountId }
+> {
+  const useCases = useUseCases();
+  return useMutation<
+    { readonly url: string },
+    AuthorizationError | NotFoundError | NetworkError | ValidationError,
+    { readonly accountId: StripeAccountId }
+  >({
+    mutationFn: async (input: {
+      readonly accountId: StripeAccountId;
+    }): Promise<{ readonly url: string }> => {
+      const r = await useCases.createAccountLoginLink.execute({
+        accountId: input.accountId,
+      });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+  });
+}
+
+/**
+ * Available + pending balance for a Connect account. Powers the headline
+ * number on the Earnings tab.
+ *
+ * Gated `enabled: accountId !== null` — drivers without a Connect account
+ * (or in the loading user-doc state) fetch nothing. The 30s `staleTime`
+ * matches `useDriverPayoutsQuery` / `useBalanceTransactionsQuery` so the
+ * three queries refresh together on a manual pull-to-refresh tick.
+ */
+export function useDriverBalanceQuery(args: {
+  readonly accountId: StripeAccountId | null;
+}): UseQueryResult<
+  { readonly available: Money; readonly pending: Money },
+  AuthorizationError | NotFoundError | NetworkError | ValidationError
+> {
+  const useCases = useUseCases();
+  const accountId = args.accountId;
+  return useQuery({
+    queryKey: accountId
+      ? queryKeys.payment.balance(accountId)
+      : ['payment', 'balance', null],
+    queryFn: async (): Promise<{
+      readonly available: Money;
+      readonly pending: Money;
+    }> => {
+      if (!accountId) {
+        // Unreachable when `enabled: false` — TanStack guards this — but
+        // satisfies the type checker without a non-null assertion.
+        throw new Error('useDriverBalanceQuery: accountId required');
+      }
+      const r = await useCases.getDriverBalance.execute({ accountId });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    enabled: accountId !== null,
+    staleTime: ACCOUNT_QUERY_STALE_MS,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Recent payouts for a Connect account. Defaults match legacy
+ * `getAccountPayouts` (7 days, 10 rows).
+ */
+export function useDriverPayoutsQuery(args: {
+  readonly accountId: StripeAccountId | null;
+  readonly days?: number;
+  readonly limit?: number;
+}): UseQueryResult<
+  readonly Payout[],
+  AuthorizationError | NotFoundError | NetworkError | ValidationError
+> {
+  const useCases = useUseCases();
+  const accountId = args.accountId;
+  const days = args.days ?? PAYOUTS_DEFAULT_DAYS;
+  const limit = args.limit ?? PAYOUTS_DEFAULT_LIMIT;
+  return useQuery({
+    queryKey: accountId
+      ? queryKeys.payment.payouts(accountId, days, limit)
+      : ['payment', 'payouts', null, days, limit],
+    queryFn: async (): Promise<readonly Payout[]> => {
+      if (!accountId) {
+        throw new Error('useDriverPayoutsQuery: accountId required');
+      }
+      const r = await useCases.listDriverPayouts.execute({
+        accountId,
+        days,
+        limit,
+      });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    enabled: accountId !== null,
+    staleTime: ACCOUNT_QUERY_STALE_MS,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Recent balance-transaction ledger rows for a Connect account. Defaults
+ * match legacy `getAccountBalanceTransactions` (7 days, 25 rows).
+ */
+export function useBalanceTransactionsQuery(args: {
+  readonly accountId: StripeAccountId | null;
+  readonly days?: number;
+  readonly limit?: number;
+}): UseQueryResult<
+  readonly BalanceTransaction[],
+  AuthorizationError | NotFoundError | NetworkError | ValidationError
+> {
+  const useCases = useUseCases();
+  const accountId = args.accountId;
+  const days = args.days ?? BALANCE_TXNS_DEFAULT_DAYS;
+  const limit = args.limit ?? BALANCE_TXNS_DEFAULT_LIMIT;
+  return useQuery({
+    queryKey: accountId
+      ? queryKeys.payment.balanceTransactions(accountId, days, limit)
+      : ['payment', 'balanceTransactions', null, days, limit],
+    queryFn: async (): Promise<readonly BalanceTransaction[]> => {
+      if (!accountId) {
+        throw new Error('useBalanceTransactionsQuery: accountId required');
+      }
+      const r = await useCases.listBalanceTransactions.execute({
+        accountId,
+        days,
+        limit,
+      });
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    enabled: accountId !== null,
+    staleTime: ACCOUNT_QUERY_STALE_MS,
+    refetchOnWindowFocus: false,
   });
 }
