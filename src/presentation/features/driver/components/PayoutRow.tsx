@@ -1,8 +1,7 @@
 import { Text, View } from 'react-native';
 
 import type { Payout, PayoutStatus } from '@domain/entities/Payout';
-
-import { formatMoney } from '../utils/formatMoney';
+import { formatMoney } from '@presentation/utils/formatMoney';
 
 /**
  * One row in the driver Earnings tab's payouts list.

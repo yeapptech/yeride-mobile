@@ -44,6 +44,7 @@ export {
   useEnsureStripeConnectAccountMutation,
   useEnsureStripeCustomerMutation,
   useListPaymentMethodsQuery,
+  useProcessTipMutation,
   useRefreshConnectAccountStatusMutation,
   useSetDefaultPaymentMethodMutation,
 } from './payment.queries';

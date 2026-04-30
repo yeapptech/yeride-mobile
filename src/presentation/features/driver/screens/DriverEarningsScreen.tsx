@@ -8,9 +8,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { formatMoney } from '@presentation/utils/formatMoney';
+
 import { BalanceTransactionRow } from '../components/BalanceTransactionRow';
 import { PayoutRow } from '../components/PayoutRow';
-import { formatMoney } from '../utils/formatMoney';
 import { useDriverEarningsViewModel } from '../view-models/useDriverEarningsViewModel';
 
 /**

@@ -1,8 +1,7 @@
 import { Text, View } from 'react-native';
 
 import type { BalanceTransaction } from '@domain/entities/BalanceTransaction';
-
-import { formatMoney } from '../utils/formatMoney';
+import { formatMoney } from '@presentation/utils/formatMoney';
 
 /**
  * One row in the driver Earnings tab's balance-transaction ledger list.

@@ -1,28 +1,11 @@
-import type { Money } from '@domain/entities/Money';
-
 /**
- * Format a `Money` value as a USD-style string for the driver Earnings
- * surface. Phase 6 turn 4 is USD-only (legacy parity); when other
- * currencies arrive, swap the hardcoded `'USD'` for `money.currency`
- * and let `Intl.NumberFormat` route per-locale.
+ * Deprecation shim — `formatMoney` moved to `@presentation/utils/formatMoney`
+ * in Phase 6 turn 5 so both rider-side and driver-side surfaces can
+ * share it. Existing imports keep working through this re-export.
  *
- * Examples:
- *   formatMoney({ minorUnits: 12_345, currency: 'USD' })  → '$123.45'
- *   formatMoney({ minorUnits: 12_345_678, currency: 'USD' }) → '$123,456.78'
- *   formatMoney({ minorUnits: 0, currency: 'USD' })       → '$0.00'
- *
- * Negative balances are not currently constructible (`Money.create`
- * rejects negatives at the value-object boundary), but the formatter
- * handles a hypothetical signed input gracefully via `Math.sign(...)` —
- * future support for refunds / transfers-out can drop in negative
- * `minorUnits` and the formatter will render `-$X.YY`.
+ * Remove this file (and update any stragglers to import from
+ * `@presentation/utils/formatMoney`) in any non-sandbox checkout. The
+ * sandbox virtiofs blocks `unlink()` so we can't delete it from this
+ * environment.
  */
-export function formatMoney(money: Money): string {
-  const major = money.minorUnits / 100;
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(major);
-}
+export { formatMoney } from '@presentation/utils/formatMoney';

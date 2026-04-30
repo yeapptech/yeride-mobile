@@ -1,6 +1,5 @@
 import { Money } from '@domain/entities/Money';
-
-import { formatMoney } from '../formatMoney';
+import { formatMoney } from '@presentation/utils/formatMoney';
 
 function unwrap<T>(
   r: { ok: true; value: T } | { ok: false; error: unknown },

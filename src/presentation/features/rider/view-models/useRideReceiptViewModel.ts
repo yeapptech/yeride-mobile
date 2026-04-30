@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Money } from '@domain/entities/Money';
 import { Money as MoneyClass } from '@domain/entities/Money';
@@ -7,20 +7,24 @@ import type { RideId } from '@domain/entities/RideId';
 import type { TripPayment } from '@domain/entities/TripPayment';
 import { useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
-import { useRideQuery } from '@presentation/queries';
 
 /**
  * View-model for `RideReceiptScreen`.
  *
  * Composition:
- *   - `useRideQuery(rideId)` — one-shot read of the trip doc. Receipt
- *     is a terminal-state read; no need for a live subscription. Cache
- *     warmed by `useCancelRideAsRiderMutation` / `useCreateRideMutation`
- *     in earlier flows.
+ *   - `useFirestoreSubscription(observeRide)` — live ride doc. Phase 6
+ *     turn 5 swapped the one-shot `useRideQuery` for the live source so
+ *     a `'payment_failed' → 'completed'` flip server-side (rider re-tries
+ *     the charge from a different surface) lights up the tip selector
+ *     without a navigation round-trip. The receipt VM stays read-only;
+ *     the tip flow lives in `useTipFlowViewModel` consuming
+ *     `{ride, tipPayment}` from this VM.
  *   - `useFirestoreSubscription(observeTripPayments)` — live: the
  *     Stripe webhook may write a tip / refund row after the rider
  *     opened the receipt. Wiring as a live source means the receipt
- *     auto-updates without a manual refresh.
+ *     auto-updates without a manual refresh, and the tip flow's
+ *     `'submitted' → 'hidden'` transition is driven by the new `'tip'`
+ *     row landing here.
  *
  * Computed surface:
  *   - `fareTotal` — sum of `succeeded` `fare` + `tip` − `refund`. The
@@ -29,13 +33,21 @@ import { useRideQuery } from '@presentation/queries';
  *   - `farePayment` / `tipPayment` / `refundPayment` — single-instance
  *     access for the receipt's labelled rows.
  *
- * Phase 6 will add `cardLast4`, `cardBrand`, and `processingFee` to
+ * Loading semantics: `useFirestoreSubscription` initializes to the
+ * `initialValue` we pass (`null` for the ride). `InMemoryRideRepository`
+ * + `FirestoreRideRepository` both emit synchronously on first
+ * subscribe, so `hasRideEmitted` flips to true within a tick. We
+ * surface `isLoading: true` only until that first emission lands; from
+ * then on `ride === null` means the doc was actually deleted (rare —
+ * admin tooling only) and the screen renders a not-found message.
+ *
+ * Phase 9 will add `cardLast4`, `cardBrand`, and `processingFee` to
  * `TripPayment`. For now the screen renders a "Charged to your default
  * card" placeholder.
  */
 
 export interface UseRideReceiptViewModel {
-  readonly ride: Ride | null | undefined;
+  readonly ride: Ride | null;
   readonly payments: readonly TripPayment[];
   readonly fareTotal: Money | null;
   readonly farePayment: TripPayment | null;
@@ -52,8 +64,28 @@ export function useRideReceiptViewModel(args: {
   const { rideId } = args;
   const useCases = useUseCases();
 
-  const rideQuery = useRideQuery(rideId);
+  // ── Live ride subscription ────────────────────────────────────────
+  const [hasRideEmitted, setHasRideEmitted] = useState(false);
+  const subscribeRide = useCallback(
+    (cb: (ride: Ride | null) => void) =>
+      useCases.observeRide.execute({
+        rideId,
+        callback: (next) => {
+          setHasRideEmitted(true);
+          cb(next);
+        },
+      }),
+    [useCases, rideId],
+  );
+  const ride = useFirestoreSubscription<Ride | null>(subscribeRide, null);
 
+  // Reset the emitted flag when the rideId changes — switching the
+  // observed trip should re-show the loading state.
+  useEffect(() => {
+    setHasRideEmitted(false);
+  }, [rideId]);
+
+  // ── Live trip-payments subscription ───────────────────────────────
   const subscribePayments = useCallback(
     (cb: (payments: readonly TripPayment[]) => void) =>
       useCases.observeTripPayments.execute({ rideId, callback: cb }),
@@ -116,15 +148,17 @@ export function useRideReceiptViewModel(args: {
   }, []);
 
   return {
-    ride: rideQuery.data,
+    ride,
     payments,
     fareTotal,
     farePayment,
     tipPayment,
     refundPayment,
-    isLoading: rideQuery.isLoading,
-    error:
-      rideQuery.isError && rideQuery.error ? rideQuery.error.message : null,
+    // Loading until the first ride-doc emission lands. Subsequent
+    // `ride === null` means the doc was deleted; the screen renders
+    // "couldn't find that receipt" in that branch.
+    isLoading: !hasRideEmitted,
+    error: null,
     emailReceipt,
   };
 }

@@ -20,7 +20,9 @@ import type {
   RiderStackScreenProps,
 } from '@presentation/navigation/types';
 
+import { TipSelector } from '../components/TipSelector';
 import { useRideReceiptViewModel } from '../view-models/useRideReceiptViewModel';
+import { useTipFlowViewModel } from '../view-models/useTipFlowViewModel';
 
 /**
  * RideReceiptScreen — read-only post-ride summary.
@@ -67,6 +69,15 @@ function RideReceiptContent({
   readonly navigation: RiderStackNavigation;
 }) {
   const vm = useRideReceiptViewModel({ rideId });
+
+  // Tip flow lives in its own VM so the receipt VM stays read-only.
+  // We feed in the live `ride` + `tipPayment` so the selector hides the
+  // moment the trip flips out of `'completed'` or a `'tip'` row lands.
+  const tipFlowVM = useTipFlowViewModel({
+    rideId,
+    ride: vm.ride,
+    tipPayment: vm.tipPayment,
+  });
 
   if (vm.isLoading) {
     return (
@@ -149,6 +160,8 @@ function RideReceiptContent({
           </View>
         </View>
 
+        <TipSelector state={tipFlowVM.state} />
+
         <View className="border-t border-border px-4 py-3">
           <Text className="text-xs uppercase text-muted-foreground">
             Payment
@@ -157,7 +170,7 @@ function RideReceiptContent({
             Charged to your default card.
           </Text>
           <Text className="mt-0.5 text-xs text-muted-foreground">
-            Card brand + last-4 land in Phase 6 alongside the Stripe wallet.
+            Card brand + last-4 land alongside Stripe brand glyphs in Phase 9.
           </Text>
         </View>
 

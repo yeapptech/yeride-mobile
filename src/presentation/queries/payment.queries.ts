@@ -11,6 +11,7 @@ import type { Money } from '@domain/entities/Money';
 import type { PaymentMethod } from '@domain/entities/PaymentMethod';
 import type { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import type { Payout } from '@domain/entities/Payout';
+import type { RideId } from '@domain/entities/RideId';
 import type { StripeAccountId } from '@domain/entities/StripeAccountId';
 import type { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import type {
@@ -539,5 +540,49 @@ export function useBalanceTransactionsQuery(args: {
     enabled: accountId !== null,
     staleTime: ACCOUNT_QUERY_STALE_MS,
     refetchOnWindowFocus: false,
+  });
+}
+
+/* ─── Tip flow (Phase 6 turn 5) ─── */
+
+/**
+ * Process a tip for a completed trip via the `tipDriver` Cloud Function
+ * callable. Routes through the `ProcessTip` use case which enforces the
+ * client-side rules ($1 floor, whole-dollar, USD-only, passenger-owns-trip,
+ * trip-must-be-completed) before the network round-trip.
+ *
+ * No cache invalidation — `useRideReceiptViewModel` already subscribes to
+ * the trip's `payments` subcollection via `useFirestoreSubscription
+ * (observeTripPayments)`. Once the Cloud Function's webhook fires (or its
+ * direct write lands), the new `'tip'` `TripPayment` row materializes
+ * through the live subscription and the receipt repaints. Adding a
+ * TanStack invalidation here would just kick a redundant refetch.
+ *
+ * Server-side idempotency on `(tripId, customerId)` keeps a network-blip
+ * retry safe; the local `useTipFlowViewModel` adds a defense-in-depth
+ * single-tap guard so a double-press during a slow round-trip doesn't
+ * fire the callable twice.
+ */
+export function useProcessTipMutation(): UseMutationResult<
+  void,
+  AuthorizationError | NotFoundError | NetworkError | ValidationError,
+  { readonly rideId: RideId; readonly tipAmount: Money }
+> {
+  const useCases = useUseCases();
+  return useMutation<
+    void,
+    AuthorizationError | NotFoundError | NetworkError | ValidationError,
+    { readonly rideId: RideId; readonly tipAmount: Money }
+  >({
+    mutationFn: async (input: {
+      readonly rideId: RideId;
+      readonly tipAmount: Money;
+    }): Promise<void> => {
+      const r = await useCases.processTip.execute({
+        rideId: input.rideId,
+        tipAmount: input.tipAmount,
+      });
+      if (!r.ok) throw r.error;
+    },
   });
 }
