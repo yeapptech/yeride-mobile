@@ -10,6 +10,7 @@ import {
 
 import { FakeBackgroundGeolocationClient } from './FakeBackgroundGeolocationClient';
 import { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
+import { FakeNavigationSdkClient } from './FakeNavigationSdkClient';
 import { FakeRoutesService } from './FakeRoutesService';
 import { FakeStripeServerService } from './FakeStripeServerService';
 import { FakeVinDecoderService } from './FakeVinDecoderService';
@@ -57,6 +58,7 @@ export function TestContainerProvider({
   stripeServer,
   cloudFunctions,
   bgGeolocation,
+  navigationSdk,
   useCases,
   children,
 }: {
@@ -72,6 +74,7 @@ export function TestContainerProvider({
   stripeServer?: FakeStripeServerService;
   cloudFunctions?: FakeCloudFunctionsService;
   bgGeolocation?: FakeBackgroundGeolocationClient;
+  navigationSdk?: FakeNavigationSdkClient;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
@@ -90,6 +93,7 @@ export function TestContainerProvider({
     cloudFunctions ?? new FakeCloudFunctionsService();
   const bgGeolocationClient =
     bgGeolocation ?? new FakeBackgroundGeolocationClient();
+  const navigationSdkClient = navigationSdk ?? new FakeNavigationSdkClient();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
@@ -107,6 +111,7 @@ export function TestContainerProvider({
   const container: Container = {
     useCases: merged,
     bgGeolocation: bgGeolocationClient,
+    navigationSdk: navigationSdkClient,
   };
 
   // Every view-model test needs a QueryClientProvider — view-models

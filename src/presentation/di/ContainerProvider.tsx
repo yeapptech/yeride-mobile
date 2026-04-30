@@ -67,3 +67,31 @@ export function useBackgroundGeolocation(): Container['bgGeolocation'] {
   }
   return ctx.bgGeolocation;
 }
+
+/**
+ * Hook returning the Google Navigation SDK seam (Phase 8 turn 1).
+ * Sibling of `useUseCases()` and `useBackgroundGeolocation()` for the
+ * same reason: the SDK's `useNavigationController` hook is React-tied,
+ * and the `useDriverNavigationViewModel` (Turn 2) drives the session
+ * lifecycle directly through this adapter rather than through a
+ * stateless use case.
+ *
+ * Throws if used outside of a ContainerProvider — same contract as
+ * `useUseCases()`.
+ *
+ * Mounting rule:
+ *   - This hook is consumed exclusively by the Phase 8 Turn 2
+ *     `DriverNavigationScreen`'s connector hook (which calls
+ *     `useNavigationController` from the SDK and pushes the controller
+ *     into the adapter via `setController`). Other view-models / screens
+ *     never reach into the SDK directly.
+ */
+export function useNavigationSdk(): Container['navigationSdk'] {
+  const ctx = useContext(ContainerContext);
+  if (ctx === null) {
+    throw new Error(
+      'useNavigationSdk() called outside <ContainerProvider/>. Wrap your tree in <ContainerProvider/>.',
+    );
+  }
+  return ctx.navigationSdk;
+}

@@ -1,0 +1,639 @@
+import {
+  NavigationSessionStatus,
+  RouteStatus,
+  TravelMode,
+  type ArrivalEvent as SdkArrivalEvent,
+  type NavigationController,
+  type SetDestinationsOptions,
+  type Waypoint,
+} from '@googlemaps/react-native-navigation-sdk';
+
+import { Coordinates } from '@domain/entities/Coordinates';
+import { AuthorizationError, NetworkError } from '@domain/errors';
+import { Result } from '@domain/shared/Result';
+import { LOG } from '@shared/logger';
+
+const logger = LOG.extend('NavigationSdk');
+
+/**
+ * Single seam between the rewrite and `@googlemaps/react-native-navigation-sdk`
+ * (Phase 8 turn 1).
+ *
+ * Why an adapter instead of importing the SDK directly:
+ *
+ *   - The SDK's primary surface is a React hook (`useNavigationController`)
+ *     that returns a `NavigationController` plus a bag of setter functions
+ *     (`setOnArrival`, …). Wrapping it in a domain-shaped facade keeps the
+ *     SDK's lifecycle out of every view-model and lets the rest of the
+ *     codebase (`useDriverNavigationViewModel` in Turn 2) consume a stable
+ *     async + Result-returning API.
+ *
+ *   - The SDK throws on transient failures (network, terms-not-accepted at
+ *     startGuidance time, etc.); we catch at this boundary and map to
+ *     `NetworkError` / `AuthorizationError` so the use cases stay in the
+ *     project's "no expected throws" pattern.
+ *
+ *   - `NavigationSessionStatus` (returned by `init()`) and `RouteStatus`
+ *     (returned by `setDestinations()`) are string enums with multiple
+ *     non-OK values that aren't infrastructure errors so much as domain
+ *     outcomes (e.g. NO_ROUTE_FOUND ≠ network problem). The adapter
+ *     translates them into our own tagged unions and surfaces them via
+ *     `Result.ok` (per Phase 8 kickoff decision 2).
+ *
+ * Controller injection seam:
+ *
+ *   The SDK's `useNavigationController` hook is React-tied, but our
+ *   adapter is plain class-based. The presentation-layer glue
+ *   (Turn 2 — a small connector hook mounted by `DriverNavigationScreen`)
+ *   calls `useNavigationController` and pushes the result into this adapter
+ *   via `setController({controller, listeners})`. On unmount, the connector
+ *   calls `setController({controller: null, listeners: null})`.
+ *
+ *   Methods invoked while no controller is connected return
+ *   `Result.err(NetworkError({code: 'navigation_sdk_not_connected'}))` so
+ *   misuse is loud rather than silent.
+ *
+ * Listener pattern (subscribeToArrival):
+ *
+ *   The SDK's `setOnArrival` is a single-slot setter — calling it twice
+ *   replaces the callback. Our `subscribeToArrival` exposes a
+ *   multi-subscriber facade by:
+ *     1. Holding a `Set<callback>` of all subscribers.
+ *     2. Registering ONE underlying SDK listener when the first subscriber
+ *        joins, fanning the event out to every subscriber.
+ *     3. Clearing the SDK listener (`setOnArrival(null)`) when the last
+ *        subscriber leaves.
+ *
+ *   Listener-level dedup (mirrors `BackgroundGeolocationClient`) collapses
+ *   duplicate fires by `(timestampMs, isFinal)` — the SDK can emit twice
+ *   on iOS/Android boundary transitions.
+ */
+
+/* ───── Domain-shaped types exported to the rest of the codebase ───── */
+
+/**
+ * Mapped from the SDK's `RouteStatus` enum (string values like 'OK',
+ * 'NO_ROUTE_FOUND', 'NETWORK_ERROR', …). Kept as a string-tagged union
+ * so callers can branch on each case without importing the SDK enum.
+ */
+export type NavRouteStatus =
+  | 'ok'
+  | 'no_route_found'
+  | 'network_error'
+  | 'quota_check_failed'
+  | 'route_canceled'
+  | 'location_disabled'
+  | 'location_unknown'
+  | 'waypoint_error'
+  | 'invalid_place_id'
+  | 'duplicate_waypoints_error'
+  | 'unknown';
+
+/**
+ * One-shot result of `init()`. Successful init resolves
+ * `Result.ok(true)`; non-OK SDK statuses get mapped to
+ * `AuthorizationError` (terms / API key / permission) or `NetworkError`
+ * (transport).
+ */
+export type NavInitError = AuthorizationError | NetworkError;
+
+/**
+ * The arrival event domain shape. Coordinates are derived from the
+ * waypoint's `position` if present, else `null` (SDK allows place-id-
+ * only waypoints).
+ */
+export interface NavArrivalEvent {
+  readonly title: string | null;
+  readonly coords: Coordinates | null;
+  readonly placeId: string | null;
+  readonly isFinalDestination: boolean;
+  /** Adapter-stamped event time; the SDK doesn't surface a server timestamp. */
+  readonly timestampMs: number;
+}
+
+/**
+ * Domain shape of a single waypoint for `setDestinations`. Either
+ * `placeId` or `coords` must be provided (matches the SDK's `Waypoint`
+ * shape but in domain primitives).
+ */
+export interface NavWaypoint {
+  readonly title?: string;
+  readonly coords?: Coordinates;
+  readonly placeId?: string;
+  /** Forwarded to the SDK; defaults to right-side-of-road bias on Android. */
+  readonly preferSameSideOfRoad?: boolean;
+}
+
+/**
+ * Args to `setDestinations`. `routeToken` (rider-selected route from the
+ * Routes API) wins over `routingOptions` when both are provided —
+ * matches the SDK's `routeTokenOptions` vs. `routingOptions` mutual
+ * exclusion.
+ */
+export interface NavSetDestinationsArgs {
+  readonly waypoints: readonly NavWaypoint[];
+  readonly routeToken?: string;
+  readonly avoidTolls?: boolean;
+  readonly avoidFerries?: boolean;
+  readonly avoidHighways?: boolean;
+}
+
+export interface NavTermsResult {
+  readonly accepted: boolean;
+}
+
+/** The subset of `NavigationListenerSetters` the adapter needs. */
+export interface NavigationListenerSetters {
+  setOnArrival: (callback: ((event: SdkArrivalEvent) => void) | null) => void;
+}
+
+/* ───── Adapter ───── */
+
+export class NavigationSdkClient {
+  /**
+   * The currently-connected SDK controller, set by `setController`. Null
+   * when no `<NavigationProvider/>`-rooted component is mounted (i.e. the
+   * driver isn't on a navigation surface).
+   */
+  private controller: NavigationController | null = null;
+
+  /**
+   * The subset of `NavigationListenerSetters` we register listeners
+   * against. Held alongside the controller so we can re-apply the
+   * underlying SDK listener if the controller changes mid-subscription
+   * (e.g. React re-render).
+   */
+  private listeners: NavigationListenerSetters | null = null;
+
+  /** Multi-subscriber facade over the SDK's single-slot setOnArrival. */
+  private arrivalCallbacks = new Set<(event: NavArrivalEvent) => void>();
+
+  /** Most-recent arrival dedup key. Cleared on `cleanup()` / disconnect. */
+  private lastArrivalKey: string | null = null;
+
+  /** True once we've registered our internal handler with `setOnArrival`. */
+  private sdkArrivalListenerActive = false;
+
+  /**
+   * Connect the SDK's NavigationController + listener setters to this
+   * adapter. Pass `controller: null` + `listeners: null` to disconnect
+   * on the consumer's unmount.
+   *
+   * If callers re-connect with subscribers already registered (component
+   * re-mount with persistent subscriptions), the underlying SDK listener
+   * is re-applied to the new controller.
+   */
+  setController(args: {
+    controller: NavigationController | null;
+    listeners: NavigationListenerSetters | null;
+  }): void {
+    // Clear the SDK listener on the OLD controller before swapping —
+    // otherwise the old controller will keep firing into our handler if
+    // the SDK retains the reference.
+    if (
+      this.sdkArrivalListenerActive &&
+      this.listeners &&
+      this.listeners !== args.listeners
+    ) {
+      this.listeners.setOnArrival(null);
+      this.sdkArrivalListenerActive = false;
+    }
+
+    this.controller = args.controller;
+    this.listeners = args.listeners;
+
+    // Re-register on the new listener bag if we still have subscribers.
+    if (
+      this.controller &&
+      this.listeners &&
+      this.arrivalCallbacks.size > 0 &&
+      !this.sdkArrivalListenerActive
+    ) {
+      this.listeners.setOnArrival(this.handleArrival);
+      this.sdkArrivalListenerActive = true;
+    }
+  }
+
+  /**
+   * Initialize the navigation session. Maps the SDK's
+   * `NavigationSessionStatus` to a domain-shaped Result.
+   *
+   *   - `OK` → `Result.ok(true)`
+   *   - `TERMS_NOT_ACCEPTED` → `Result.err(AuthorizationError({code:
+   *     'navigation_terms_not_accepted'}))` so the VM's `terms_pending`
+   *     arm can fire.
+   *   - `NOT_AUTHORIZED` → `AuthorizationError({code:
+   *     'navigation_api_not_authorized'})` — Cloud Console hasn't
+   *     enabled the Navigation SDK API for this project.
+   *   - `LOCATION_PERMISSION_MISSING` → `AuthorizationError({code:
+   *     'navigation_location_permission_missing'})`.
+   *   - `NETWORK_ERROR` → `NetworkError({code:
+   *     'navigation_init_network_error'})`.
+   *   - `UNKNOWN_ERROR` and any other status → `NetworkError({code:
+   *     'navigation_init_unknown_error'})`.
+   */
+  async init(): Promise<Result<true, NavInitError>> {
+    if (!this.controller) {
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_sdk_not_connected',
+          message:
+            'NavigationSdkClient.init called without a connected controller',
+        }),
+      );
+    }
+    try {
+      const status = await this.controller.init();
+      return mapInitStatus(status);
+    } catch (e) {
+      logger.error('init threw', e);
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_init_failed',
+          message: 'Navigation SDK init threw',
+          cause: e,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Show the SDK's terms-and-conditions dialog. Returns
+   * `Result.ok({accepted})` for both paths. `accepted: false` means the
+   * user explicitly tapped Cancel; the caller should NOT progress to
+   * `init()` until the user accepts.
+   *
+   * SDK throws → `NetworkError`. Calling this with no controller is the
+   * same misuse signal as the other methods.
+   */
+  async showTermsAndConditionsDialog(): Promise<
+    Result<NavTermsResult, NetworkError>
+  > {
+    if (!this.controller) {
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_sdk_not_connected',
+          message:
+            'NavigationSdkClient.showTermsAndConditionsDialog called without a connected controller',
+        }),
+      );
+    }
+    try {
+      const accepted = await this.controller.showTermsAndConditionsDialog();
+      return Result.ok({ accepted });
+    } catch (e) {
+      logger.error('showTermsAndConditionsDialog threw', e);
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_terms_dialog_failed',
+          message: 'Could not show terms & conditions dialog',
+          cause: e,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Set destinations + return the SDK's `RouteStatus` mapped to our
+   * tagged union. Per kickoff decision 2, non-OK statuses come back as
+   * `Result.ok(<status>)` because they're domain outcomes (the caller
+   * branches on which one to surface — a "no route found" UX differs
+   * from a "network down" UX).
+   *
+   * SDK throws → `Result.err(NetworkError)` (the throw indicates the
+   * call itself failed, not that the route calculation reported a
+   * domain error code).
+   */
+  async setDestinations(
+    args: NavSetDestinationsArgs,
+  ): Promise<Result<NavRouteStatus, NetworkError>> {
+    if (!this.controller) {
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_sdk_not_connected',
+          message:
+            'NavigationSdkClient.setDestinations called without a connected controller',
+        }),
+      );
+    }
+    if (args.waypoints.length === 0) {
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_setdestinations_empty_waypoints',
+          message: 'setDestinations called with no waypoints',
+        }),
+      );
+    }
+    const sdkWaypoints: Waypoint[] = args.waypoints.map(toSdkWaypoint);
+    const sdkOptions = buildSetDestinationsOptions(args);
+    try {
+      const status = await this.controller.setDestinations(
+        sdkWaypoints,
+        sdkOptions,
+      );
+      return Result.ok(mapRouteStatus(status));
+    } catch (e) {
+      logger.error('setDestinations threw', e);
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_setdestinations_failed',
+          message: 'Could not set destinations',
+          cause: e,
+        }),
+      );
+    }
+  }
+
+  async startGuidance(): Promise<Result<true, NetworkError>> {
+    if (!this.controller) {
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_sdk_not_connected',
+          message:
+            'NavigationSdkClient.startGuidance called without a connected controller',
+        }),
+      );
+    }
+    try {
+      await this.controller.startGuidance();
+      return Result.ok(true);
+    } catch (e) {
+      logger.error('startGuidance threw', e);
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_start_guidance_failed',
+          message: 'Could not start guidance',
+          cause: e,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Idempotent — calling stopGuidance without an active session is a
+   * no-op on the SDK side. We catch the throw defensively just in case.
+   */
+  async stopGuidance(): Promise<Result<true, NetworkError>> {
+    if (!this.controller) {
+      // No controller = nothing to stop. Treat as success rather than
+      // surfacing a misuse error: callers may invoke this in cleanup
+      // paths after the controller has already been disconnected.
+      return Result.ok(true);
+    }
+    try {
+      await this.controller.stopGuidance();
+      return Result.ok(true);
+    } catch (e) {
+      logger.warn('stopGuidance threw — swallowing', e);
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_stop_guidance_failed',
+          message: 'Could not stop guidance',
+          cause: e,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Release SDK resources. Calls `stopGuidance` first (defensively,
+   * tolerating throws from either step) then `cleanup()` on the
+   * controller. Clears all subscribers and dedup state.
+   *
+   * Idempotent; safe to call after disconnect (returns Result.ok).
+   */
+  async cleanup(): Promise<Result<true, NetworkError>> {
+    // Tear down our internal subscriber registry first, regardless of
+    // whether we have a live controller. This prevents leaks if the
+    // consumer disconnected the controller before calling cleanup.
+    this.arrivalCallbacks.clear();
+    this.lastArrivalKey = null;
+    if (this.sdkArrivalListenerActive && this.listeners) {
+      try {
+        this.listeners.setOnArrival(null);
+      } catch (e) {
+        logger.warn('cleanup: setOnArrival(null) threw — swallowing', e);
+      }
+      this.sdkArrivalListenerActive = false;
+    }
+
+    if (!this.controller) {
+      return Result.ok(true);
+    }
+    // stopGuidance first; if the SDK throws here we still want to try
+    // cleanup() so the failure on stop doesn't strand the session.
+    try {
+      await this.controller.stopGuidance();
+    } catch (e) {
+      logger.warn('cleanup: stopGuidance threw — continuing to cleanup', e);
+    }
+    try {
+      await this.controller.cleanup();
+      return Result.ok(true);
+    } catch (e) {
+      logger.error('cleanup: controller.cleanup() threw', e);
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_cleanup_failed',
+          message: 'Could not clean up navigation session',
+          cause: e,
+        }),
+      );
+    }
+  }
+
+  /**
+   * Subscribe to arrival events. Multiple callers register against ONE
+   * underlying SDK listener; the SDK fires once per arrival but we
+   * dedup `(timestampMs, isFinal)` defensively in case the
+   * listener is double-applied across re-renders. Returns a synchronous
+   * disposer; removing the LAST subscriber clears the SDK listener so
+   * the SDK doesn't keep firing into the void.
+   *
+   * If no controller is connected at the time of subscription, the
+   * subscriber is recorded and the SDK listener is registered on the
+   * next `setController(controller)` call. This lets the consumer
+   * subscribe before the navigation screen mounts (Turn 2 will use this).
+   */
+  subscribeToArrival(callback: (event: NavArrivalEvent) => void): () => void {
+    this.arrivalCallbacks.add(callback);
+    if (!this.sdkArrivalListenerActive && this.listeners && this.controller) {
+      this.listeners.setOnArrival(this.handleArrival);
+      this.sdkArrivalListenerActive = true;
+    }
+    return () => {
+      this.arrivalCallbacks.delete(callback);
+      if (
+        this.arrivalCallbacks.size === 0 &&
+        this.sdkArrivalListenerActive &&
+        this.listeners
+      ) {
+        this.listeners.setOnArrival(null);
+        this.sdkArrivalListenerActive = false;
+        this.lastArrivalKey = null;
+      }
+    };
+  }
+
+  /* ───── Internal handlers ───── */
+
+  private handleArrival = (event: SdkArrivalEvent): void => {
+    const ts = Date.now();
+    const isFinal = event.isFinalDestination ?? false;
+    // Use placeId ?? coords ?? title to make the dedup key sensitive to
+    // which waypoint arrived — back-to-back arrivals at different
+    // waypoints (multi-stop trip; rare in YeRide today) shouldn't dedup.
+    const wp = event.waypoint;
+    const wpKey =
+      wp.placeId ??
+      (wp.position
+        ? `${String(wp.position.lat)},${String(wp.position.lng)}`
+        : (wp.title ?? ''));
+    const key = `${wpKey}:${String(isFinal)}`;
+    if (key === this.lastArrivalKey) return;
+    this.lastArrivalKey = key;
+
+    let coords: Coordinates | null = null;
+    if (wp.position) {
+      const c = Coordinates.create(wp.position.lat, wp.position.lng);
+      coords = c.ok ? c.value : null;
+    }
+    const domainEvent: NavArrivalEvent = {
+      title: wp.title ?? null,
+      coords,
+      placeId: wp.placeId ?? null,
+      isFinalDestination: isFinal,
+      timestampMs: ts,
+    };
+    for (const cb of [...this.arrivalCallbacks]) {
+      try {
+        cb(domainEvent);
+      } catch (e) {
+        logger.warn('handleArrival: subscriber threw', e);
+      }
+    }
+  };
+}
+
+/* ───── SDK ↔ domain mappers ───── */
+
+function toSdkWaypoint(w: NavWaypoint): Waypoint {
+  const out: Waypoint = {};
+  if (w.title !== undefined) out.title = w.title;
+  if (w.placeId !== undefined) out.placeId = w.placeId;
+  if (w.coords) {
+    out.position = { lat: w.coords.latitude, lng: w.coords.longitude };
+  }
+  if (w.preferSameSideOfRoad !== undefined) {
+    out.preferSameSideOfRoad = w.preferSameSideOfRoad;
+  }
+  return out;
+}
+
+function buildSetDestinationsOptions(
+  args: NavSetDestinationsArgs,
+): SetDestinationsOptions {
+  // Per SDK: routingOptions and routeTokenOptions are mutually exclusive;
+  // routeToken wins when supplied (rider's route preference from
+  // RoutesService). Display options stay constant for now — matches
+  // legacy DriverNavigation behaviour.
+  if (args.routeToken !== undefined) {
+    return {
+      routeTokenOptions: {
+        routeToken: args.routeToken,
+        travelMode: TravelMode.DRIVING,
+      },
+      displayOptions: { showDestinationMarkers: true },
+    };
+  }
+  const routingOptions: SetDestinationsOptions['routingOptions'] = {
+    travelMode: TravelMode.DRIVING,
+    avoidFerries: args.avoidFerries ?? true,
+    avoidTolls: args.avoidTolls ?? false,
+  };
+  if (args.avoidHighways !== undefined) {
+    routingOptions.avoidHighways = args.avoidHighways;
+  }
+  return {
+    routingOptions,
+    displayOptions: { showDestinationMarkers: true },
+  };
+}
+
+function mapRouteStatus(status: RouteStatus): NavRouteStatus {
+  switch (status) {
+    case RouteStatus.OK:
+      return 'ok';
+    case RouteStatus.NO_ROUTE_FOUND:
+      return 'no_route_found';
+    case RouteStatus.NETWORK_ERROR:
+      return 'network_error';
+    case RouteStatus.QUOTA_CHECK_FAILED:
+      return 'quota_check_failed';
+    case RouteStatus.ROUTE_CANCELED:
+      return 'route_canceled';
+    case RouteStatus.LOCATION_DISABLED:
+      return 'location_disabled';
+    case RouteStatus.LOCATION_UNKNOWN:
+      return 'location_unknown';
+    case RouteStatus.WAYPOINT_ERROR:
+      return 'waypoint_error';
+    case RouteStatus.INVALID_PLACE_ID:
+      return 'invalid_place_id';
+    case RouteStatus.DUPLICATE_WAYPOINTS_ERROR:
+      return 'duplicate_waypoints_error';
+    case RouteStatus.UNKNOWN:
+      return 'unknown';
+    default:
+      // Forward-compat: unknown SDK enum value (older device, newer SDK
+      // upgrade with new statuses) — surface as 'unknown' rather than
+      // throwing.
+      return 'unknown';
+  }
+}
+
+function mapInitStatus(
+  status: NavigationSessionStatus,
+): Result<true, NavInitError> {
+  switch (status) {
+    case NavigationSessionStatus.OK:
+      return Result.ok(true);
+    case NavigationSessionStatus.TERMS_NOT_ACCEPTED:
+      return Result.err(
+        new AuthorizationError({
+          code: 'navigation_terms_not_accepted',
+          message: 'Navigation terms have not been accepted',
+        }),
+      );
+    case NavigationSessionStatus.NOT_AUTHORIZED:
+      return Result.err(
+        new AuthorizationError({
+          code: 'navigation_api_not_authorized',
+          message:
+            'Navigation SDK is not authorized for this API key — enable Navigation SDK in Cloud Console',
+        }),
+      );
+    case NavigationSessionStatus.LOCATION_PERMISSION_MISSING:
+      return Result.err(
+        new AuthorizationError({
+          code: 'navigation_location_permission_missing',
+          message: 'Location permission is required for navigation',
+        }),
+      );
+    case NavigationSessionStatus.NETWORK_ERROR:
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_init_network_error',
+          message: 'Network error during Navigation SDK init',
+        }),
+      );
+    case NavigationSessionStatus.UNKNOWN_ERROR:
+    default:
+      return Result.err(
+        new NetworkError({
+          code: 'navigation_init_unknown_error',
+          message: `Navigation SDK init returned status: ${String(status)}`,
+        }),
+      );
+  }
+}

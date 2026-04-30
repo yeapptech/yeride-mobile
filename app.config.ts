@@ -187,6 +187,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // `IncompatibleClassChangeError`. Legacy yeride applies the same
     // pin in its `android/build.gradle`'s top-level `ext { }` block.
     './plugins/withPlayServicesLocationVersion.js',
+    // Phase 8 turn 1: integrate `@googlemaps/react-native-navigation-sdk`.
+    // The SDK doesn't ship its own `app.plugin.js`, so the local plugin
+    // covers everything: Android core library desugaring +
+    // play-services-maps exclusion + kotlin-stdlib alignment + AAR
+    // metadata check disable; iOS GoogleMaps podspec alignment +
+    // RCTDirectEventBlock event-type fix + CocoaPods CDN fallback +
+    // strip the orphan `pod 'react-native-google-maps'` line that
+    // Expo's withMaps emits for legacy react-native-maps. Minimum
+    // patch set per kickoff decision 3 — Firebase BoM 34.0.0 pin and
+    // MapView NPE patches are deferred until Turn 3's device build
+    // smoke catches them. `npm run prebuild` is required after this
+    // plugin lands so the native config takes effect.
+    './plugins/withNavigationSdk.js',
     [
       // Phase 6 turn 3: in-app card collection via Stripe's React Native
       // SDK. The Expo plugin (a) writes the Apple Pay merchant identifier
@@ -244,7 +257,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           extraMavenRepos: [],
         },
         ios: {
-          deploymentTarget: '15.1',
+          // Phase 8 turn 1: bumped 15.1 → 16.0 because
+          // `@googlemaps/react-native-navigation-sdk@0.14.1`'s podspec
+          // declares `:ios => "16.0"` as its minimum platform. CocoaPods
+          // refuses to resolve the dependency otherwise (`could not find
+          // compatible versions for pod "react-native-navigation-sdk"`).
+          // Legacy yeride is already on iOS 16+; the rewrite's earlier
+          // 15.1 was a hold-over from before the Navigation SDK landed.
+          // Practical user-base impact: drops iPhone 6s / 7 / SE-1, all
+          // released ≥ 9 years ago.
+          deploymentTarget: '16.0',
           // Required so Firebase Swift pods (FirebaseAuth, FirebaseFirestore,
           // FirebaseFunctions, ...) can resolve their non-modular Obj-C
           // dependencies (GoogleUtilities, FirebaseAppCheckInterop, etc.).

@@ -14,6 +14,16 @@ export type {
   CloudFunctionsMethod,
   FakeCloudFunctionsSpies,
 } from './FakeCloudFunctionsService';
+export { FakeNavigationSdkClient } from './FakeNavigationSdkClient';
+export type {
+  FakeNavigationSdkMethod,
+  FakeNavigationSdkSpies,
+  NavArrivalEvent,
+  NavInitError,
+  NavRouteStatus,
+  NavSetDestinationsArgs,
+  NavTermsResult,
+} from './FakeNavigationSdkClient';
 export { FakeRoutesService } from './FakeRoutesService';
 export { FakeStripeServerService } from './FakeStripeServerService';
 export type { FakeStripeServerSpies } from './FakeStripeServerService';

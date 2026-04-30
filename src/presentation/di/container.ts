@@ -66,6 +66,7 @@ import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } fro
 import type { BackgroundGeolocationClient as BackgroundGeolocationClientType } from '@data/services/BackgroundGeolocationClient';
 import type { CloudFunctionsService as CloudFunctionsServiceType } from '@data/services/CloudFunctionsService';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
+import type { NavigationSdkClient as NavigationSdkClientType } from '@data/services/NavigationSdkClient';
 import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
 import type { StripeServerHttpAdapter as StripeServerHttpAdapterType } from '@data/services/StripeServerHttpAdapter';
 import type {
@@ -88,6 +89,7 @@ import { LOG } from '@shared/logger';
 import type {
   FakeBackgroundGeolocationClient as FakeBackgroundGeolocationClientType,
   FakeCloudFunctionsService as FakeCloudFunctionsServiceType,
+  FakeNavigationSdkClient as FakeNavigationSdkClientType,
   FakeRoutesService as FakeRoutesServiceType,
   FakeStripeServerService as FakeStripeServerServiceType,
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
@@ -228,6 +230,16 @@ export interface Container {
   bgGeolocation:
     | BackgroundGeolocationClientType
     | FakeBackgroundGeolocationClientType;
+  /**
+   * Phase 8 turn 1: the Google Navigation SDK seam. Exposed alongside
+   * `useCases` and `bgGeolocation` rather than wrapped in a use case
+   * because the SDK's lifecycle is React-tied (the
+   * `useNavigationController` hook is the only entry point) and the
+   * `useDriverNavigationViewModel` (Turn 2) drives session state
+   * directly. Tests inject a `FakeNavigationSdkClient` via
+   * `TestContainerProvider`'s optional `navigationSdk` prop.
+   */
+  navigationSdk: NavigationSdkClientType | FakeNavigationSdkClientType;
 }
 
 /**
@@ -406,6 +418,14 @@ export function buildContainer(): Container {
   // the module is mocked globally in `jest.setup.ts`.
   const bgGeolocation = buildBackgroundGeolocationClient();
 
+  // Phase 8 turn 1: NavigationSdkClient. Unconditional in production —
+  // the SDK billing model is per-Maps-Platform usage; an unconfigured
+  // device gracefully surfaces `NavigationSessionStatus.NOT_AUTHORIZED`
+  // through `init()`. Tests inject `FakeNavigationSdkClient` via
+  // `TestContainerProvider`; this branch is never hit under jest because
+  // the SDK module is mocked globally in `jest.setup.ts`.
+  const navigationSdk = buildNavigationSdkClient();
+
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
       FirebaseAuthRepository: new () => FirebaseAuthRepositoryType;
@@ -439,7 +459,7 @@ export function buildContainer(): Container {
     const paymentCallable: PaymentCallableService =
       new dataCloudFunctions.CloudFunctionsService();
     LOG.info(
-      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories + StripeServer + CloudFunctions + BackgroundGeolocationClient',
+      'Container using Firebase{Auth,Firestore,Storage} + FirestoreServiceArea + FirestoreRide + FirestoreLocation + FirestoreVehicle repositories + StripeServer + CloudFunctions + BackgroundGeolocationClient + NavigationSdkClient',
     );
     return {
       useCases: makeUseCases({
@@ -457,6 +477,7 @@ export function buildContainer(): Container {
         paymentCallable,
       }),
       bgGeolocation,
+      navigationSdk,
     };
   }
 
@@ -489,6 +510,7 @@ export function buildContainer(): Container {
       paymentCallable: new testing.FakeCloudFunctionsService(),
     }),
     bgGeolocation,
+    navigationSdk,
   };
 }
 
@@ -511,6 +533,28 @@ function buildBackgroundGeolocationClient(): BackgroundGeolocationClientType {
     BackgroundGeolocationClient: new () => BackgroundGeolocationClientType;
   };
   return new dataBg.BackgroundGeolocationClient();
+}
+
+/**
+ * Build the real `NavigationSdkClient`. Unconditional in production —
+ * the SDK gracefully reports `NavigationSessionStatus.NOT_AUTHORIZED`
+ * via `init()` if the Maps Platform project doesn't have the Navigation
+ * SDK API enabled, so a missing config doesn't crash module-load.
+ *
+ * Lazy-required so a fakes-only build that never reaches the runtime
+ * Container construction (e.g. a unit test that imports a use case
+ * directly) doesn't pull the SDK into the bundle.
+ *
+ * Tests use `TestContainerProvider`'s `navigationSdk` override slot to
+ * inject `FakeNavigationSdkClient` directly — this builder is not
+ * exercised under jest because `@googlemaps/react-native-navigation-sdk`
+ * is mocked globally in `jest.setup.ts`.
+ */
+function buildNavigationSdkClient(): NavigationSdkClientType {
+  const dataNav = require('@data/services/NavigationSdkClient') as {
+    NavigationSdkClient: new () => NavigationSdkClientType;
+  };
+  return new dataNav.NavigationSdkClient();
 }
 
 /**

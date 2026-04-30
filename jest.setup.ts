@@ -164,4 +164,187 @@ jest.mock('react-native-background-geolocation', () => ({
   default: mockBg,
 }));
 
+// @googlemaps/react-native-navigation-sdk (Phase 8 turn 1): the SDK's
+// React-tied surface (`useNavigationController` + `<NavigationView/>` +
+// `<NavigationProvider/>`) is TurboModule-backed and crashes outside a
+// real RN runtime. We provide a JS-only stub with:
+//
+//   1. The string-enum constants the adapter reads at module-load:
+//      `RouteStatus.*`, `NavigationSessionStatus.*`, `TravelMode.*`,
+//      `TaskRemovedBehavior.*`. Match the SDK's actual values exactly
+//      (RouteStatus + NavigationSessionStatus are string literals;
+//      TravelMode + TaskRemovedBehavior are numeric).
+//
+//   2. A factory `mockMakeNavigationController()` that returns an object
+//      shaped like `NavigationController`. Every method is a `jest.fn()`
+//      with a default no-throw resolved value matching the SDK's docs.
+//      Tests prime per-call behaviour with `.mockResolvedValueOnce(...)`
+//      / `.mockRejectedValueOnce(...)`.
+//
+//   3. Per-bucket listener registries (arrival + forward-compat
+//      routeChanged / trafficUpdated; per Phase 8 turn 1 kickoff
+//      decision 5) and `__emitArrival` / `__reset` helpers under the
+//      module's named exports. Adapter tests register listeners via the
+//      controller's `setOnArrival` (passed in alongside the controller),
+//      then drive deliveries with the helpers.
+//
+//   4. Stubs for the React surfaces (`NavigationProvider`,
+//      `NavigationView`, `useNavigationController`) — the rewrite
+//      doesn't render any of these in tests this turn (Turn 2 will), but
+//      mocking them keeps the module-load surface clean for any future
+//      VM test that imports the SDK indirectly.
+
+interface MockNavListeners {
+  arrival: Array<(event: unknown) => void>;
+  routeChanged: Array<() => void>;
+  trafficUpdated: Array<() => void>;
+}
+
+const mockNavListeners: MockNavListeners = {
+  arrival: [],
+  routeChanged: [],
+  trafficUpdated: [],
+};
+
+const mockMakeNavigationController = () => ({
+  areTermsAccepted: jest.fn().mockResolvedValue(true),
+  showTermsAndConditionsDialog: jest.fn().mockResolvedValue(true),
+  resetTermsAccepted: jest.fn().mockResolvedValue(undefined),
+  init: jest.fn().mockResolvedValue('ok' /* NavigationSessionStatus.OK */),
+  cleanup: jest.fn().mockResolvedValue(undefined),
+  getCurrentRouteSegment: jest.fn().mockResolvedValue({}),
+  getRouteSegments: jest.fn().mockResolvedValue([]),
+  getCurrentTimeAndDistance: jest
+    .fn()
+    .mockResolvedValue({ meters: 0, seconds: 0, delaySeverity: 0 }),
+  getTraveledPath: jest.fn().mockResolvedValue([]),
+  getNavSDKVersion: jest.fn().mockResolvedValue('0.14.1-mock'),
+  setDestination: jest.fn().mockResolvedValue('OK' /* RouteStatus.OK */),
+  setDestinations: jest.fn().mockResolvedValue('OK' /* RouteStatus.OK */),
+  continueToNextDestination: jest.fn().mockResolvedValue(undefined),
+  clearDestinations: jest.fn().mockResolvedValue(undefined),
+  startGuidance: jest.fn().mockResolvedValue(undefined),
+  stopGuidance: jest.fn().mockResolvedValue(undefined),
+  setAbnormalTerminatingReportingEnabled: jest.fn(),
+  setSpeedAlertOptions: jest.fn(),
+  setAudioGuidanceType: jest.fn(),
+  stopUpdatingLocation: jest.fn(),
+  startUpdatingLocation: jest.fn(),
+  setBackgroundLocationUpdatesEnabled: jest.fn(),
+  setTurnByTurnLoggingEnabled: jest.fn(),
+  simulator: {
+    simulateLocationsAlongExistingRoute: jest.fn(),
+    stopLocationSimulation: jest.fn(),
+    resumeLocationSimulation: jest.fn(),
+    pauseLocationSimulation: jest.fn(),
+    simulateLocation: jest.fn(),
+  },
+});
+
+const mockMakeListenerSetters = () => ({
+  setOnStartGuidance: jest.fn(),
+  setOnArrival: jest.fn((cb: ((event: unknown) => void) | null | undefined) => {
+    if (cb) {
+      mockNavListeners.arrival.push(cb);
+    } else {
+      mockNavListeners.arrival.length = 0;
+    }
+  }),
+  setOnLocationChanged: jest.fn(),
+  setOnRawLocationChanged: jest.fn(),
+  setOnNavigationReady: jest.fn(),
+  setOnRouteChanged: jest.fn(),
+  setOnReroutingRequestedByOffRoute: jest.fn(),
+  setOnTrafficUpdated: jest.fn(),
+  setOnRemainingTimeOrDistanceChanged: jest.fn(),
+  setOnTurnByTurn: jest.fn(),
+  setLogDebugInfo: jest.fn(),
+});
+
+jest.mock('@googlemaps/react-native-navigation-sdk', () => {
+  // SDK enum values — kept verbatim because the real adapter compares
+  // via `RouteStatus.OK` etc. and would never match if these drifted.
+  const RouteStatus = {
+    OK: 'OK',
+    NO_ROUTE_FOUND: 'NO_ROUTE_FOUND',
+    NETWORK_ERROR: 'NETWORK_ERROR',
+    QUOTA_CHECK_FAILED: 'QUOTA_CHECK_FAILED',
+    ROUTE_CANCELED: 'ROUTE_CANCELED',
+    LOCATION_DISABLED: 'LOCATION_DISABLED',
+    LOCATION_UNKNOWN: 'LOCATION_UNKNOWN',
+    WAYPOINT_ERROR: 'WAYPOINT_ERROR',
+    INVALID_PLACE_ID: 'INVALID_PLACE_ID',
+    DUPLICATE_WAYPOINTS_ERROR: 'DUPLICATE_WAYPOINTS_ERROR',
+    UNKNOWN: 'UNKNOWN',
+  };
+
+  const NavigationSessionStatus = {
+    OK: 'ok',
+    NOT_AUTHORIZED: 'notAuthorized',
+    TERMS_NOT_ACCEPTED: 'termsNotAccepted',
+    NETWORK_ERROR: 'networkError',
+    LOCATION_PERMISSION_MISSING: 'locationPermissionMissing',
+    UNKNOWN_ERROR: 'unknownError',
+  };
+
+  const TravelMode = {
+    DRIVING: 0,
+    CYCLING: 1,
+    WALKING: 2,
+    TWO_WHEELER: 3,
+    TAXI: 4,
+  };
+
+  const TaskRemovedBehavior = {
+    CONTINUE_SERVICE: 0,
+    QUIT_SERVICE: 1,
+  };
+
+  return {
+    __esModule: true,
+
+    // Enums consumed at module-load.
+    RouteStatus,
+    NavigationSessionStatus,
+    TravelMode,
+    TaskRemovedBehavior,
+
+    // React surfaces — stubbed so any future test that pulls them in
+    // doesn't fail at import time.
+    NavigationProvider: ({ children }: { children: unknown }): unknown =>
+      children,
+    NavigationView: () => null,
+    useNavigationController: jest.fn(() => ({
+      navigationController: mockMakeNavigationController(),
+      ...mockMakeListenerSetters(),
+      removeAllListeners: jest.fn(() => {
+        mockNavListeners.arrival.length = 0;
+        mockNavListeners.routeChanged.length = 0;
+        mockNavListeners.trafficUpdated.length = 0;
+      }),
+    })),
+
+    // Test-only constructors / helpers — namespaced under `__` so
+    // they're loud at the call site. Tests get a fresh controller +
+    // listeners pair via:
+    //
+    //   const sdk = require('@googlemaps/react-native-navigation-sdk');
+    //   const controller = sdk.__makeController();
+    //   const listeners = sdk.__makeListeners();
+    //   client.setController({controller, listeners});
+    //   sdk.__emitArrival({waypoint: {...}, isFinalDestination: true});
+    __makeController: mockMakeNavigationController,
+    __makeListeners: mockMakeListenerSetters,
+    __listeners: mockNavListeners,
+    __emitArrival: (event: unknown): void => {
+      for (const cb of [...mockNavListeners.arrival]) cb(event);
+    },
+    __reset: (): void => {
+      mockNavListeners.arrival.length = 0;
+      mockNavListeners.routeChanged.length = 0;
+      mockNavListeners.trafficUpdated.length = 0;
+    },
+  };
+});
+
 export {};

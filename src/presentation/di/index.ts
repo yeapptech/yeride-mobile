@@ -1,6 +1,7 @@
 export {
   ContainerProvider,
   useBackgroundGeolocation,
+  useNavigationSdk,
   useUseCases,
 } from './ContainerProvider';
 export {
