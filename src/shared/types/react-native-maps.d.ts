@@ -85,3 +85,10 @@ export default MapView;
 
 export const Marker: ComponentType<MarkerProps>;
 export const Polyline: ComponentType<PolylineProps>;
+
+// Provider constants (Phase 9 turn 1: rewrite forces PROVIDER_GOOGLE on
+// both platforms to escape the iOS Apple Maps Fabric registration
+// regression). Mirror the runtime export from
+// `node_modules/react-native-maps/src/ProviderConstants.ts`.
+export const PROVIDER_GOOGLE: 'google';
+export const PROVIDER_DEFAULT: undefined;

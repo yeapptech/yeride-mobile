@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
 import MapView, {
   Marker,
   Polyline,
+  PROVIDER_GOOGLE,
   type Region as RNRegion,
 } from 'react-native-maps';
 
@@ -51,10 +52,25 @@ import { decodePolyline, type DecodedPoint } from './decodePolyline';
  *
  * ## Provider
  *
- * On Android we force the Google Maps provider (matches legacy: the
- * `com.google.android.geo.API_KEY` plumbing in `withGoogleMapsApiKey`
- * targets it). On iOS we let the platform pick (Apple Maps default for
- * react-native-maps' built-in MapView).
+ * Both platforms force `PROVIDER_GOOGLE`. On Android this matches legacy
+ * yeride and the `com.google.android.geo.API_KEY` plumbing in
+ * `withGoogleMapsApiKey`. On iOS, Phase 9 turn 1 flipped the rewrite from
+ * Apple Maps (`provider={undefined}`) to Google Maps to escape a Fabric
+ * registration regression: under Expo SDK 55 + RN 0.83.6 New Arch, every
+ * screen using `<MapView>` without `provider="google"` falls through to a
+ * pink "Unimplemented component: <RNMapsMapView>" placeholder (the
+ * react-native-maps@1.24 Apple Maps view manager isn't picked up by the
+ * Fabric → Paper interop). Switching to the Google view manager
+ * (`AIRGoogleMap`) sidesteps the issue entirely. The plugin
+ * `plugins/withNavigationSdk.js` ensures the `react-native-maps/Google`
+ * subspec lands in the Podfile and bumps its `GoogleMaps` dep to 10.7.0
+ * to match the Navigation SDK's pin.
+ *
+ * Legacy yeride uses `provider={Platform.OS === 'ios' ? undefined : 'google'}`
+ * (Apple Maps on iOS) — but legacy is on Expo SDK 53 with the old
+ * architecture and doesn't hit the Fabric regression. The rewrite needs
+ * Google on both platforms; legacy parity is intentionally not preserved
+ * here.
  */
 
 export interface MapMarkerProps {
@@ -161,7 +177,7 @@ export function Map({
   return (
     <View style={styles.container}>
       <MapView
-        provider={Platform.OS === 'ios' ? undefined : 'google'}
+        provider={PROVIDER_GOOGLE}
         style={styles.map}
         showsCompass={true}
         {...(initialRegion ? { initialRegion: toRNRegion(initialRegion) } : {})}

@@ -18,6 +18,26 @@ jest.mock('@stripe/stripe-react-native', () =>
   require('@stripe/stripe-react-native/jest/mock'),
 );
 
+// react-native-maps (Phase 9 turn 1): manual mock lives at
+// `<rootDir>/__mocks__/react-native-maps.tsx`. Jest auto-resolves it.
+//
+// Why a separate file: the package's exports are native view-managers
+// (`AIRMap`, `AIRGoogleMap`) that fail to load outside a real RN runtime,
+// so we mock unconditionally. But the mock has to render real `<View>`s
+// (so `getByTestId` queries against the rendered tree work), and inline
+// `jest.mock` factories collide with NativeWind's babel plugin: the
+// plugin injects a `_ReactNativeCSSInterop` reference into transformed
+// components, and since `jest.mock` factories are hoisted above the
+// file-scope binding for that helper, the factory body fails with
+// "module factory ... not allowed to reference any out-of-scope variables".
+// A manual mock at `__mocks__/react-native-maps.tsx` is a regular module
+// (not a hoisted factory), so NativeWind's transform binds correctly.
+//
+// The mock encodes the relevant props into `testID`s so consumer tests
+// can assert on them: `getByTestId('map-view-provider-google')`,
+// `getAllByTestId('map-polyline-len-0')`,
+// `getAllByTestId('map-marker-opacity-0')`.
+
 // react-native-background-geolocation (Phase 7 turn 1): the SDK's default
 // export is the `BackgroundGeolocation` namespace whose methods are
 // TurboModule-backed and crash outside a real RN runtime. We provide a

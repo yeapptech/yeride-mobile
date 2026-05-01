@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 1, 2026 (Phase 8 turn 3 — first device-build smoke + Phase 8 close)
+**Last updated:** May 1, 2026 (Phase 9 turn 1 — iOS Apple Maps Fabric escape)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,59 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 turn 1 shipped.** First Phase 9 turn lands the iOS Apple
+Maps Fabric escape that closed Phase 8 surfaced. The rewrite's
+`<Map/>` now uses `provider={PROVIDER_GOOGLE}` on both platforms
+(was `provider={Platform.OS === 'ios' ? undefined : 'google'}`); under
+Expo SDK 55 + RN 0.83.6 New Arch, the react-native-maps@1.24 Apple
+Maps view manager (`AIRMap`) doesn't get picked up by the Fabric →
+Paper interop, leaving every iOS map screen rendering a pink
+"Unimplemented component: <RNMapsMapView>" placeholder. Switching to
+the Google view manager (`AIRGoogleMap`) sidesteps the registration
+failure entirely. To make it compile + register, `plugins/withNavigationSdk.js`
+gained: (a) a three-branch Podfile mod that emits
+`pod 'react-native-maps/Google', :path => '../node_modules/react-native-maps'`
+(replacing the previous strip-only behavior — the strip was correct
+about Expo's emit being broken but never provided a working
+replacement); (b) iOS podspec patch path corrected from the
+no-longer-existing `react-native-google-maps.podspec` to the unified
+`react-native-maps.podspec` so the upstream `GoogleMaps '9.3.0'`
+inside the Google subspec actually gets bumped to `10.7.0` (matching
+the Navigation SDK's pin); (c) `eventPatchFiles` list extension
+fixing stale `.m` extensions to `.mm` for AirGoogleMaps Manager +
+Map and adding the missing `AirMaps/AIRMap.mm` (silent Phase 8 no-op
+that would have surfaced as a runtime bridge-event mismatch once the
+Google subspec activated); **(d) react-native-maps' `package.json`
+`codegenConfig.ios.componentProvider` patched to add the 4 missing
+Fabric component mappings (`RNMapsMapView`, `RNMapsGoogleMapView`,
+`RNMapsMarker → RNMapsMarkerView`, `RNMapsGooglePolygon → RNMapsGooglePolygonView`).
+This is the bit that actually makes Fabric register the components
+at runtime — without it, the app's auto-generated
+`RCTThirdPartyComponentsProvider.mm` lists Stripe / screens /
+safe-area / nav-sdk components but contains zero entries for
+react-native-maps, and `NSClassFromString` returns nil for both
+Apple and Google view managers regardless of which subspec is
+compiled in.** Surfaced during the first device-build attempt: with
+only (a)-(c) in place, the iOS sim still rendered the placeholder
+but with the component name flipped from `<RNMapsMapView>` to
+`<RNMapsGoogleMapView>` (proving the JS provider flip worked but
+the runtime registration was still empty). Also added
+`__mocks__/react-native-maps.tsx` as a manual Jest mock so consumer
+tests can render `<Map/>` — inline `jest.mock` factories inside
+`.tsx` test files collide with NativeWind's babel plugin's
+`_ReactNativeCSSInterop` injection, but manual mocks at
+`<rootDir>/__mocks__/<pkg>` bind correctly. **`npm run prebuild` is
+required** before the next iOS / Android build so the package.json
+patch (along with the Podfile emit and podspec patch) re-applies;
+the user must then run `(cd ios && pod install)` locally to
+regenerate the codegen output (`RCTThirdPartyComponentsProvider.mm`)
+with the new componentProvider entries, plus a clean Xcode build
+before `npm run ios` to relink with the regenerated codegen. Phase 9
+turn 1 delta: **+1 suite / +6 tests** (3 new Map.test.tsx tests + 3
+surplus from previously intermittent tests stabilizing under the
+global mock), lands at **161 suites / 1274 tests** (Phase 8 close
+160/1268 → Phase 9 turn 1 161/1274).
 
 **Phase 8 closed.** Across three turns Phase 8 shipped the full
 driver-side Google Navigation SDK integration: the data-layer SDK
@@ -284,6 +337,7 @@ pending (Turn 5).
 | Phase 8 turn 1 | `NavigationSdkClient` adapter + fake + DI wiring                    | ✅     |
 | Phase 8 turn 2 | `useDriverNavigationViewModel` + screen + DriverMonitor integration | ✅     |
 | Phase 8 turn 3 | First device-build smoke (iOS + Android) + Phase 8 close            | ✅     |
+| Phase 9 turn 1 | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE  | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -347,7 +401,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 8 turn 1  | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port              | ✅                             |
 | 8 turn 2  | `useDriverNavigationViewModel` + screen + DriverMonitor integration              | ✅                             |
 | 8 turn 3  | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close    | ✅                             |
-| 9         | Push notifications + Crashlytics + polish (incl. iOS Apple Maps fix)             | Next                           |
+| 9 turn 1  | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE               | ✅                             |
+| 9 turn 2+ | Push notifications + Crashlytics + nav-screen polish + cleanup grab-bag          | Next                           |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
@@ -1470,5 +1525,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_7_TURN_1.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_1.md`),
 then ask.

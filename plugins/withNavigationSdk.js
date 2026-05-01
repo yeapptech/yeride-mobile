@@ -72,12 +72,14 @@ const path = require('path');
  *
  * **iOS (`withDangerousMod`):**
  *
- *   1. Patch `react-native-google-maps.podspec` (lives inside
- *      react-native-maps) to align `GoogleMaps` to `10.7.0` +
- *      `Google-Maps-iOS-Utils` to `7.0.0`. The Navigation SDK pulls
- *      `GoogleNavigation` which depends on `GoogleMaps == 10.7.0`;
- *      without this patch CocoaPods refuses to resolve the conflicting
- *      version pins.
+ *   1. Patch `react-native-maps.podspec` (the unified podspec
+ *      react-native-maps@1.23+ ships, replacing the older standalone
+ *      `react-native-google-maps.podspec`) to align the `Google`
+ *      subspec's `GoogleMaps` dep to `10.7.0` and `Google-Maps-iOS-Utils`
+ *      to `7.0.0`. The Navigation SDK pulls `GoogleNavigation` which
+ *      depends on `GoogleMaps == 10.7.0`; without this patch CocoaPods
+ *      refuses to resolve the conflicting version pins (subspec ships
+ *      `GoogleMaps '9.3.0'` upstream).
  *
  *   2. Patch `onMapReady` event registrations across react-native-maps's
  *      iOS code to use `RCTDirectEventBlock` instead of
@@ -91,29 +93,103 @@ const path = require('path');
  *      as a fallback for jsdelivr CDN HTTP/2 framing errors. Order
  *      matters: must be inserted before any pod declarations.
  *
- *   4. Strip the `# @generated begin react-native-maps` block that
- *      Expo's built-in `withMaps` injects when `ios.config.googleMapsApiKey`
- *      is set (or when the Maps key landed via our local
- *      `withGoogleMapsApiKey` plugin). It emits
- *      `pod 'react-native-google-maps', :path => …`, but
- *      react-native-maps@1.23+ no longer ships that podspec — pod install
- *      fails with "No podspec found for react-native-google-maps". We
- *      keep the Maps API key in Info.plist for the Navigation SDK to
- *      consume; stripping the bogus pod line is the cleanest fix.
+ *   4. Replace the `# @generated begin react-native-maps` block that
+ *      Expo's built-in `withMaps` injects (Phase 9 turn 1: previously
+ *      stripped because the Expo block emits a `pod 'react-native-google-maps'`
+ *      line referencing a podspec that no longer ships in 1.23+). The
+ *      replacement emits `pod 'react-native-maps/Google'`, the subspec
+ *      form that actually compiles in the unified podspec. This pulls
+ *      the AirGoogleMaps view manager (`AIRGoogleMap`) into the build —
+ *      required for `provider={PROVIDER_GOOGLE}` on iOS, which the
+ *      rewrite uses to escape the Apple Maps Fabric registration
+ *      regression on Expo SDK 55 + RN 0.83.6 New Arch (every screen
+ *      using `<MapView>` without this falls through to a pink
+ *      "Unimplemented component: <RNMapsMapView>" placeholder).
  *      Belt-and-suspenders: also drop any orphan
- *      `pod 'react-native-google-maps' …` line outside an @generated
- *      block.
+ *      `pod 'react-native-google-maps' …` line outside the @generated
+ *      block in case Expo's emit drifts in future SDK versions.
  */
 
 function withNavigationSdkIos(config) {
   return withDangerousMod(config, [
     'ios',
     (config) => {
-      // 1. Patch react-native-google-maps podspec to align GoogleMaps version
-      //    with Navigation SDK (which requires GoogleMaps 10.7.0 via GoogleNavigation).
+      // 0. Patch react-native-maps' package.json to declare its Fabric
+      //    components via `codegenConfig.ios.componentProvider`. RN 0.74+
+      //    requires every package to map JS Fabric component names to
+      //    the iOS class names via this field; without it, the app's
+      //    `RCTThirdPartyComponentsProvider.mm` (auto-generated under
+      //    `ios/build/generated/ios/ReactCodegen/`) doesn't list ANY of
+      //    react-native-maps' components, and the runtime renders the
+      //    pink "Unimplemented component: <RNMapsGoogleMapView>" /
+      //    "<RNMapsMapView>" placeholders for every <Map/>.
+      //
+      //    react-native-maps@1.24 ships a hand-written
+      //    `node_modules/react-native-maps/ios/generated/RCTThirdPartyComponentsProvider.mm`
+      //    with the right 4 mappings, but that file is `exclude_files`'d
+      //    in the podspec and never actually compiled. The mappings
+      //    have to live in `package.json` for the app's codegen to read
+      //    them at `pod install` time.
+      //
+      //    Phase 9 turn 1: this patch is what makes the Apple Maps
+      //    Fabric escape (Map.tsx provider flip) actually take effect
+      //    at runtime. Without it, both `<RNMapsMapView>` (Apple) and
+      //    `<RNMapsGoogleMapView>` (Google) come back as "Unimplemented".
+      //
+      //    Run order: this mutation lands at prebuild time, so when
+      //    `pod install` runs (either inside prebuild or from the
+      //    user's `(cd ios && pod install)`), the codegen step picks
+      //    up the new componentProvider entries.
+      const rnMapsPkgPath = path.resolve(
+        config.modRequest.projectRoot,
+        'node_modules/react-native-maps/package.json',
+      );
+      if (fs.existsSync(rnMapsPkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(rnMapsPkgPath, 'utf-8'));
+        if (pkg.codegenConfig && typeof pkg.codegenConfig === 'object') {
+          const desiredProvider = {
+            RNMapsMapView: 'RNMapsMapView',
+            RNMapsGoogleMapView: 'RNMapsGoogleMapView',
+            RNMapsMarker: 'RNMapsMarkerView',
+            RNMapsGooglePolygon: 'RNMapsGooglePolygonView',
+          };
+          const currentIos = pkg.codegenConfig.ios ?? {};
+          const currentProvider = currentIos.componentProvider ?? {};
+          const merged = { ...desiredProvider, ...currentProvider };
+          // Only write if the merged result differs from what's on disk
+          // (idempotency: avoids touching mtime on every prebuild).
+          const equal =
+            JSON.stringify(currentProvider) === JSON.stringify(merged);
+          if (!equal) {
+            pkg.codegenConfig.ios = {
+              ...currentIos,
+              componentProvider: merged,
+            };
+            fs.writeFileSync(
+              rnMapsPkgPath,
+              JSON.stringify(pkg, null, 2) + '\n',
+            );
+          }
+        }
+      }
+
+      // 1. Patch react-native-maps' unified podspec to align the `Google`
+      //    subspec's GoogleMaps dep with the Navigation SDK
+      //    (which requires GoogleMaps 10.7.0 via GoogleNavigation).
+      //
+      //    Phase 9 turn 1: the path was previously
+      //    `react-native-google-maps.podspec`, a separate podspec that
+      //    react-native-maps shipped through 1.22.x. Starting in 1.23,
+      //    the package consolidated to a single `react-native-maps.podspec`
+      //    with `Generated` / `Maps` / `Google` subspecs. The old
+      //    standalone podspec no longer exists, so the previous patch
+      //    was a silent no-op (guarded by `fs.existsSync`). The Google
+      //    subspec ships `GoogleMaps '9.3.0'` upstream — without the
+      //    bump below, adding `pod 'react-native-maps/Google'` to the
+      //    Podfile fails to resolve against `GoogleNavigation == 10.7.0`.
       const podspecPath = path.resolve(
         config.modRequest.projectRoot,
-        'node_modules/react-native-maps/react-native-google-maps.podspec',
+        'node_modules/react-native-maps/react-native-maps.podspec',
       );
       if (fs.existsSync(podspecPath)) {
         let podspec = fs.readFileSync(podspecPath, 'utf-8');
@@ -134,16 +210,23 @@ function withNavigationSdkIos(config) {
       //    while the Navigation SDK uses RCTDirectEventBlock. In dev
       //    builds RN refuses the second registration. Coerce
       //    react-native-maps to use RCTDirectEventBlock to match.
+      //
+      //    Phase 9 turn 1: file extensions corrected — Manager / Map
+      //    impls in `react-native-maps@1.24.0` ship as `.mm`, not `.m`.
+      //    The previous list also missed `AirMaps/AIRMap.mm` outright.
+      //    Without these, the patch silently no-op'd on the impl files
+      //    via `fs.existsSync`; only the headers were updated.
       const rnMapsIosDir = path.resolve(
         config.modRequest.projectRoot,
         'node_modules/react-native-maps/ios',
       );
       const eventPatchFiles = [
-        'AirGoogleMaps/AIRGoogleMapManager.m',
+        'AirGoogleMaps/AIRGoogleMapManager.mm',
         'AirGoogleMaps/AIRGoogleMap.h',
-        'AirGoogleMaps/AIRGoogleMap.m',
+        'AirGoogleMaps/AIRGoogleMap.mm',
         'AirMaps/AIRMapManager.m',
         'AirMaps/AIRMap.h',
+        'AirMaps/AIRMap.mm',
       ];
       for (const relPath of eventPatchFiles) {
         const filePath = path.resolve(rnMapsIosDir, relPath);
@@ -188,17 +271,80 @@ function withNavigationSdkPodfile(config) {
       );
     }
 
-    // 2. Strip the `# @generated begin react-native-maps` block emitted
-    //    by Expo's built-in withMaps. react-native-maps@1.23+ doesn't
-    //    ship the `react-native-google-maps` podspec; the bogus pod
-    //    line breaks pod install. We keep Maps API key support intact
-    //    via our local `withGoogleMapsApiKey` plugin.
-    contents = contents.replace(
-      /^[ \t]*# @generated begin react-native-maps[\s\S]*?# @generated end react-native-maps\n?/m,
-      '',
-    );
+    // 2. Replace the `# @generated begin react-native-maps` block emitted
+    //    by Expo's built-in withMaps with the corrected subspec form.
+    //
+    //    What Expo emits (broken):
+    //      pod 'react-native-google-maps', :path => '../node_modules/react-native-maps'
+    //
+    //    react-native-maps@1.23+ retired the standalone
+    //    `react-native-google-maps.podspec`; that pod line fails to
+    //    resolve. The package now exposes Google Maps as a subspec of
+    //    the unified `react-native-maps.podspec` (`Maps`, `Google`,
+    //    `Generated` siblings). The corrected emit pulls the AirGoogleMaps
+    //    view manager (`AIRGoogleMap`, `AIRGoogleMapManager`) into the
+    //    build — required for `provider={PROVIDER_GOOGLE}` on iOS,
+    //    which the rewrite uses to escape the Apple Maps Fabric
+    //    registration regression on Expo SDK 55 + RN 0.83.6 New Arch
+    //    (every screen using `<MapView>` falls through to a pink
+    //    "Unimplemented component: <RNMapsMapView>" placeholder
+    //    otherwise — see Phase 9 turn 1 record).
+    //
+    //    Why replace instead of strip + manual emit elsewhere: this
+    //    keeps the @generated boundary intact so re-running prebuild
+    //    is idempotent. Each prebuild Expo emits the broken block; we
+    //    rewrite it to the working form. No drift.
+    const RN_MAPS_GENERATED_BLOCK =
+      /^([ \t]*)# @generated begin react-native-maps[\s\S]*?# @generated end react-native-maps\n?/m;
+    // Our own @generated block — distinct sentinel so we can refresh
+    // in place across prebuilds without colliding with Expo's. The
+    // sentinel strings have no regex-special chars so we can match
+    // them literally.
+    const YERIDE_GENERATED_BLOCK =
+      /^([ \t]*)# @generated begin react-native-maps\/Google - yeride-next withNavigationSdk[\s\S]*?# @generated end react-native-maps\/Google\n?/m;
+
+    const buildBlock = (indent) =>
+      [
+        `${indent}# @generated begin react-native-maps/Google - yeride-next withNavigationSdk (Phase 9 turn 1)`,
+        `${indent}pod 'react-native-maps/Google', :path => '../node_modules/react-native-maps'`,
+        `${indent}# @generated end react-native-maps/Google\n`,
+      ].join('\n');
+
+    if (YERIDE_GENERATED_BLOCK.test(contents)) {
+      // Already emitted by a previous prebuild — refresh in place
+      // (handles indent / version drift across prebuilds).
+      contents = contents.replace(YERIDE_GENERATED_BLOCK, (_match, indent) =>
+        buildBlock(indent),
+      );
+    } else if (RN_MAPS_GENERATED_BLOCK.test(contents)) {
+      // Replace Expo's broken @generated block with our subspec form.
+      contents = contents.replace(RN_MAPS_GENERATED_BLOCK, (_match, indent) =>
+        buildBlock(indent),
+      );
+    } else {
+      // Expo didn't emit (e.g. withMaps is no-op'd because we don't set
+      // `ios.config.googleMapsApiKey` — the rewrite plumbs `GMSApiKey`
+      // via the local `withGoogleMapsApiKey` plugin). Inject the pod
+      // line directly after `use_native_modules!` inside the app target
+      // block so autolinking has resolved before our explicit subspec
+      // pin lands.
+      const useNativeMatch = contents.match(
+        /^([ \t]*)config = use_native_modules!\([^\n]*\)\n/m,
+      );
+      if (useNativeMatch) {
+        // buildBlock already ends with a trailing `\n`; add ONE blank
+        // line of separation between `use_native_modules!` and our
+        // begin marker. Don't add another `\n` at the end — that would
+        // produce a double-blank gap before `use_frameworks!`.
+        contents = contents.replace(
+          useNativeMatch[0],
+          `${useNativeMatch[0]}\n${buildBlock(useNativeMatch[1])}`,
+        );
+      }
+    }
     // Belt + suspenders: drop any stray `pod 'react-native-google-maps'`
-    // line that leaks outside a @generated block.
+    // line that leaks outside a @generated block (the legacy podspec
+    // name; would still fail to resolve).
     contents = contents.replace(
       /^[ \t]*pod\s+['"]react-native-google-maps['"][^\n]*\n/gm,
       '',
