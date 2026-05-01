@@ -23,10 +23,11 @@ import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
-import { NetworkError } from '@domain/errors';
+import { AuthorizationError, NetworkError } from '@domain/errors';
 import { useDriverStatusStore, useGpsStore } from '@presentation/stores';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import {
+  FakeNavigationSdkClient,
   InMemoryLocationRepository,
   InMemoryRideRepository,
   TestContainerProvider,
@@ -46,6 +47,19 @@ jest.mock('@react-navigation/native', () => ({
     reset: mockReset,
   }),
 }));
+
+// Toast mock — `onLaunchNavigation` (Phase 8 turn 2) surfaces init
+// failures via Toast. Hooked here so other tests stay isolated.
+jest.mock('react-native-toast-message', () => {
+  const show = jest.fn();
+  const hide = jest.fn();
+  function ToastComponent() {
+    return null;
+  }
+  ToastComponent.show = show;
+  ToastComponent.hide = hide;
+  return { __esModule: true, default: ToastComponent };
+});
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
   if (!r.ok) throw r.error;
@@ -205,11 +219,15 @@ function setupSeededState(opts?: { seedRide?: Ride }): SeededState {
   return { ridesRepo, locationsRepo };
 }
 
-function withTestContainer(setup: SeededState) {
+function withTestContainer(
+  setup: SeededState,
+  fakes?: { readonly navigationSdk?: FakeNavigationSdkClient },
+) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       rides={setup.ridesRepo}
       locations={setup.locationsRepo}
+      {...(fakes?.navigationSdk ? { navigationSdk: fakes.navigationSdk } : {})}
     >
       {children}
     </TestContainerProvider>
@@ -757,6 +775,370 @@ describe('useDriverMonitorViewModel', () => {
       // is no longer `'dispatched'` (the router returns 'started'
       // regardless of `arrivedAtPickup`).
       expect(result.current.status).toBe('started');
+    });
+  });
+
+  describe('onLaunchNavigation (Phase 8 turn 2)', () => {
+    function makeDispatchedRideWithPref(opts?: {
+      readonly avoidTolls?: boolean;
+    }): Ride {
+      const base = unwrap(
+        Ride.create({
+          id: RIDE_ID,
+          passenger: PASSENGER,
+          rideService: ECONOMY_SNAPSHOT,
+          pickup: unwrap(
+            Endpoint.create({
+              location: MIAMI,
+              address: 'pickup',
+              placeName: null,
+              directions: null,
+            }),
+          ),
+          dropoff: unwrap(
+            Endpoint.create({
+              location: FORT_LAUDERDALE,
+              address: 'dropoff',
+              placeName: null,
+              directions: null,
+            }),
+          ),
+          createdAt: new Date(),
+          routePreference: {
+            avoidTolls: opts?.avoidTolls ?? false,
+            selectedRouteSummary: null,
+            routeToken: 'tk-rider-selected',
+          },
+        }),
+      );
+      return unwrap(
+        base.dispatch({
+          driver: makeDriverSnap(),
+          pickupDirections: PICKUP_ROUTE,
+          at: new Date(),
+        }),
+      );
+    }
+
+    function makeStartedRideWithPref(opts?: {
+      readonly avoidTolls?: boolean;
+      readonly routeToken?: string | null;
+    }): Ride {
+      const base = unwrap(
+        Ride.create({
+          id: RIDE_ID,
+          passenger: PASSENGER,
+          rideService: ECONOMY_SNAPSHOT,
+          pickup: unwrap(
+            Endpoint.create({
+              location: MIAMI,
+              address: 'pickup',
+              placeName: null,
+              directions: null,
+            }),
+          ),
+          dropoff: unwrap(
+            Endpoint.create({
+              location: FORT_LAUDERDALE,
+              address: 'dropoff',
+              placeName: null,
+              directions: null,
+            }),
+          ),
+          createdAt: new Date(),
+          routePreference: {
+            avoidTolls: opts?.avoidTolls ?? false,
+            selectedRouteSummary: null,
+            routeToken:
+              opts?.routeToken === undefined
+                ? 'tk-rider-selected'
+                : opts.routeToken,
+          },
+        }),
+      );
+      return unwrap(
+        unwrap(
+          base.dispatch({
+            driver: makeDriverSnap(),
+            pickupDirections: PICKUP_ROUTE,
+            at: new Date(),
+          }),
+        ).start({ odometerMeters: 1_000, at: new Date() }),
+      );
+    }
+
+    it('on dispatched, navigates with the pickup leg payload', async () => {
+      const fake = new FakeNavigationSdkClient();
+      const setup = setupSeededState({
+        seedRide: makeDispatchedRideWithPref({ avoidTolls: true }),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      expect(fake.spies.initCalls).toBe(1);
+      expect(mockNavigate).toHaveBeenCalledTimes(1);
+      const [routeName, payload] = mockNavigate.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(routeName).toBe('DriverNavigation');
+      expect(payload.leg).toBe('pickup');
+      expect(payload.title).toBe('Pickup Location');
+      expect(payload.destination).toEqual({
+        lat: MIAMI.latitude,
+        lng: MIAMI.longitude,
+      });
+      // Pickup leg never forwards routeToken (pickup directions are
+      // computed by the dispatch flow, not rider-selected).
+      expect(payload.routeToken).toBeUndefined();
+      expect(payload.avoidTolls).toBe(true);
+    });
+
+    it('on started, navigates with the dropoff leg payload + routeToken', async () => {
+      const fake = new FakeNavigationSdkClient();
+      // Seed BG GPS so the start mutation didn't bump us elsewhere.
+      const setup = setupSeededState({
+        seedRide: makeStartedRideWithPref(),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride?.status).toBe('started');
+      });
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      expect(fake.spies.initCalls).toBe(1);
+      const [, payload] = mockNavigate.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(payload.leg).toBe('dropoff');
+      expect(payload.title).toBe('Dropoff Location');
+      expect(payload.destination).toEqual({
+        lat: FORT_LAUDERDALE.latitude,
+        lng: FORT_LAUDERDALE.longitude,
+      });
+      expect(payload.routeToken).toBe('tk-rider-selected');
+    });
+
+    it('on started without a routeToken, omits routeToken from the payload', async () => {
+      const fake = new FakeNavigationSdkClient();
+      const setup = setupSeededState({
+        seedRide: makeStartedRideWithPref({ routeToken: null }),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride?.status).toBe('started');
+      });
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      const [, payload] = mockNavigate.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(payload.routeToken).toBeUndefined();
+    });
+
+    it('on terms-not-accepted, shows dialog, accepts, retries init, then navigates', async () => {
+      const fake = new FakeNavigationSdkClient();
+      // First init returns the terms_not_accepted error.
+      fake.failNext({
+        method: 'init',
+        error: new AuthorizationError({
+          code: 'navigation_terms_not_accepted',
+          message: 'terms',
+        }),
+      });
+      // Default: showTermsAndConditionsDialog → accepted; second init → ok.
+      const setup = setupSeededState({
+        seedRide: makeDispatchedRideWithPref(),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      expect(fake.spies.initCalls).toBe(2);
+      expect(fake.spies.showTermsCalls).toBe(1);
+      expect(mockNavigate).toHaveBeenCalledTimes(1);
+    });
+
+    it('on terms declined by user, does not navigate', async () => {
+      const fake = new FakeNavigationSdkClient();
+      fake.failNext({
+        method: 'init',
+        error: new AuthorizationError({
+          code: 'navigation_terms_not_accepted',
+          message: 'terms',
+        }),
+      });
+      fake.seedTermsAccepted(false);
+
+      const setup = setupSeededState({
+        seedRide: makeDispatchedRideWithPref(),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      expect(fake.spies.showTermsCalls).toBe(1);
+      // Init was called once; no retry after decline.
+      expect(fake.spies.initCalls).toBe(1);
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('on init network error, surfaces a Toast and does not navigate', async () => {
+      const Toast = (
+        require('react-native-toast-message') as {
+          default: { show: jest.Mock };
+        }
+      ).default;
+      Toast.show.mockClear();
+
+      const fake = new FakeNavigationSdkClient();
+      fake.failNext({
+        method: 'init',
+        error: new NetworkError({
+          code: 'navigation_init_network_error',
+          message: 'down',
+        }),
+      });
+
+      const setup = setupSeededState({
+        seedRide: makeDispatchedRideWithPref(),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+      expect(Toast.show).toHaveBeenCalledTimes(1);
+    });
+
+    it('on a non-launchable status (completed), does nothing', async () => {
+      const fake = new FakeNavigationSdkClient();
+      const setup = setupSeededState({
+        seedRide: makeCompletedRide(),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride?.status).toBe('completed');
+      });
+      // Wait for the terminal-redirect effect to fire so it doesn't
+      // race onLaunchNavigation; clear the mock so we only see the
+      // launch-navigation behaviour below.
+      await waitFor(() => {
+        expect(mockReset).toHaveBeenCalled();
+      });
+      mockNavigate.mockClear();
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      expect(fake.spies.initCalls).toBe(0);
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('isLaunchingNavigation is true while in flight', async () => {
+      const fake = new FakeNavigationSdkClient();
+      const setup = setupSeededState({
+        seedRide: makeDispatchedRideWithPref(),
+      });
+      const { result } = renderHook(
+        () =>
+          useDriverMonitorViewModel({
+            rideId: RIDE_ID,
+            driverLocation: DRIVER_LOC,
+          }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      expect(result.current.isLaunchingNavigation).toBe(false);
+
+      await act(async () => {
+        await result.current.onLaunchNavigation();
+      });
+
+      // Settled — flag should reset.
+      expect(result.current.isLaunchingNavigation).toBe(false);
+      expect(mockNavigate).toHaveBeenCalledTimes(1);
     });
   });
 });

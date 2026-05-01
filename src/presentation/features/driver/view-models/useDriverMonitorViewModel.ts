@@ -1,5 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Toast from 'react-native-toast-message';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Coordinates } from '@domain/entities/Coordinates';
@@ -7,7 +8,7 @@ import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { UserLocation } from '@domain/entities/UserLocation';
-import { useUseCases } from '@presentation/di';
+import { useNavigationSdk, useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
 import {
@@ -145,6 +146,21 @@ export interface UseDriverMonitorViewModel {
     reason: CancellationReason;
     odometerMeters?: number;
   }) => Promise<boolean>;
+  /**
+   * Launch the Google Navigation SDK turn-by-turn screen for the
+   * current trip leg (Phase 8 turn 2). Reads `ride.status` to pick the
+   * pickup vs. dropoff leg, runs the SDK's `init()` (showing the terms
+   * dialog on first launch), and on success navigates to
+   * `'DriverNavigation'` with the leg's destination + (for dropoff)
+   * route token + avoid-tolls preference. Surface errors via a Toast
+   * — no external-Maps fallback this phase.
+   *
+   * No-op on statuses where navigation isn't applicable (e.g.
+   * `'completed'`, `'cancelled'`).
+   */
+  onLaunchNavigation: () => Promise<void>;
+  /** True while `onLaunchNavigation`'s init/terms chain is in flight. */
+  readonly isLaunchingNavigation: boolean;
 }
 
 export interface DriverMonitorViewModelArgs {
@@ -158,6 +174,7 @@ export function useDriverMonitorViewModel(
   const { rideId, driverLocation } = args;
   const useCases = useUseCases();
   const navigation = useNavigation<DriverStackNavigation>();
+  const navigationSdk = useNavigationSdk();
   const driverId = useCurrentUserId();
   const setMode = useDriverStatusStore((s) => s.setMode);
   const updateLocationMutation = useUpdateLocationMutation();
@@ -363,6 +380,75 @@ export function useDriverMonitorViewModel(
     }
   }, [requestPaymentMutation, rideId, currentOdometerMeters]);
 
+  // ── Launch Navigation (Phase 8 turn 2) ─────────────────────────
+  // The connector hook (mounted by DriverMonitorScreen) has already
+  // pushed the SDK controller into the adapter by the time this
+  // callback fires. We run the legacy-faithful init sequence in the
+  // PARENT screen — `init()` first, with a terms-dialog retry on
+  // first launch — so the navigation screen, when it pushes, sees
+  // an already-alive session. This sidesteps the legacy
+  // `getCurrentActivity()` null-after-`<NavigationView/>` quirk on
+  // Android.
+  //
+  // Errors surface as Toast warnings; no external-Maps fallback this
+  // phase (see Phase 8 kickoff "out" list).
+  const [isLaunchingNavigation, setIsLaunchingNavigation] = useState(false);
+  const onLaunchNavigation = useCallback(async (): Promise<void> => {
+    if (isLaunchingNavigation) return;
+    if (!ride) return;
+
+    // Pick leg + build route param. Defensive guard on statuses where
+    // navigation isn't applicable: silently no-op.
+    const legParam = buildLegParam(ride);
+    if (legParam === null) {
+      logger.debug('onLaunchNavigation: ride status not eligible', {
+        status: ride.status,
+      });
+      return;
+    }
+
+    setIsLaunchingNavigation(true);
+    try {
+      // Run the init dance against the live adapter. The connector
+      // hook ensured the SDK controller is connected.
+      let initR = await navigationSdk.init();
+      if (!initR.ok && initR.error.code === 'navigation_terms_not_accepted') {
+        const termsR = await navigationSdk.showTermsAndConditionsDialog();
+        if (!termsR.ok) {
+          logger.warn('terms dialog failed', termsR.error);
+          Toast.show({
+            type: 'error',
+            text1: 'Could not show terms dialog. Please try again.',
+          });
+          return;
+        }
+        if (!termsR.value.accepted) {
+          // User declined. Don't badger them with a Toast — declining
+          // is a deliberate choice.
+          logger.info('terms declined by user');
+          return;
+        }
+        initR = await navigationSdk.init();
+      }
+      if (!initR.ok) {
+        logger.warn('navigation init failed', initR.error);
+        Toast.show({
+          type: 'error',
+          text1: 'Navigation unavailable',
+          text2:
+            initR.error.code === 'navigation_api_not_authorized'
+              ? 'This device is not authorized for navigation.'
+              : 'Please check your connection and try again.',
+        });
+        return;
+      }
+
+      navigation.navigate('DriverNavigation', legParam);
+    } finally {
+      setIsLaunchingNavigation(false);
+    }
+  }, [isLaunchingNavigation, ride, navigationSdk, navigation]);
+
   // ── Status derivation ──────────────────────────────────────────
   const status = useMemo<DriverMonitorStatus>(() => {
     if (ride === null) return 'loading';
@@ -426,5 +512,63 @@ export function useDriverMonitorViewModel(
     onStartRide,
     requestPayment,
     cancel,
+    onLaunchNavigation,
+    isLaunchingNavigation,
   };
+}
+
+/* ───── Helpers ───── */
+
+/**
+ * Build the route param for `DriverNavigation`, picking pickup vs.
+ * dropoff based on `ride.status`. Returns null when navigation is not
+ * applicable (e.g. completed / cancelled / payment_failed) — the
+ * caller treats null as a no-op.
+ *
+ * Pickup leg: no route token, optional avoid-tolls (drivers can
+ * deviate freely from the pre-computed pickup polyline).
+ *
+ * Dropoff leg: forwards `ride.routePreference.routeToken` if
+ * present (rider-selected route from the Routes API) so the SDK
+ * uses the rider's preferred path, plus `avoidTolls` for fallback
+ * routing when no token is available.
+ */
+function buildLegParam(ride: Ride): {
+  readonly leg: 'pickup' | 'dropoff';
+  readonly title: string;
+  readonly destination: { readonly lat: number; readonly lng: number };
+  readonly routeToken?: string;
+  readonly avoidTolls?: boolean;
+} | null {
+  switch (ride.status) {
+    case 'dispatched':
+    case 'scheduled_driver_accepted': {
+      const avoidTolls = ride.routePreference?.avoidTolls;
+      return {
+        leg: 'pickup',
+        title: 'Pickup Location',
+        destination: {
+          lat: ride.pickup.location.latitude,
+          lng: ride.pickup.location.longitude,
+        },
+        ...(avoidTolls !== undefined ? { avoidTolls } : {}),
+      };
+    }
+    case 'started': {
+      const avoidTolls = ride.routePreference?.avoidTolls;
+      const routeToken = ride.routePreference?.routeToken ?? null;
+      return {
+        leg: 'dropoff',
+        title: 'Dropoff Location',
+        destination: {
+          lat: ride.dropoff.location.latitude,
+          lng: ride.dropoff.location.longitude,
+        },
+        ...(routeToken !== null ? { routeToken } : {}),
+        ...(avoidTolls !== undefined ? { avoidTolls } : {}),
+      };
+    }
+    default:
+      return null;
+  }
 }

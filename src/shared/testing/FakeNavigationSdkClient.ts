@@ -1,5 +1,6 @@
 import type {
   NavArrivalEvent,
+  NavigationListenerSetters,
   NavInitError,
   NavRouteStatus,
   NavSetDestinationsArgs,
@@ -9,15 +10,34 @@ import type { AuthorizationError, NetworkError } from '@domain/errors';
 import { Result } from '@domain/shared/Result';
 
 /**
+ * One push into the adapter. Records the controller + listeners pair so
+ * connector-hook tests can verify mount-push (controller non-null) +
+ * unmount-clear (controller null).
+ *
+ * The controller is typed as `unknown` to keep the fake compatible
+ * with the real adapter's `setController` signature (which takes a
+ * concrete SDK `NavigationController`). The fake doesn't actually
+ * USE the controller — its public methods (`init`, `setDestinations`,
+ * …) work without one — so we don't bother modelling the SDK's
+ * surface here.
+ */
+export interface FakeSetControllerCall {
+  readonly controller: unknown;
+  readonly listeners: NavigationListenerSetters | null;
+}
+
+/**
  * Programmable in-memory `NavigationSdkClient` stand-in. Mirrors the real
  * adapter's surface 1:1 so view-model and use-case tests can exercise the
  * navigation pipeline without touching the SDK or its React-hook-tied
  * controller.
  *
- * The fake intentionally does NOT model the controller-injection seam —
- * Turn 2's presentation glue is what's responsible for connecting the
- * SDK controller. Tests of the fake exercise the same async + Result
- * surface the real adapter exposes.
+ * The fake intentionally does NOT actually USE a connected controller —
+ * its public methods (`init`, `setDestinations`, …) work without one.
+ * Phase 8 turn 2 added a `setController()` no-op spy so the
+ * `useNavigationSdkConnector` hook's mount-push / unmount-clear
+ * behaviour is testable. The recorded calls live on
+ * `spies.setControllerCalls`.
  *
  * Pattern matches `FakeBackgroundGeolocationClient` /
  * `FakeStripeServerService`:
@@ -49,6 +69,12 @@ export interface FakeNavigationSdkSpies {
   readonly cleanupCalls: number;
   readonly subscribeArrivalCalls: number;
   readonly arrivalDisposes: number;
+  /**
+   * Each `setController(args)` push from the connector hook (Phase 8
+   * turn 2). Index 0 is the mount-push (controller non-null), index 1
+   * is the unmount-clear (controller null) on a happy lifecycle.
+   */
+  readonly setControllerCalls: ReadonlyArray<FakeSetControllerCall>;
 }
 
 type AnyFakeError = NetworkError | AuthorizationError;
@@ -85,6 +111,7 @@ export class FakeNavigationSdkClient {
     cleanupCalls: 0,
     subscribeArrivalCalls: 0,
     arrivalDisposes: 0,
+    setControllerCalls: [] as FakeSetControllerCall[],
   };
 
   get spies(): FakeNavigationSdkSpies {
@@ -139,6 +166,7 @@ export class FakeNavigationSdkClient {
     this._spies.cleanupCalls = 0;
     this._spies.subscribeArrivalCalls = 0;
     this._spies.arrivalDisposes = 0;
+    this._spies.setControllerCalls.length = 0;
   }
 
   /* ───── Emit helpers ───── */
@@ -169,6 +197,30 @@ export class FakeNavigationSdkClient {
   }
 
   /* ───── Public adapter surface ───── */
+
+  /**
+   * No-op stand-in for the real adapter's controller-injection seam.
+   * The fake's behaviour does not depend on a connected controller —
+   * `init` / `setDestinations` / etc. all work without one. This method
+   * exists solely so `useNavigationSdkConnector` can push the SDK
+   * controller into "the adapter" in tests, and we can verify the
+   * mount-push / unmount-clear pair via `spies.setControllerCalls`.
+   *
+   * Parameter shape relaxed to `unknown` for the controller so the
+   * union-typed `Container.navigationSdk` (real adapter | fake) keeps
+   * `setController` callable from the connector hook without an
+   * intersection-typed parameter (the real adapter's NavigationController
+   * has a richer public surface than the fake needs to model).
+   */
+  setController(args: {
+    controller: unknown;
+    listeners: NavigationListenerSetters | null;
+  }): void {
+    this._spies.setControllerCalls.push({
+      controller: args.controller,
+      listeners: args.listeners,
+    });
+  }
 
   async init(): Promise<Result<true, NavInitError>> {
     this._spies.initCalls += 1;

@@ -261,6 +261,48 @@ const mockMakeListenerSetters = () => ({
   setLogDebugInfo: jest.fn(),
 });
 
+/**
+ * Phase 8 turn 2: the connector hook (`useNavigationSdkConnector`)
+ * calls the SDK's `useNavigation()` context hook to read the shared
+ * controller minted by `<NavigationProvider/>` at App root. We mock
+ * `useNavigation` here so connector / view-model tests don't have to
+ * mount a real `<NavigationProvider/>` — they get the same controller
+ * + listeners across every render via this module-scope cache.
+ *
+ * Tests that need a fresh controller (e.g. simulating a re-mount after
+ * sign-out) call `sdk.__resetSharedNavigation()` between renders.
+ */
+let mockSharedNavigation: {
+  navigationController: ReturnType<typeof mockMakeNavigationController>;
+  removeAllListeners: jest.Mock;
+} & ReturnType<typeof mockMakeListenerSetters> = (() => {
+  const controller = mockMakeNavigationController();
+  const listeners = mockMakeListenerSetters();
+  return {
+    navigationController: controller,
+    removeAllListeners: jest.fn(() => {
+      mockNavListeners.arrival.length = 0;
+      mockNavListeners.routeChanged.length = 0;
+      mockNavListeners.trafficUpdated.length = 0;
+    }),
+    ...listeners,
+  };
+})();
+
+const resetMockSharedNavigation = (): void => {
+  const controller = mockMakeNavigationController();
+  const listeners = mockMakeListenerSetters();
+  mockSharedNavigation = {
+    navigationController: controller,
+    removeAllListeners: jest.fn(() => {
+      mockNavListeners.arrival.length = 0;
+      mockNavListeners.routeChanged.length = 0;
+      mockNavListeners.trafficUpdated.length = 0;
+    }),
+    ...listeners,
+  };
+};
+
 jest.mock('@googlemaps/react-native-navigation-sdk', () => {
   // SDK enum values — kept verbatim because the real adapter compares
   // via `RouteStatus.OK` etc. and would never match if these drifted.
@@ -324,6 +366,14 @@ jest.mock('@googlemaps/react-native-navigation-sdk', () => {
       }),
     })),
 
+    /**
+     * Context-hook stand-in for `<NavigationProvider/>`. Returns the
+     * shared mock instance so consumers across the same render tree
+     * see the same controller. Phase 8 turn 2 — consumed by
+     * `useNavigationSdkConnector`.
+     */
+    useNavigation: jest.fn(() => mockSharedNavigation),
+
     // Test-only constructors / helpers — namespaced under `__` so
     // they're loud at the call site. Tests get a fresh controller +
     // listeners pair via:
@@ -339,10 +389,24 @@ jest.mock('@googlemaps/react-native-navigation-sdk', () => {
     __emitArrival: (event: unknown): void => {
       for (const cb of [...mockNavListeners.arrival]) cb(event);
     },
+    /**
+     * Read the shared `useNavigation()` return value — the same
+     * controller + listeners pair the connector hook will see. Tests
+     * use this to assert reference identity across re-renders, OR to
+     * spy on per-method invocations on the controller.
+     */
+    __getSharedNavigation: (): unknown => mockSharedNavigation,
+    /**
+     * Construct a fresh shared controller + listeners pair. Use
+     * between tests when the connector's mount-push / unmount-clear
+     * lifecycle needs a clean slate.
+     */
+    __resetSharedNavigation: resetMockSharedNavigation,
     __reset: (): void => {
       mockNavListeners.arrival.length = 0;
       mockNavListeners.routeChanged.length = 0;
       mockNavListeners.trafficUpdated.length = 0;
+      resetMockSharedNavigation();
     },
   };
 });

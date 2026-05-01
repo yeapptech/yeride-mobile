@@ -24,6 +24,7 @@ import { EnRouteToPickupView } from '../components/EnRouteToPickupView';
 import { PaymentFailedView } from '../components/PaymentFailedView';
 import { PaymentRequestedView } from '../components/PaymentRequestedView';
 import { StartedView } from '../components/StartedView';
+import { useNavigationSdkConnector } from '../hooks/useNavigationSdkConnector';
 import { useDriverMonitorViewModel } from '../view-models/useDriverMonitorViewModel';
 
 /**
@@ -83,6 +84,14 @@ export default function DriverMonitorScreen({
 function DriverMonitorContent({ rideId }: { rideId: RideId }) {
   const currentLocation = useCurrentLocation();
   const navigation = useNavigation<DriverStackNavigation>();
+  // Push the SDK NavigationController into our adapter as soon as
+  // DriverMonitor mounts. This makes the controller alive whenever
+  // the driver is on an active trip — well before they tap "Open
+  // Navigation" — so `vm.onLaunchNavigation` can call `init()`
+  // through the adapter without racing the screen-level mount of
+  // `<NavigationView/>` (legacy `getCurrentActivity()` null quirk).
+  // Phase 8 turn 2.
+  useNavigationSdkConnector();
   const vm = useDriverMonitorViewModel({
     rideId,
     driverLocation: currentLocation.coordinates,
@@ -215,7 +224,11 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
               ride={ride}
               onArrived={vm.onArriveAtPickup}
               onPressCancel={openCancelSheet}
+              onLaunchNavigation={() => {
+                void vm.onLaunchNavigation();
+              }}
               cancelDisabled={vm.isCancelling}
+              launchNavigationDisabled={vm.isLaunchingNavigation}
             />
           ) : vm.status === 'at_pickup' ? (
             <AtPickupView
@@ -235,8 +248,12 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
               onRequestPayment={() => {
                 void vm.requestPayment();
               }}
+              onLaunchNavigation={() => {
+                void vm.onLaunchNavigation();
+              }}
               cancelDisabled={vm.isCancelling}
               requestPaymentDisabled={vm.isRequestingPayment}
+              launchNavigationDisabled={vm.isLaunchingNavigation}
             />
           ) : vm.status === 'payment_requested' ? (
             <PaymentRequestedView ride={ride} />

@@ -162,6 +162,12 @@ module.exports = [
   // domain-shaped types so the rest of the presentation layer never has
   // to know the SDK exists. Same architectural exception as the DI
   // container: a single composition file allowed to cross layers.
+  // Phase 8 turn 2: useNavigationSdkConnector.ts and
+  // useDriverNavigationViewModel.ts are the presentation-layer seam over
+  // the NavigationSdkClient adapter. They import the adapter's
+  // `Nav*` domain-shaped types so the rest of the presentation layer
+  // never has to know the SDK exists. Same architectural exception as
+  // useGpsLifecycle / useGpsStore.
   {
     files: [
       '**/__tests__/**/*.{ts,tsx}',
@@ -170,6 +176,8 @@ module.exports = [
       'src/presentation/di/container.ts',
       'src/presentation/hooks/useGpsLifecycle.ts',
       'src/presentation/stores/useGpsStore.ts',
+      'src/presentation/features/driver/hooks/useNavigationSdkConnector.ts',
+      'src/presentation/features/driver/view-models/useDriverNavigationViewModel.ts',
     ],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

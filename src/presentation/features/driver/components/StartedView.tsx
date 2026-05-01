@@ -24,6 +24,10 @@ import {
  *     against the planned dropoff directions). Authoritative final fare
  *     is computed server-side by the `completeTrip` Cloud Function once
  *     "Request payment" fires; this row is for driver visibility only.
+ *   - "Open Navigation" CTA — launches the Google Navigation SDK
+ *     turn-by-turn surface for the dropoff leg (Phase 8 turn 2). The
+ *     parent VM forwards `ride.routePreference.routeToken` (when
+ *     present) so the SDK uses the rider's preferred route.
  *   - Primary CTA "Request payment" → an `Alert.alert` confirm prompt;
  *     on confirm, calls `onRequestPayment()`. Loading prop disables it.
  *
@@ -33,24 +37,25 @@ import {
  * end a trip from across town). Until then the destructive-confirm alert
  * is enough for a functionally complete screen, without pulling in an
  * extra native dep.
- *
- * Why no Navigate-to-dropoff button here: Google Navigation SDK lands in
- * Phase 8.
  */
 interface StartedViewProps {
   readonly ride: Ride;
   readonly onPressCancel: () => void;
   readonly onRequestPayment: () => void;
+  readonly onLaunchNavigation: () => void;
   readonly cancelDisabled?: boolean;
   readonly requestPaymentDisabled?: boolean;
+  readonly launchNavigationDisabled?: boolean;
 }
 
 export function StartedView({
   ride,
   onPressCancel,
   onRequestPayment,
+  onLaunchNavigation,
   cancelDisabled,
   requestPaymentDisabled,
+  launchNavigationDisabled,
 }: StartedViewProps) {
   const directions = ride.dropoff.directions;
   const eta = directions ? formatEta(directions.durationSeconds) : null;
@@ -120,7 +125,22 @@ export function StartedView({
         </Text>
       </View>
 
-      <View className="px-4 pt-4">
+      <View className="gap-2 px-4 pt-4">
+        <Pressable
+          onPress={onLaunchNavigation}
+          disabled={launchNavigationDisabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open navigation"
+          accessibilityState={{ disabled: launchNavigationDisabled }}
+          className={`items-center rounded-xl border border-primary px-4 py-3 ${
+            launchNavigationDisabled ? 'opacity-60' : ''
+          }`}
+          testID="started-launch-navigation"
+        >
+          <Text className="text-base font-semibold text-primary">
+            Open navigation
+          </Text>
+        </Pressable>
         <Pressable
           onPress={handleRequestPayment}
           disabled={requestPaymentDisabled}

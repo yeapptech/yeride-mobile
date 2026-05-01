@@ -17,11 +17,15 @@ import {
  *     boundary mirrors the rider-side `DispatchedView` driver card —
  *     no email, no phone, no avatar URL exposure.
  *   - Pickup endpoint card.
+ *   - "Open Navigation" CTA — launches the Google Navigation SDK
+ *     turn-by-turn surface for the pickup leg (Phase 8 turn 2).
+ *     `launchNavigationDisabled` reflects the parent VM's
+ *     `isLaunchingNavigation` so a double-tap doesn't double-launch
+ *     the init/terms chain.
  *   - Primary CTA "Arrived at pickup" → flips the parent into the
  *     `'at_pickup'` UI state. Phase 7's geofence-entry event will
  *     auto-fire this; until then it's a manual button tap.
  *
- * No "Navigate" button — Google Navigation SDK integration is Phase 8.
  * The header chat button is deferred to Phase 9 polish; the cancel
  * action is the only header trailing action.
  */
@@ -29,16 +33,20 @@ interface EnRouteToPickupViewProps {
   readonly ride: Ride;
   readonly onArrived: () => void;
   readonly onPressCancel: () => void;
+  readonly onLaunchNavigation: () => void;
   readonly cancelDisabled?: boolean;
   readonly arriveDisabled?: boolean;
+  readonly launchNavigationDisabled?: boolean;
 }
 
 export function EnRouteToPickupView({
   ride,
   onArrived,
   onPressCancel,
+  onLaunchNavigation,
   cancelDisabled,
   arriveDisabled,
+  launchNavigationDisabled,
 }: EnRouteToPickupViewProps) {
   const directions = ride.pickup.directions;
   const eta = directions ? formatEta(directions.durationSeconds) : null;
@@ -79,7 +87,24 @@ export function EnRouteToPickupView({
         </Text>
       </View>
 
-      <View className="px-4 py-4">
+      <View className="gap-2 px-4 pb-2 pt-4">
+        <Pressable
+          onPress={onLaunchNavigation}
+          disabled={launchNavigationDisabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open navigation"
+          accessibilityState={{ disabled: launchNavigationDisabled }}
+          className={`items-center rounded-xl border border-primary px-4 py-3 ${
+            launchNavigationDisabled ? 'opacity-60' : ''
+          }`}
+          testID="en-route-launch-navigation"
+        >
+          <Text className="text-base font-semibold text-primary">
+            Open navigation
+          </Text>
+        </Pressable>
+      </View>
+      <View className="px-4 pb-4">
         <Pressable
           onPress={onArrived}
           disabled={arriveDisabled}

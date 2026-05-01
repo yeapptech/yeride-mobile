@@ -122,6 +122,36 @@ export type DriverStackParamList = {
    */
   DriverMonitor: { rideId: string };
   /**
+   * Google Navigation SDK turn-by-turn surface (Phase 8 turn 2). The
+   * driver arrives here from `DriverMonitor.onLaunchNavigation` after
+   * the SDK session has been `init()`-ed (and any first-time terms
+   * dialog accepted). The screen mounts `<NavigationView/>` from the
+   * SDK and delegates session lifecycle to
+   * `useDriverNavigationViewModel`.
+   *
+   * Param payload:
+   *   - `leg`: which trip leg this session covers — 'pickup' (driver
+   *     → rider's pickup point) or 'dropoff' (driver → rider's
+   *     dropoff). Used purely for screen-title copy + analytics.
+   *   - `title`: human-readable destination label shown in the SDK
+   *     UI ("Pickup Location", "Dropoff Location", etc.).
+   *   - `destination`: lat/lng of the single waypoint for this leg.
+   *   - `routeToken?`: rider-selected route token from
+   *     `ride.dropoff.directions.routeToken` when present (dropoff
+   *     leg only). When supplied, the SDK uses it instead of
+   *     re-computing routing options.
+   *   - `avoidTolls?`: forwarded to the SDK's `routingOptions` when
+   *     no route token is supplied. Reads from
+   *     `ride.routePreference.avoidTolls`.
+   */
+  DriverNavigation: {
+    leg: 'pickup' | 'dropoff';
+    title: string;
+    destination: { lat: number; lng: number };
+    routeToken?: string;
+    avoidTolls?: boolean;
+  };
+  /**
    * Profile editor reachable as a modal from the Profile tab. Same screen
    * that the Profile tab points at, but pushed instead of root-mounted, so
    * the tab bar hides while editing — same pattern as the rider stack.

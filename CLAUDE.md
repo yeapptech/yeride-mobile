@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 30, 2026 (Phase 7 turn 3 — RideMonitor + DriverMonitor swap-ins + Phase 7 close)
+**Last updated:** April 30, 2026 (Phase 8 turn 2 — view-model + screen + DriverMonitor integration)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,50 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 8 turn 2 shipped.** The driver Google-Navigation surface is
+end-to-end now. `<NavigationProvider/>` is mounted at App root with
+the legacy terms-dialog config + `TaskRemovedBehavior.CONTINUE_SERVICE`
+(matches legacy yeride). The new `useNavigationSdkConnector` hook is
+mounted exactly once on `DriverMonitorScreen` — it calls the SDK's
+`useNavigation()` context hook to read the shared
+`{navigationController, ...listenerSetters}` and pushes them into
+`NavigationSdkClient` via `setController`. On unmount it pushes
+`{controller: null, listeners: null}` to disconnect. The connector is
+deliberately scoped to DriverMonitor (not lifted to AppContent) so the
+adapter stays disconnected for non-driver flows. The new
+`useDriverMonitorViewModel.onLaunchNavigation()` runs the
+legacy-faithful init+terms chain (`navigationSdk.init()` → on
+`'navigation_terms_not_accepted'` show dialog → on accept retry init
+→ on init success `navigation.navigate('DriverNavigation', ...)`)
+BEFORE pushing the navigation screen — sidesteps the legacy
+`getCurrentActivity()` null-after-`<NavigationView/>` Android quirk.
+Init failures (other than user-declined terms) surface a Toast warn;
+no external-Maps fallback this phase. The new
+`useDriverNavigationViewModel` is a 5-arm tagged-union state machine
+(`uninitialized | initializing | guiding | arrived | error` with 5
+error sub-kinds) that runs `setDestinations` → `startGuidance` after
+the screen flips `onMapReady`, surfaces the full `NavRouteStatus` →
+`error.subKind` mapping, auto-flips to `'arrived'` on
+final-destination arrival, and exposes `onEndNavigation` + `onRetry`
+(retry uses a `retryNonce` dep tick to re-trigger the chain effect
+without listing `state.kind` as a dep — the latter created a
+self-cancelling race the test suite caught on first run). The new
+`DriverNavigationScreen` hosts `<NavigationView/>` filling the
+viewport, a bottom-pinned "End Navigation" CTA, a `<StateOverlay/>`
+during non-guiding arms (spinner / error+retry / brief "Arrived"
+panel), and an auto-pop `useEffect` keyed on `vm.hasArrived` that
+schedules `navigation.goBack()` after a 1.2s delay (guarded by a
+`hasNavigatedAwayRef` against double-pop). `EnRouteToPickupView`
+(pickup leg) and `StartedView` (dropoff leg) gain "Open navigation"
+CTAs gated on `isLaunchingNavigation`; the dropoff-leg path forwards
+`ride.routePreference?.routeToken` (when present) to the SDK so the
+rider's Routes-API selection drives turn-by-turn. Phase 8 turn 2
+delta: **+5 suites / +47 tests** over Turn 1's 155/1213 (+8 suites /
++89 tests over Phase 7's close at 152/1171), lands at **160 suites /
+1260 tests**. **No native config changes** this turn (Turn 1's
+`withNavigationSdk.js` plugin landed everything); `npm run prebuild`
+is a no-op for this turn's scope.
 
 **Phase 7 closed.** Across three turns Phase 7 brought the full
 background-GPS pipeline online: the single SDK seam
@@ -181,14 +225,16 @@ unstable object reference). Express dashboard reach via
 sandbox virtiofs blocks `unlink()`. Tip flow on RideReceipt remains
 pending (Turn 5).
 
-| Phase          | Scope                                                | Status |
-| -------------- | ---------------------------------------------------- | ------ |
-| Phase 6 turn 4 | Driver Earnings + Stripe Connect onboarding          | ✅     |
-| Phase 6 turn 5 | Tip flow on RideReceipt + Phase 6 cleanup            | ✅     |
-| Phase 7 turn 1 | `BackgroundGeolocationClient` adapter + fake + DI    | ✅     |
-| Phase 7 turn 2 | `useGpsLifecycle` + AppContent integration           | ✅     |
-| Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close | ✅     |
-| Phase 8 turn 1 | `NavigationSdkClient` adapter + fake + DI wiring     | Next   |
+| Phase          | Scope                                                               | Status |
+| -------------- | ------------------------------------------------------------------- | ------ |
+| Phase 6 turn 4 | Driver Earnings + Stripe Connect onboarding                         | ✅     |
+| Phase 6 turn 5 | Tip flow on RideReceipt + Phase 6 cleanup                           | ✅     |
+| Phase 7 turn 1 | `BackgroundGeolocationClient` adapter + fake + DI                   | ✅     |
+| Phase 7 turn 2 | `useGpsLifecycle` + AppContent integration                          | ✅     |
+| Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close                | ✅     |
+| Phase 8 turn 1 | `NavigationSdkClient` adapter + fake + DI wiring                    | ✅     |
+| Phase 8 turn 2 | `useDriverNavigationViewModel` + screen + DriverMonitor integration | ✅     |
+| Phase 8 turn 3 | Phase 8 polish + first device-build smoke + close                   | Next   |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -249,7 +295,9 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 7 turn 1  | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch            | ✅                             |
 | 7 turn 2  | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation         | ✅                             |
 | 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | ✅                             |
-| 8         | Google Navigation SDK (driver in-app navigation)                                 | Next                           |
+| 8 turn 1  | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port              | ✅                             |
+| 8 turn 2  | `useDriverNavigationViewModel` + screen + DriverMonitor integration              | ✅                             |
+| 8 turn 3  | Phase 8 polish + first device-build smoke + close                                | Next                           |
 | 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
 
@@ -818,7 +866,7 @@ new app writes to it.
 ## Critical files
 
 | File                                                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REFACTOR_PLAN.md`                                                                | Phased migration roadmap, decisions, target architecture                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `docs/PHASE_1_TURN_2.md`                                                          | What shipped through Phase 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `docs/PHASE_3_TURN_{1..5,4A,4B}.md`                                               | Phase 3 turn-by-turn record — read newest first when picking up rider/UI work                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -826,6 +874,7 @@ new app writes to it.
 | `docs/PHASE_5_KICKOFF.md` + `docs/PHASE_5_TURN_{1,2,3,4}.md`                      | Phase 5 turn-by-turn record — read newest first when picking up vehicle work                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `docs/PHASE_6_KICKOFF.md` + `docs/PHASE_6_TURN_{1,…}.md`                          | Phase 6 turn-by-turn record — read newest first when picking up payments / Stripe / tipping work                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `docs/PHASE_7_KICKOFF.md` + `docs/PHASE_7_TURN_{1,…}.md`                          | Phase 7 turn-by-turn record — read newest first when picking up background-GPS / geofence work                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `docs/PHASE_8_KICKOFF.md` + `docs/PHASE_8_TURN_{1,…}.md`                          | Phase 8 turn-by-turn record — read newest first when picking up Google Navigation SDK work                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting)                                                                                                                                                                                                                                                                                                                                                                                         |
 | `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -882,6 +931,15 @@ new app writes to it.
 | `src/presentation/AppContent.tsx`                                                 | Phase 7 turn 2 — also mounts `useGpsLifecycle` once. Computes `enabled` via `isRegistrationComplete(user)` (rider needs `defaultPaymentMethodId !== null`; driver needs `stripeChargesEnabled && stripePayoutsEnabled` — mirrors the legacy `computeTargetRoute` gate). Resolves `activeRideForGeofence` via `useActiveRideForGeofence(user)`. Resets `useGpsStore` on `'unauthenticated'` transition (canonical reset point)                                                                       |
 | `src/presentation/di/ContainerProvider.tsx`                                       | Phase 7 turn 2 — adds the sibling `useBackgroundGeolocation()` hook alongside `useUseCases()`. Same throw-outside-provider contract. `useGpsLifecycle` is the sole consumer                                                                                                                                                                                                                                                                                                                         |
 | `eslint.config.js`                                                                | Phase 7 turn 2 — boundaries-rule override extended to include `useGpsLifecycle.ts` + `useGpsStore.ts` alongside `presentation/di/container.ts`. These are the presentation-layer SDK seams (kickoff decisions 2 + 3) — same architectural exception as the DI composition root                                                                                                                                                                                                                      |
+| `src/data/services/NavigationSdkClient.ts`                                        | Phase 8 turn 1 — single SDK seam over `@googlemaps/react-native-navigation-sdk@0.14.1`. 8 `Result`-returning methods (`init`, `showTermsAndConditionsDialog`, `setDestinations`, `startGuidance`, `stopGuidance`, `cleanup`, `subscribeToArrival`, `setController`). Listener-level dedup of arrivals by `(waypointKey, isFinal)`. Non-OK `RouteStatus` mapped to `Result.ok<NavRouteStatus>` (domain outcomes); `init`'s status string-enum mapped to `Result<true, AuthorizationError             | NetworkError>` |
+| `src/shared/testing/FakeNavigationSdkClient.ts`                                   | Phase 8 turn 1 + turn 2 — programmable in-memory fake mirroring the real adapter 1:1. Seam set: `seedTermsAccepted` / `seedRouteStatus` / `failNext({method, error})` / `emitArrival` / `emitMultiFireArrival` / `setController` (Phase 8 turn 2 spy) / read-only introspection (`getActiveDestinations`, `isInitialized`, `isGuiding`, `getArrivalSubscriberCount`) / `reset`. `setController` parameter is `unknown` so the union with the real adapter stays callable from the connector hook    |
+| `plugins/withNavigationSdk.js`                                                    | Phase 8 turn 1 — custom Expo config plugin (minimum patch set per kickoff decision 3): Android `coreLibraryDesugaringEnabled` + `play-services-maps` exclusion + `kotlin-stdlib:2.0.21` alignment + AAR-metadata check disable; iOS `react-native-google-maps.podspec` patches (GoogleMaps 10.7.0 alignment + `RCTDirectEventBlock` fix on `onMapReady`) + Podfile CDN fallback + strip Expo's orphan `react-native-google-maps` pod line                                                           |
+| `src/presentation/App.tsx`                                                        | Phase 8 turn 2 — adds `<NavigationProvider/>` from the SDK between `MaybeStripeProvider` and `<QueryClientProvider/>`. Always mounted (no "unconfigured" branch). Terms-dialog config matches legacy yeride: `{title: 'Navigation Terms', companyName: 'YeRide', showOnlyDisclaimer: true}` + `TaskRemovedBehavior.CONTINUE_SERVICE`                                                                                                                                                                |
+| `src/presentation/features/driver/hooks/useNavigationSdkConnector.ts`             | Phase 8 turn 2 — calls the SDK's `useNavigation()` context hook to read the shared `{navigationController, ...listenerSetters}` and pushes them into the adapter via `setController`. On unmount, pushes `{controller: null, listeners: null}`. Mounting rule: exactly once on `DriverMonitorScreen` — not at AppContent (too broad) and not at the navigation screen (too narrow; legacy `getCurrentActivity()` quirk requires init-in-parent)                                                     |
+| `src/presentation/features/driver/view-models/useDriverNavigationViewModel.ts`    | Phase 8 turn 2 — 5-arm tagged-union state machine (`uninitialized                                                                                                                                                                                                                                                                                                                                                                                                                                   | initializing   | guiding | arrived | error`) with 5 error sub-kinds. Drives `setDestinations`→`startGuidance`after`onMapReady`; final-destination arrival auto-flips to `'arrived'`; `onEndNavigation`+`onRetry`. State-machine race avoidance: chain effect's gate reads `state.kind`via a`stateRef`, and `onRetry`bumps a`retryNonce`dep tick to re-fire the chain (listing`state.kind` as a dep self-cancels) |
+| `src/presentation/features/driver/screens/DriverNavigationScreen.tsx`             | Phase 8 turn 2 — hosts `<NavigationView style={{flex:1}} onMapReady={...}/>`, a bottom-pinned "End Navigation" CTA, a `<StateOverlay/>` during non-guiding arms (spinner / error+retry / brief "Arrived" panel), and an auto-pop `useEffect` keyed on `vm.hasArrived` (1.2s delay; `hasNavigatedAwayRef` guards against double-pop). Validates route-param coords at the screen boundary and renders an inline error if invalid                                                                     |
+| `eslint.config.js`                                                                | Phase 8 turn 2 — boundaries-rule override block extended to include `useNavigationSdkConnector.ts` + `useDriverNavigationViewModel.ts` alongside `useGpsLifecycle.ts` / `useGpsStore.ts`. Same architectural exception: presentation-layer SDK seams allowed to import data-layer `Nav*` types                                                                                                                                                                                                      |
+| `jest.setup.ts`                                                                   | Phase 8 turn 2 — extends the SDK module mock with a `useNavigation` export (returns a shared `mockSharedNavigation` instance) + `__getSharedNavigation` / `__resetSharedNavigation` test helpers. Connector hook tests use these to assert reference identity across re-renders without mounting a real `<NavigationProvider/>`                                                                                                                                                                     |
 
 ## Build & deployment
 
@@ -1308,6 +1366,7 @@ Payment queries            → src/presentation/queries/payment.queries.ts
 
 Driver screens             → src/presentation/features/driver/screens/*.tsx
                               DriverHome, DriverDispatch, DriverMonitor,
+                              DriverNavigation (phase 8 turn 2 — Google Nav SDK turn-by-turn),
                               DriverActivityPlaceholder, DriverEarnings (phase 6 turn 4),
                               VehicleList, VehicleRegistration, VehicleDetails, VehiclePhotos
                               (DriverEarningsPlaceholderScreen retained as a deprecation stub)
@@ -1321,6 +1380,7 @@ Driver components          → src/presentation/features/driver/components/
                               PayoutRow, BalanceTransactionRow (phase 6 turn 4)
 Driver hooks               → src/presentation/features/driver/hooks/*.ts (phase 6 turn 4)
                               useStripeConnectOnboarding (multi-step onboarding launcher)
+                              useNavigationSdkConnector (phase 8 turn 2 — pushes SDK controller into adapter)
 Driver utils               → src/presentation/features/driver/utils/*.ts
                               formatMoney (1-line re-export shim — phase 6 turn 5 moved the canonical
                                file to src/presentation/utils/formatMoney.ts; remove the shim in any
@@ -1328,7 +1388,8 @@ Driver utils               → src/presentation/features/driver/utils/*.ts
 Driver view-models         → src/presentation/features/driver/view-models/use*ViewModel.ts
                               (incl. useVehicleListViewModel, useVehicleRegistrationViewModel,
                                useVehicleDetailsViewModel, useVehiclePhotosViewModel,
-                               useDriverEarningsViewModel — phase 6 turn 4)
+                               useDriverEarningsViewModel — phase 6 turn 4;
+                               useDriverNavigationViewModel — phase 8 turn 2)
 Driver cancel sheet        → src/presentation/components/trip/DriverCancelReasonSheet.tsx
                               (shared by every cancel-eligible driver status view)
 Vehicle queries            → src/presentation/queries/vehicle.queries.ts

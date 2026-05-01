@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
 import DriverDispatchScreen from '@presentation/features/driver/screens/DriverDispatchScreen';
 import DriverMonitorScreen from '@presentation/features/driver/screens/DriverMonitorScreen';
+import DriverNavigationScreen from '@presentation/features/driver/screens/DriverNavigationScreen';
 import VehicleDetailsScreen from '@presentation/features/driver/screens/VehicleDetailsScreen';
 import VehicleListScreen from '@presentation/features/driver/screens/VehicleListScreen';
 import VehiclePhotosScreen from '@presentation/features/driver/screens/VehiclePhotosScreen';
@@ -46,6 +47,11 @@ export function DriverNavigator() {
         name="DriverMonitor"
         component={DriverMonitorScreen}
         options={{ title: 'Active ride', headerBackVisible: false }}
+      />
+      <Stack.Screen
+        name="DriverNavigation"
+        component={DriverNavigationScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="UserProfile"

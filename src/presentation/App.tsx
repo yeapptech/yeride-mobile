@@ -1,3 +1,8 @@
+import {
+  NavigationProvider as NavSdkProvider,
+  TaskRemovedBehavior,
+  type TermsAndConditionsDialogOptions,
+} from '@googlemaps/react-native-navigation-sdk';
 import { NavigationContainer } from '@react-navigation/native';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -22,17 +27,30 @@ import { RootNavigator } from './navigation/RootNavigator';
  *       MaybeStripeProvider        ← Stripe context (Phase 6 turn 3); only when
  *                                    a publishable key is configured. The Wallet
  *                                    view-model handles the unconfigured state.
- *         QueryClientProvider      ← TanStack Query for server cache
- *           ContainerProvider      ← DI container (use cases)
- *             AppContent           ← auth listener + session bootstrapping
- *               NavigationContainer ← React Navigation
- *                 RootNavigator    ← conditional auth/main routing
+ *         NavSdkProvider           ← Google Navigation SDK context (Phase 8
+ *                                    turn 2). Always mounted — the SDK creates a
+ *                                    single shared `NavigationController` at app
+ *                                    boot; consumers (`useNavigationSdkConnector`)
+ *                                    read it via the SDK's `useNavigation()`
+ *                                    context hook and push it into our adapter.
+ *           QueryClientProvider    ← TanStack Query for server cache
+ *             ContainerProvider    ← DI container (use cases)
+ *               AppContent         ← auth listener + session bootstrapping
+ *                 NavigationContainer ← React Navigation
+ *                   RootNavigator  ← conditional auth/main routing
  *
  * `<StripeProvider/>` is mounted ABOVE `<ContainerProvider/>` so
  * `useStripe()` is callable from any screen — the Phase 6 turn 4 Connect
  * onboarding may need it from outside the Wallet flow. When no
  * publishable key is configured we skip the provider entirely and log a
  * loud warn at boot.
+ *
+ * `<NavSdkProvider/>` (Phase 8 turn 2) is mounted unconditionally below
+ * Stripe and above TanStack Query — the SDK's terms / billing wiring is
+ * Maps-Platform-key-driven (already in place), and the provider has no
+ * "unconfigured" branch like Stripe. In tests, the SDK ships a jest mock
+ * that renders the provider as a `children`-passthrough so unit-test
+ * trees that don't go through `App.tsx` still work.
  *
  * NativeWind's metro plugin wires `global.css` automatically — no
  * side-effect import needed here.
@@ -82,21 +100,41 @@ function MaybeStripeProvider({
   );
 }
 
+/**
+ * Terms-and-conditions dialog config baked into the SDK's
+ * `<NavigationProvider/>`. The SDK invokes the dialog from
+ * `navigationController.showTermsAndConditionsDialog()`; per-call
+ * overrides are still possible via the optional argument to that method.
+ *
+ * `showOnlyDisclaimer: true` matches legacy yeride — the user sees the
+ * Google legal disclaimer + an Accept / Cancel pair, no full ToS body.
+ */
+const NAV_TERMS_DIALOG_OPTIONS: TermsAndConditionsDialogOptions = {
+  title: 'Navigation Terms',
+  companyName: 'YeRide',
+  showOnlyDisclaimer: true,
+};
+
 export function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <MaybeStripeProvider>
-          <QueryClientProvider client={queryClient}>
-            <ContainerProvider>
-              <AppContent>
-                <NavigationContainer>
-                  <StatusBar style="auto" />
-                  <RootNavigator />
-                </NavigationContainer>
-              </AppContent>
-            </ContainerProvider>
-          </QueryClientProvider>
+          <NavSdkProvider
+            termsAndConditionsDialogOptions={NAV_TERMS_DIALOG_OPTIONS}
+            taskRemovedBehavior={TaskRemovedBehavior.CONTINUE_SERVICE}
+          >
+            <QueryClientProvider client={queryClient}>
+              <ContainerProvider>
+                <AppContent>
+                  <NavigationContainer>
+                    <StatusBar style="auto" />
+                    <RootNavigator />
+                  </NavigationContainer>
+                </AppContent>
+              </ContainerProvider>
+            </QueryClientProvider>
+          </NavSdkProvider>
         </MaybeStripeProvider>
       </SafeAreaProvider>
       {/* Toast lives at the root so it floats over every screen +
