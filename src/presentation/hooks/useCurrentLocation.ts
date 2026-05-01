@@ -66,9 +66,31 @@ export function useCurrentLocation(): UseCurrentLocation {
         return;
       }
       setPermissionStatus('granted');
-      const reading = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // Try last-known position first — cheap, returns null instead of
+      // throwing. This unblocks the common simulator case where the GPS
+      // provider has been seeded with a point (Extended Controls SET
+      // LOCATION on Android, Features > Location > Custom on iOS) but
+      // hasn't been promoted to a "current fix" by the FusedLocationProvider.
+      // `getCurrentPositionAsync` would otherwise throw with
+      // "Current location is unavailable. Make sure that location services
+      // are enabled" until the provider gets around to acquiring a
+      // proper fix.
+      //
+      // No `maxAge` cap: for centring a map any cached fix beats none, and
+      // simulator-seeded "single point" locations frequently age past a
+      // tight window between the set-location action and the app's first
+      // mount/reload. Stale cached fixes are corrected as soon as the user
+      // moves (or the route playback streams) and `useGpsLifecycle` /
+      // `refresh()` push fresh readings in.
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      const reading =
+        lastKnown ??
+        (await Location.getCurrentPositionAsync({
+          // Lower accuracy on the cold path: less likely to time out on
+          // a simulator that's only seeded a single GPS point. The
+          // Coordinates value object validates the result anyway.
+          accuracy: Location.Accuracy.Lowest,
+        }));
       const r = Coordinates.create(
         reading.coords.latitude,
         reading.coords.longitude,
@@ -81,7 +103,18 @@ export function useCurrentLocation(): UseCurrentLocation {
       }
       setCoordinates(r.value);
     } catch (e: unknown) {
-      logger.error('refresh failed', e);
+      // Surface the expo-location CodedError details when present —
+      // `code` is a string like 'E_LOCATION_UNAUTHORIZED' /
+      // 'E_LOCATION_TIMEOUT' / 'E_LOCATION_SERVICES_DISABLED'. The
+      // default `console.error(error)` collapses to a stack trace; we
+      // explicitly include the message and code so the toast shows
+      // something useful.
+      const code =
+        typeof e === 'object' && e !== null && 'code' in e
+          ? String((e as { code: unknown }).code)
+          : 'unknown';
+      const message = e instanceof Error ? e.message : String(e);
+      logger.error('refresh failed', { code, message });
       setError(
         e instanceof Error
           ? e.message

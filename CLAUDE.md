@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** April 30, 2026 (Phase 8 turn 2 — view-model + screen + DriverMonitor integration)
+**Last updated:** May 1, 2026 (Phase 8 turn 3 — first device-build smoke + Phase 8 close)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,55 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 8 closed.** Across three turns Phase 8 shipped the full
+driver-side Google Navigation SDK integration: the data-layer SDK
+seam + adapter + fake + DI wiring + custom Expo plugin (turn 1) →
+the App-root `<NavigationProvider/>` mount + `useNavigationSdkConnector`
+
+- 5-arm `useDriverNavigationViewModel` + `DriverNavigationScreen` +
+  "Open Navigation" CTAs on EnRouteToPickupView / StartedView (turn 2)
+  → first device-build smoke driving the whole flow end-to-end on
+  iPhone 17 simulator + Pixel 10 Pro emulator against `yeapp-stage`
+  Firestore (turn 3). Net delta across the phase: **+10 suites / +97
+  tests** (152/1171 → 160/1268). Three Phase-3 latent bugs that
+  escaped unit-test coverage were surfaced and patched as the smoke
+  exercised the real Cloud Functions and on-disk doc shapes:
+  `CloudFunctionsService.cancelTrip` was sending `code` while the
+  deployed function reads `reason`; the rewrite's `RideDocSchema`
+  didn't accept the legacy flat cancel-doc shape (status
+  `'passenger_canceled'` + top-level string `cancelReason`); and
+  `useCurrentLocation` blocked on a fresh GPS fix that the
+  FusedLocationProvider doesn't always promote from a single
+  Extended-Controls injection. Each fix carries regression coverage.
+  **No native plugin patches were required beyond Turn 1's set** —
+  the legacy patch reservoir (Firebase BoM 34.0.0 pin, Compose
+  Compiler classpath, kotlin-stdlib 2.0.21 force) was inspected and
+  intentionally not ported (the kotlin-stdlib force is explicitly
+  NOT to be ported under Expo SDK 55 — see plugin JSDoc).
+
+**Phase 8 turn 3 shipped.** Manual end-to-end smoke driven on a
+real device: signed-in driver accepts a real `awaiting_driver`
+ride from `yeapp-stage` Firestore → DriverMonitor renders with
+the green driver→pickup polyline → "Open Navigation" tapped on
+EnRouteToPickupView → terms dialog displays on first launch (Turn
+2's `<NavigationProvider/>` config working) → driver accepts →
+`<NavigationView/>` mounts full-screen with turn-by-turn voice
+guidance → simulated drive to pickup → arrival auto-pops back to
+DriverMonitor (1.2s arrival overlay shows before `goBack`) →
+AtPickupView displays (Phase 7 turn 3's geofence auto-flip held)
+→ Start ride → second `<NavigationView/>` for the dropoff leg
+with the rider's selected `routeToken` forwarded → arrival
+auto-pops → Request payment. The full driver navigation surface
+proved out against the real SDK with the legacy-faithful init+terms
+chain ordering in `useDriverMonitorViewModel.onLaunchNavigation`.
+Caveat: iOS has a separate Apple Maps Fabric registration regression
+(`<RNMapsMapView>` unimplemented across every screen using
+`<Map/>`); the Phase 8 nav surface uses `<NavigationView/>` (Google
+Navigation SDK's own native view, separate from `react-native-maps`)
+so it doesn't block. Phase 9 follow-up logged. Phase 8 turn 3
+delta: **+0 suites / +8 tests** (each incidental fix carries its
+own regression coverage), lands at **160 suites / 1268 tests**.
 
 **Phase 8 turn 2 shipped.** The driver Google-Navigation surface is
 end-to-end now. `<NavigationProvider/>` is mounted at App root with
@@ -234,7 +283,7 @@ pending (Turn 5).
 | Phase 7 turn 3 | RideMonitor + DriverMonitor swap-ins + Phase 7 close                | ✅     |
 | Phase 8 turn 1 | `NavigationSdkClient` adapter + fake + DI wiring                    | ✅     |
 | Phase 8 turn 2 | `useDriverNavigationViewModel` + screen + DriverMonitor integration | ✅     |
-| Phase 8 turn 3 | Phase 8 polish + first device-build smoke + close                   | Next   |
+| Phase 8 turn 3 | First device-build smoke (iOS + Android) + Phase 8 close            | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -297,8 +346,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | ✅                             |
 | 8 turn 1  | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port              | ✅                             |
 | 8 turn 2  | `useDriverNavigationViewModel` + screen + DriverMonitor integration              | ✅                             |
-| 8 turn 3  | Phase 8 polish + first device-build smoke + close                                | Next                           |
-| 9         | Push notifications + Crashlytics + polish                                        | Pending                        |
+| 8 turn 3  | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close    | ✅                             |
+| 9         | Push notifications + Crashlytics + polish (incl. iOS Apple Maps fix)             | Next                           |
 | 10        | Cutover from legacy yeride                                                       | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites

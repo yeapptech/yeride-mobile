@@ -20,12 +20,20 @@ import {
 
 import { useRiderHomeViewModel } from '../useRiderHomeViewModel';
 
-// Navigation mock — we assert `replace` and `navigate` shape only.
+// Navigation mock — we assert `replace`, `navigate`, and `reset` shape
+// only. The auto-resume path now uses `reset` (not `replace`) to keep
+// `RiderTabs` at the base of the stack so RideReceipt's `Done`
+// (popToTop) has somewhere to pop to.
 const mockNavigate = jest.fn();
 const mockReplace = jest.fn();
+const mockReset = jest.fn();
 const focusCallbacks: (() => void)[] = [];
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mockNavigate, replace: mockReplace }),
+  useNavigation: () => ({
+    navigate: mockNavigate,
+    replace: mockReplace,
+    reset: mockReset,
+  }),
   // useFocusEffect runs the callback immediately (and once) so the
   // auto-redirect behaviour fires deterministically.
   useFocusEffect: (cb: () => void) => {
@@ -35,11 +43,18 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 // expo-location mock — return a deterministic location.
+// `useCurrentLocation` tries getLastKnownPositionAsync first (cheap,
+// returns null instead of throwing on simulators that have a seeded
+// GPS point but no fresh fix). Mock both surfaces; the test suite
+// resolves to last-known immediately.
 jest.mock('expo-location', () => ({
   __esModule: true,
-  Accuracy: { Balanced: 3 },
+  Accuracy: { Balanced: 3, Lowest: 1 },
   requestForegroundPermissionsAsync: jest.fn(async () => ({
     status: 'granted',
+  })),
+  getLastKnownPositionAsync: jest.fn(async () => ({
+    coords: { latitude: 25.7617, longitude: -80.1918 },
   })),
   getCurrentPositionAsync: jest.fn(async () => ({
     coords: { latitude: 25.7617, longitude: -80.1918 },
@@ -136,6 +151,7 @@ describe('useRiderHomeViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockReplace.mockClear();
+    mockReset.mockClear();
     focusCallbacks.length = 0;
     useServiceAreaStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });

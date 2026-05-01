@@ -25,11 +25,27 @@ const FUNCTIONS_REGION = 'us-east1';
  *     applies app charges (booking, dispatch, pickup/dropoff bandwidth, maps
  *     API), kicks off the Stripe charge, and updates the trip doc to
  *     `payment_requested`. Returns the canonical fare breakdown.
+ *
+ *     **Wire-format translation**: the deployed Cloud Function reads
+ *     `request.data.odometer` (legacy yeride parity), but the rewrite's
+ *     domain layer carries `odometerMeters` (semantic / typed). We
+ *     translate `odometerMeters` → `odometer` at this boundary so domain
+ *     code keeps its semantics and the deployed function gets the field
+ *     name it expects. Without this rename the function throws
+ *     `invalid-argument: "odometer must be a non-negative number"`.
  *   - `cancelTrip(tripId, by, code, reasonText, odometerMeters)` — both
  *     rider-side and driver-side cancellation. The function validates the
  *     caller's authorization, computes any cancellation fee, writes the
  *     `trip.cancelReason` subdoc, flips status to `'cancelled'`, and
  *     refunds / charges as needed.
+ *
+ *     **Wire-format translation**: the deployed Cloud Function (legacy
+ *     yeride parity) reads `request.data.reason` (not `code`). The
+ *     domain-level `CancellationReason.code` is what the rewrite uses
+ *     end-to-end; we translate `code` → `reason` at this boundary so
+ *     domain code keeps its semantics and the deployed function gets the
+ *     field name it expects. Without this rename the function throws
+ *     `invalid-argument: "reason is required"`.
  *   - `tipDriver(tripId, tipAmount)` — Phase 6 turn 2. Rider-initiated tip
  *     after trip completion. The function authenticates the rider as the
  *     trip's passenger, validates trip status (must be `'completed'`),
@@ -41,12 +57,13 @@ const FUNCTIONS_REGION = 'us-east1';
  *     `tipAmount` is in **dollars** (legacy contract) — `ProcessTip`
  *     converts from `Money` minor units at the use-case boundary.
  *
- * Error mapping:
- *   - `functions/unauthenticated`           → AuthorizationError
- *   - `functions/permission-denied`         → AuthorizationError
- *   - `functions/not-found`                 → NotFoundError
- *   - `functions/invalid-argument`          → ValidationError
- *   - `functions/failed-precondition`       → ValidationError
+ * Error mapping (handles both bare codes from RNFirebase v24+ and
+ * legacy `functions/`-prefixed codes for backward compatibility):
+ *   - `unauthenticated`                     → AuthorizationError
+ *   - `permission-denied`                   → AuthorizationError
+ *   - `not-found`                           → NotFoundError
+ *   - `invalid-argument`                    → ValidationError
+ *   - `failed-precondition`                 → ValidationError
  *   - everything else (deadline-exceeded, unavailable, internal, network) →
  *     NetworkError
  *
@@ -67,7 +84,15 @@ export class CloudFunctionsService {
       NetworkError | AuthorizationError | NotFoundError | ValidationError
     >
   > {
-    return this.call<CompleteTripResult>('completeTrip', args);
+    // Translate `odometerMeters` → `odometer` at the wire boundary. The
+    // deployed Cloud Function (legacy yeride parity) reads
+    // `request.data.odometer`; the rewrite's domain layer uses
+    // `odometerMeters`. See the JSDoc on this class for the rationale.
+    const payload = {
+      tripId: args.tripId,
+      odometer: args.odometerMeters,
+    };
+    return this.call<CompleteTripResult>('completeTrip', payload);
   }
 
   async cancelTrip(args: {
@@ -82,7 +107,18 @@ export class CloudFunctionsService {
       NetworkError | AuthorizationError | NotFoundError | ValidationError
     >
   > {
-    return this.call<CancelTripResult>('cancelTrip', args);
+    // Translate `code` → `reason` at the wire boundary. The deployed
+    // Cloud Function (legacy yeride parity) reads `request.data.reason`;
+    // the rewrite's domain layer uses `CancellationReason.code`. See
+    // the JSDoc on this class for the rationale.
+    const payload = {
+      tripId: args.tripId,
+      by: args.by,
+      reason: args.code,
+      reasonText: args.reasonText,
+      odometerMeters: args.odometerMeters,
+    };
+    return this.call<CancelTripResult>('cancelTrip', payload);
   }
 
   /**
@@ -154,10 +190,17 @@ function mapFunctionsError(
   e: unknown,
   op: string,
 ): NetworkError | AuthorizationError | NotFoundError | ValidationError {
-  const code =
+  const rawCode =
     typeof e === 'object' && e !== null && 'code' in e
       ? String((e as { code: unknown }).code)
       : 'unknown';
+  // Normalize: RNFirebase v24+ surfaces bare codes (`invalid-argument`),
+  // older versions and the JS docs use the `functions/`-prefixed form
+  // (`functions/invalid-argument`). Strip the prefix once so the switch
+  // below stays readable and the matching is forward-compatible.
+  const code = rawCode.startsWith('functions/')
+    ? rawCode.slice('functions/'.length)
+    : rawCode;
   const message =
     typeof e === 'object' && e !== null && 'message' in e
       ? String((e as { message: unknown }).message)
@@ -177,22 +220,22 @@ function mapFunctionsError(
   logger.warn(`Cloud Function ${op} failed`, { code, domainCode });
 
   switch (code) {
-    case 'functions/unauthenticated':
-    case 'functions/permission-denied':
+    case 'unauthenticated':
+    case 'permission-denied':
       return new AuthorizationError({
         code: domainCode,
         message,
         cause: e,
       });
-    case 'functions/not-found':
+    case 'not-found':
       return new NotFoundError({
         code: domainCode,
         message,
         resource: 'cloud_function_target',
         cause: e,
       });
-    case 'functions/invalid-argument':
-    case 'functions/failed-precondition':
+    case 'invalid-argument':
+    case 'failed-precondition':
       return new ValidationError({
         code: domainCode,
         message,

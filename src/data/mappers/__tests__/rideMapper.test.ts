@@ -337,3 +337,112 @@ describe('toDomain — legacy field shape tolerance', () => {
     expect(round.dropoff.directions).toBeNull();
   });
 });
+
+// Phase 8 turn 3 regression coverage. The deployed Cloud Function
+// `cancelTrip` writes a flat shape: status='passenger_canceled' /
+// 'driver_canceled' (snake_case), cancelReason as a top-level *string*,
+// with sibling top-level canceledBy / canceledAt / cancelReasonText.
+// The DTO must accept this and the mapper must fold it into the
+// canonical domain `RideCancellation` with `status='cancelled'`.
+describe('toDomain — legacy Cloud Function cancel shape', () => {
+  function makeLegacyCanceledDoc(
+    overrides: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const ride = freshRide();
+    const doc = toDoc(ride) as unknown as Record<string, unknown>;
+    return { ...doc, ...overrides };
+  }
+
+  it('normalizes status `passenger_canceled` to canonical `cancelled`', () => {
+    const ride = freshRide();
+    const doc = makeLegacyCanceledDoc({
+      status: 'passenger_canceled',
+      cancelReason: 'changed_mind',
+      canceledBy: 'rider',
+      canceledAt: T_DISPATCH.toISOString(),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.status).toBe('cancelled');
+    expect(round.cancellation?.by).toBe('rider');
+    expect(round.cancellation?.reason.code).toBe('changed_mind');
+    expect(round.cancellation?.at.toISOString()).toBe(T_DISPATCH.toISOString());
+  });
+
+  it('normalizes status `driver_canceled` to canonical `cancelled` with by=driver', () => {
+    const ride = freshRide();
+    const doc = makeLegacyCanceledDoc({
+      status: 'driver_canceled',
+      cancelReason: 'passenger_no_show',
+      canceledBy: 'driver',
+      canceledAt: T_DISPATCH.toISOString(),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.status).toBe('cancelled');
+    expect(round.cancellation?.by).toBe('driver');
+    expect(round.cancellation?.reason.code).toBe('passenger_no_show');
+  });
+
+  it('folds top-level `cancelReasonText` into the cancellation reason', () => {
+    const ride = freshRide();
+    const doc = makeLegacyCanceledDoc({
+      status: 'driver_canceled',
+      cancelReason: 'other',
+      cancelReasonText: 'flat tire',
+      canceledBy: 'driver',
+      canceledAt: T_DISPATCH.toISOString(),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.cancellation?.reason.code).toBe('other');
+    expect(round.cancellation?.reason.reasonText).toBe('flat tire');
+  });
+
+  it('infers `by` from status when `canceledBy` is absent', () => {
+    const ride = freshRide();
+    const doc = makeLegacyCanceledDoc({
+      status: 'passenger_canceled',
+      cancelReason: 'changed_mind',
+      // No canceledBy field — older legacy writes may have omitted it.
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.cancellation?.by).toBe('rider');
+  });
+
+  it('synthesizes a minimal cancellation when status is set but cancelReason is missing', () => {
+    const ride = freshRide();
+    const doc = makeLegacyCanceledDoc({
+      status: 'passenger_canceled',
+      // No cancelReason at all (truncated/garbled cancel write)
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.status).toBe('cancelled');
+    // Falls through to a stub `'changed_mind'` reason — better than
+    // crashing the read on a malformed disk record.
+    expect(round.cancellation?.reason.code).toBe('changed_mind');
+    expect(round.cancellation?.by).toBe('rider');
+  });
+
+  it('still accepts the canonical nested `cancelReason` object', () => {
+    // Ensures the union doesn't break the rewrite's direct-write path.
+    const cancelled = unwrap(
+      freshRide().cancel({
+        reason: unwrap(
+          CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+        ),
+        by: 'rider',
+        at: T_DISPATCH,
+        odometerMeters: 0,
+      }),
+    );
+    const doc = toDoc(cancelled);
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(cancelled.id), parsed));
+    expect(round.status).toBe('cancelled');
+    expect(round.cancellation?.reason.code).toBe('changed_mind');
+    expect(round.cancellation?.odometerMeters).toBe(0);
+  });
+});

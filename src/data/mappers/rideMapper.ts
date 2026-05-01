@@ -98,9 +98,7 @@ export function toDomain(
   const dropoffR = dropoffToDomain(doc.dropoff);
   if (!dropoffR.ok) return dropoffR;
 
-  const cancellationR = doc.cancelReason
-    ? cancellationToDomain(doc.cancelReason)
-    : Result.ok(null);
+  const cancellationR = cancellationFromDoc(doc);
   if (!cancellationR.ok) return cancellationR;
 
   const pickupTiming: RidePickupTiming = {
@@ -124,9 +122,17 @@ export function toDomain(
     ? routePreferenceToDomain(doc.routePreference)
     : null;
 
+  // Legacy Cloud Function writes `'passenger_canceled'` / `'driver_canceled'`
+  // for cancelled trips; rewrite domain only knows canonical `'cancelled'`.
+  // The `by` distinction is preserved in the cancellation subdoc.
+  const normalizedStatus =
+    doc.status === 'passenger_canceled' || doc.status === 'driver_canceled'
+      ? 'cancelled'
+      : doc.status;
+
   return Ride.fromProps({
     id: idR.value,
-    status: doc.status,
+    status: normalizedStatus,
     passenger: passengerR.value,
     driver: driverR.value,
     rideService: rideServiceR.value,
@@ -323,23 +329,87 @@ function embeddedDirectionsToRoute(
   });
 }
 
-function cancellationToDomain(
-  c: CancellationDoc,
-): Result<RideCancellation, ValidationError> {
-  // Legacy stores the code as a freeform string; the domain enum is the
-  // narrow set. If legacy ever wrote a code we don't recognise, the
-  // CancellationReason factory will reject — we let that bubble up so a
-  // garbled doc fails at parse time rather than silently round-tripping.
+/**
+ * Build the domain `RideCancellation` from whichever on-disk shape is
+ * present. The Cloud Function writes the FLAT legacy shape:
+ * `cancelReason` is a top-level *string*, with sibling top-level
+ * `canceledBy` / `canceledAt` / `cancelReasonText`. The rewrite's
+ * direct-write path uses the nested canonical `CancellationDocSchema`
+ * object. See `CancelReasonDocSchema` JSDoc in RideDoc.ts.
+ *
+ * Returns `null` when no cancellation context is present. Returns a
+ * partial best-effort `RideCancellation` when the doc has the legacy
+ * status set (`'passenger_canceled'` / `'driver_canceled'`) but the
+ * Cloud Function payload was truncated (no top-level `cancelReason`) —
+ * we don't want a malformed disk record to crash a live trip read.
+ */
+function cancellationFromDoc(
+  doc: RideDoc,
+): Result<RideCancellation | null, ValidationError> {
+  const raw = doc.cancelReason;
+  if (raw === undefined || raw === null) {
+    // No cancel context. Synthesize a minimal one only if the status
+    // explicitly says cancelled — otherwise return null (active trip).
+    if (
+      doc.status === 'passenger_canceled' ||
+      doc.status === 'driver_canceled' ||
+      doc.status === 'cancelled'
+    ) {
+      const by =
+        doc.canceledBy ??
+        (doc.status === 'driver_canceled' ? 'driver' : 'rider');
+      // Use `'changed_mind'` as a stub code — it's a common code valid
+      // for both rider and driver and doesn't require `reasonText`.
+      // We hit this branch only when the doc is malformed (status says
+      // cancelled but no reason recorded); preserving the read with a
+      // best-effort reason beats crashing the trip read.
+      const reasonR = CancellationReason.create({
+        code: 'changed_mind' as CancellationReasonCode,
+        reasonText: null,
+      });
+      if (!reasonR.ok) return reasonR;
+      return Result.ok({
+        reason: reasonR.value,
+        by,
+        at: doc.canceledAt ? new Date(doc.canceledAt) : new Date(0),
+        odometerMeters: null,
+      });
+    }
+    return Result.ok(null);
+  }
+
+  if (typeof raw === 'string') {
+    // Legacy flat shape: the code lives at the top level as a string;
+    // sibling fields carry the rest of the cancellation context.
+    const reasonR = CancellationReason.create({
+      code: raw as CancellationReasonCode,
+      reasonText: doc.cancelReasonText ?? null,
+    });
+    if (!reasonR.ok) return reasonR;
+    const by =
+      doc.canceledBy ?? (doc.status === 'driver_canceled' ? 'driver' : 'rider');
+    return Result.ok({
+      reason: reasonR.value,
+      by,
+      at: doc.canceledAt ? new Date(doc.canceledAt) : new Date(0),
+      odometerMeters: null,
+    });
+  }
+
+  // Canonical nested shape. The domain enum is the narrow set; if
+  // legacy ever wrote an unrecognised code, the CancellationReason
+  // factory rejects — we let that bubble up so a garbled doc fails
+  // at parse time rather than silently round-tripping.
   const reasonR = CancellationReason.create({
-    code: c.code as CancellationReasonCode,
-    reasonText: c.reasonText ?? null,
+    code: raw.code as CancellationReasonCode,
+    reasonText: raw.reasonText ?? null,
   });
   if (!reasonR.ok) return reasonR;
   return Result.ok({
     reason: reasonR.value,
-    by: c.by,
-    at: c.at ? new Date(c.at) : new Date(0),
-    odometerMeters: typeof c.odometer === 'number' ? c.odometer : null,
+    by: raw.by,
+    at: raw.at ? new Date(raw.at) : new Date(0),
+    odometerMeters: typeof raw.odometer === 'number' ? raw.odometer : null,
   });
 }
 

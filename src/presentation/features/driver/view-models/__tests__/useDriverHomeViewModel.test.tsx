@@ -52,11 +52,18 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 // expo-location mock — return a deterministic location.
+// `useCurrentLocation` tries getLastKnownPositionAsync first (cheap,
+// returns null instead of throwing on simulators that have a seeded
+// GPS point but no fresh fix). Mock both surfaces; the test suite
+// resolves to last-known immediately.
 jest.mock('expo-location', () => ({
   __esModule: true,
-  Accuracy: { Balanced: 3 },
+  Accuracy: { Balanced: 3, Lowest: 1 },
   requestForegroundPermissionsAsync: jest.fn(async () => ({
     status: 'granted',
+  })),
+  getLastKnownPositionAsync: jest.fn(async () => ({
+    coords: { latitude: 25.7617, longitude: -80.1918 },
   })),
   getCurrentPositionAsync: jest.fn(async () => ({
     coords: { latitude: 25.7617, longitude: -80.1918 },
