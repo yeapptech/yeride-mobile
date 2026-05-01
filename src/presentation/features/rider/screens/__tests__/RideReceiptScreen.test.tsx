@@ -149,8 +149,10 @@ const baseScreenProps = {
     name: 'RideReceipt' as const,
     params: { rideId: String(RIDE_ID) },
   },
+  // Done now calls `reset` (not `popToTop`) so the rider always lands
+  // back on RiderTabs regardless of how they reached the receipt.
   navigation: {
-    popToTop: jest.fn(),
+    reset: jest.fn(),
   } as unknown as Parameters<typeof RideReceiptScreen>[0]['navigation'],
 };
 

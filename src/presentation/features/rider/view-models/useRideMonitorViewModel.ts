@@ -226,8 +226,16 @@ export function useRideMonitorViewModel(args: {
   // Use a ref to remember whether we already dispatched a redirect so a
   // re-render with the same terminal status doesn't fire navigation
   // twice (which can pop-and-push and cause a flash).
+  //
+  // CRITICAL: this MUST be a `useEffect`, not a `useMemo`. Calling
+  // `navigation.reset` / `navigation.replace` mid-render (which is what
+  // a `useMemo` body does) updates the navigation container's state
+  // synchronously, producing the React 19 warning "Cannot update a
+  // component (`BaseNavigationContainer`) while rendering a different
+  // component (`RideMonitorContent`)". Side effects belong in effects.
+  // Mirrors the pattern in `useDriverMonitorViewModel`.
   const redirectedRef = useRef<RideStatus | null>(null);
-  const _redirectIfTerminal = useMemo(() => {
+  useEffect(() => {
     if (!status) return;
     if (redirectedRef.current === status) return;
     if (status === 'cancelled') {
@@ -249,7 +257,6 @@ export function useRideMonitorViewModel(args: {
     // on RideMonitor and sees the retry surface (PaymentFailedView).
     // The retry mutation itself is Phase 6.
   }, [status, navigation, rideId]);
-  void _redirectIfTerminal;
 
   return {
     ride,

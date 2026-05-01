@@ -280,6 +280,58 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
       return null;
     }
 
+    // Known schema gap (deferred to Phase 6 / Phase 9 polish): the
+    // deployed Cloud Functions (`completeTrip`, `cancelTrip`,
+    // `tipDriver` via `processPaymentForTrip` →
+    // `validateTripDataForPayment`) read two passenger fields that this
+    // snapshot doesn't yet carry in the right shape:
+    //
+    //   - `passenger.stripeCustomerId`         — server-side validator
+    //     requires it; `PassengerSnapshot` doesn't include it (yet).
+    //   - `passenger.defaultPaymentMethod.{id,type}` — the function
+    //     reads it as an OBJECT (cash check + Stripe `paymentMethodId`),
+    //     but this snapshot writes it as a bare id string.
+    //
+    // Without these, server-side payment processing fails with
+    // `HttpsError("internal", "Missing required payment data: …")`,
+    // which the client maps to NetworkError → "Connection trouble" copy.
+    // See the legacy `yeride/src/context/UserContext.js` `getPassenger`
+    // for the legacy wire shape we need to match.
+    //
+    // Until that domain change lands, log loudly at trip creation when
+    // the fields are unresolvable so the gap is visible in logs (and in
+    // dev consoles) BEFORE the rider hits the payment surface.
+    if (user.role === 'rider') {
+      if (user.stripeCustomerId === null) {
+        logger.warn(
+          'confirm: rider has no stripeCustomerId — server-side payment ' +
+            'processing will fail (tipDriver, completeTrip, cancelTrip). ' +
+            'Domain fix pending: PassengerSnapshot needs stripeCustomerId.',
+          { userId: String(user.id) },
+        );
+      }
+      if (user.defaultPaymentMethodId === null) {
+        logger.warn(
+          'confirm: rider has no default payment method — server-side ' +
+            'payment processing will fail. Rider should add a card before ' +
+            'requesting a trip.',
+          { userId: String(user.id) },
+        );
+      } else {
+        // Even with an id we know the wire format is wrong: the function
+        // reads `defaultPaymentMethod.type` and `.id`, not a bare string.
+        // Keep a single warn at trip-creation rather than once per
+        // server call so the gap is visible without spamming.
+        logger.warn(
+          'confirm: defaultPaymentMethod is being written as a bare id ' +
+            'string but the deployed Cloud Function expects an object ' +
+            '{id, type, ...}. Domain fix pending: PassengerSnapshot + ' +
+            'RideDoc passenger schema.',
+          { userId: String(user.id) },
+        );
+      }
+    }
+
     const passengerR = PassengerSnapshot.create({
       id: user.id,
       name: user.name,
@@ -291,6 +343,11 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
       // the trip snapshot so the server-side `completeTrip` Cloud
       // Function knows which card to charge. `String(...)` strips the
       // brand for the legacy wire-format storage.
+      //
+      // KNOWN GAP: the deployed Cloud Function actually reads this as
+      // an object with `.id` and `.type` (cash detection + Stripe call).
+      // See the warn block above. Domain fix tracked for the next
+      // Phase 6 polish turn.
       defaultPaymentMethod:
         user.role === 'rider' && user.defaultPaymentMethodId !== null
           ? String(user.defaultPaymentMethodId)

@@ -24,7 +24,12 @@ import type {
   ValidationError,
 } from '@domain/errors';
 import { useUseCases } from '@presentation/di';
-import { useUseCaseSubscription } from '@presentation/hooks';
+// Direct file import (not the hooks barrel) to avoid a require cycle:
+// `@presentation/hooks/index.ts` re-exports `useActiveRideForGeofence`,
+// which imports back from this file. Bypassing the barrel keeps the
+// dependency graph acyclic. (Mirror of the same pattern in
+// `useActiveRideForGeofence.ts`.)
+import { useUseCaseSubscription } from '@presentation/hooks/useFirestoreSubscription';
 
 import { queryKeys } from './keys';
 

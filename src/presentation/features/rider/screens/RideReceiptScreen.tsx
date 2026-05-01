@@ -194,7 +194,17 @@ function RideReceiptContent({
 
       <View className="border-t border-border px-4 py-3">
         <Pressable
-          onPress={() => navigation.popToTop()}
+          onPress={() =>
+            // Reset (rather than `popToTop`) so the rider always lands
+            // back on RiderTabs regardless of how they reached the
+            // receipt. `popToTop` fails with "POP_TO_TOP not handled by
+            // any navigator" if the stack only contains RideReceipt —
+            // which can happen via a misconfigured upstream `replace`.
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'RiderTabs' }],
+            })
+          }
           accessibilityRole="button"
           className="items-center rounded-xl bg-primary px-4 py-3"
           testID="receipt-done"

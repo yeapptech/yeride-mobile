@@ -128,11 +128,29 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   // `useFocusEffect` so the redirect fires every time RiderHome gains
   // focus — including after the user backs out of RideMonitor without
   // completing the ride.
+  //
+  // CRITICAL: this hook runs from inside `RiderTabs` (a tab screen), so
+  // calling `navigation.replace('RideMonitor', ...)` bubbles up to the
+  // parent native-stack and REPLACES the `RiderTabs` entry itself —
+  // leaving the rider stack as `[RideMonitor]` with nothing underneath.
+  // Once the ride completes and `RideMonitor` calls
+  // `replace('RideReceipt', ...)`, the stack becomes `[RideReceipt]`,
+  // and the Done button's `popToTop()` fails with
+  // "POP_TO_TOP not handled by any navigator". Use `reset` so the back
+  // stack is `[RiderTabs, RideMonitor]` — that gives RideReceipt
+  // somewhere to pop to.
   useFocusEffect(
     useCallback(() => {
       if (inProgressRide) {
-        navigation.replace('RideMonitor', {
-          rideId: String(inProgressRide.id),
+        navigation.reset({
+          index: 1,
+          routes: [
+            { name: 'RiderTabs' },
+            {
+              name: 'RideMonitor',
+              params: { rideId: String(inProgressRide.id) },
+            },
+          ],
         });
       }
     }, [inProgressRide, navigation]),

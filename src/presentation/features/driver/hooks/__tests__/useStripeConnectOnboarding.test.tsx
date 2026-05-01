@@ -174,6 +174,12 @@ describe('useStripeConnectOnboarding', () => {
       'https://connect.stripe.com/setup/abc',
       'yeridenext-dev://stripe-return',
     );
+    // Stripe gets HTTPS URLs (custom schemes rejected by the API).
+    expect(setup.stripeServer.spies.createAccountLinkCalls[0]).toEqual({
+      accountId: aid,
+      refreshUrl: 'https://yeride.com/stripe-return',
+      returnUrl: 'https://yeride.com/stripe-return',
+    });
     expect(mockedToast.show).toHaveBeenCalledWith({
       type: 'success',
       text1: "You're set up to receive payouts.",
@@ -217,15 +223,21 @@ describe('useStripeConnectOnboarding', () => {
     expect(mockedToast.show).not.toHaveBeenCalled();
   });
 
-  it('dismiss is silent (no refresh, no Toast)', async () => {
+  it('dismiss triggers RefreshConnectAccountStatus (no HTTPS→deep-link bridge)', async () => {
+    // Without a server-side bridge from the HTTPS return URL to the
+    // app's deep-link scheme, `WebBrowser.openAuthSessionAsync` cannot
+    // auto-close — drivers manually dismiss after Stripe completes.
+    // Dismiss is therefore the only signal we get and must refresh.
     const setup = await setupDriver({
       stripeAccountId: unwrap(StripeAccountId.create(SEEDED_AID)),
+      chargesEnabled: false,
+      payoutsEnabled: false,
     });
     const aid = unwrap(StripeAccountId.create(SEEDED_AID));
     setup.stripeServer.seedConnectAccount({
       accountId: aid,
-      chargesEnabled: false,
-      payoutsEnabled: false,
+      chargesEnabled: true,
+      payoutsEnabled: true,
     });
     setup.stripeServer.seedAccountLink({
       accountId: aid,
@@ -240,11 +252,16 @@ describe('useStripeConnectOnboarding', () => {
 
     await act(async () => {
       const flags = await result.current.start({ previouslyEnabled: false });
-      expect(flags).toBeNull();
+      expect(flags).toEqual({ chargesEnabled: true, payoutsEnabled: true });
     });
 
-    expect(setup.stripeServer.spies.retrieveAccountCalls).toHaveLength(0);
-    expect(mockedToast.show).not.toHaveBeenCalled();
+    // Refresh ran post-dismiss and picked up the now-enabled status,
+    // so the status-flip Toast fires too.
+    expect(setup.stripeServer.spies.retrieveAccountCalls).toHaveLength(1);
+    expect(mockedToast.show).toHaveBeenCalledWith({
+      type: 'success',
+      text1: "You're set up to receive payouts.",
+    });
   });
 
   it('does NOT fire Toast when previouslyEnabled was already true', async () => {
