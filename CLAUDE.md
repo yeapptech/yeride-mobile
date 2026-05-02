@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 1, 2026 (Phase 9 turn 1 — iOS Apple Maps Fabric escape)
+**Last updated:** May 2, 2026 (Phase 9 turn 2 — push notifications closed)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,33 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 turn 2 shipped.** Push notifications operational end-to-end.
+Three sub-turns: 2a wired the domain + data plumbing for `pushToken`
+(branded value object, `PushNotificationService` interface, fake,
+DI seam, snapshot-builder VMs sourcing from `user.pushToken` instead
+of baking `null`); 2b installed `expo-notifications@~55.0.22`, built
+the real `ExpoNotificationsAdapter`, shipped `RegisterPushToken` use
+case + `usePushTokenRegistration` hook + `NotificationPermissionSheet`
+soft-ask UX; 2c shipped `HandleNotificationResponse` use case +
+`useNotificationResponseHandler` hook + tap routing via the shared
+`navigationRef`. The deployed `yeride-functions/lib/notifications.js`
+needs zero changes — it routes Expo-wrapped tokens via
+`Expo.isExpoPushToken()`, and the rewrite emits Expo-wrapped tokens
+exactly the way legacy yeride does (`getExpoPushTokenAsync({projectId})`
+against EAS project `yeride-next`, projectId
+`adb0a788-bf99-4a60-9424-f23266127854`). Real-device smoke on iPhone
+17 simulator against `yeapp-stage` proved registration writes the
+token to `users/{uid}.pushToken` within seconds of sign-in
+(`Container using ExpoNotificationsAdapter` log line confirms env-aware
+DI selection of the real adapter over the fake fallback). End-of-Turn-2
+delta: **+8 suites / +117 tests** (161/1274 → 169/1391). **`npm run
+prebuild` is required before the next iOS / Android build** so the
+`expo-notifications` plugin's native config (iOS `aps-environment`
+entitlement, Android FCM default-icon meta-data, `'remote-notification'`
+in `UIBackgroundModes`) lands. Manual two-device delivery + tap-routing
+smoke is still the user's local validation step (iOS sim doesn't
+deliver pushes — the registration half is what's proven so far).
 
 **Phase 9 turn 1 shipped.** First Phase 9 turn lands the iOS Apple
 Maps Fabric escape that closed Phase 8 surfaced. The rewrite's
@@ -338,6 +365,7 @@ pending (Turn 5).
 | Phase 8 turn 2 | `useDriverNavigationViewModel` + screen + DriverMonitor integration | ✅     |
 | Phase 8 turn 3 | First device-build smoke (iOS + Android) + Phase 8 close            | ✅     |
 | Phase 9 turn 1 | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE  | ✅     |
+| Phase 9 turn 2 | Push notifications — Expo registration + tap routing                | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -369,41 +397,44 @@ prebuild` required before the next iOS / Android build** so the Stripe
 SDK's plugin mods (entitlements plist + Google Pay AndroidManifest
 meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 
-| Phase     | Scope                                                                            | Status                         |
-| --------- | -------------------------------------------------------------------------------- | ------------------------------ |
-| 0         | Tooling + scaffolding                                                            | ✅ Complete                    |
-| 1         | Auth + user identity                                                             | ✅ End-to-end on real Firebase |
-| 2         | Domain + data layer (service area, routes, ride, location, FareCalculator)       | ✅ End of Phase 2: 422 tests   |
-| 3 turn 1  | Phase 3 foundations: domain additions, store scaffolding                         | ✅                             |
-| 3 turn 2  | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier    | ✅                             |
-| 3 turn 3  | RiderHome + role-based routing, end-to-end ride creation                         | ✅                             |
-| 3 turn 4a | RideMonitor scaffolding + early-status views (awaiting/dispatched)               | ✅                             |
-| 3 turn 4b | Late-status views (started/completed/payment_failed) + chat stub + geofence tick | ✅                             |
-| 3 turn 5  | RideReceipt + Phase 3 cleanup                                                    | ✅                             |
-| 4 turn 1  | Phase 4 foundations: DriverNavigator + tabs + driver-status store                | ✅                             |
-| 4 turn 2  | DriverHome — map + ListAvailableRides cards + GPS toggle                         | ✅                             |
-| 4 turn 3  | DriverDispatch — incoming-ride accept/decline                                    | ✅                             |
-| 4 turn 4a | DriverMonitor scaffold + en-route / at-pickup status views                       | ✅                             |
-| 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations          | ✅                             |
-| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                  | ✅                             |
-| 5 turn 1  | Vehicle domain + DTO + mappers + in-memory fakes                                 | ✅                             |
-| 5 turn 2  | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring            | ✅                             |
-| 5 turn 3  | VehicleList + VehicleRegistration screens                                        | ✅                             |
-| 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                         | ✅                             |
-| 6 turn 1  | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake        | ✅                             |
-| 6 turn 2  | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring      | ✅                             |
-| 6 turn 3  | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)     | ✅                             |
-| 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)        | ✅                             |
-| 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)   | ✅                             |
-| 7 turn 1  | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch            | ✅                             |
-| 7 turn 2  | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation         | ✅                             |
-| 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                             | ✅                             |
-| 8 turn 1  | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port              | ✅                             |
-| 8 turn 2  | `useDriverNavigationViewModel` + screen + DriverMonitor integration              | ✅                             |
-| 8 turn 3  | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close    | ✅                             |
-| 9 turn 1  | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE               | ✅                             |
-| 9 turn 2+ | Push notifications + Crashlytics + nav-screen polish + cleanup grab-bag          | Next                           |
-| 10        | Cutover from legacy yeride                                                       | Pending                        |
+| Phase     | Scope                                                                                      | Status                         |
+| --------- | ------------------------------------------------------------------------------------------ | ------------------------------ |
+| 0         | Tooling + scaffolding                                                                      | ✅ Complete                    |
+| 1         | Auth + user identity                                                                       | ✅ End-to-end on real Firebase |
+| 2         | Domain + data layer (service area, routes, ride, location, FareCalculator)                 | ✅ End of Phase 2: 422 tests   |
+| 3 turn 1  | Phase 3 foundations: domain additions, store scaffolding                                   | ✅                             |
+| 3 turn 2  | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier              | ✅                             |
+| 3 turn 3  | RiderHome + role-based routing, end-to-end ride creation                                   | ✅                             |
+| 3 turn 4a | RideMonitor scaffolding + early-status views (awaiting/dispatched)                         | ✅                             |
+| 3 turn 4b | Late-status views (started/completed/payment_failed) + chat stub + geofence tick           | ✅                             |
+| 3 turn 5  | RideReceipt + Phase 3 cleanup                                                              | ✅                             |
+| 4 turn 1  | Phase 4 foundations: DriverNavigator + tabs + driver-status store                          | ✅                             |
+| 4 turn 2  | DriverHome — map + ListAvailableRides cards + GPS toggle                                   | ✅                             |
+| 4 turn 3  | DriverDispatch — incoming-ride accept/decline                                              | ✅                             |
+| 4 turn 4a | DriverMonitor scaffold + en-route / at-pickup status views                                 | ✅                             |
+| 4 turn 4b | DriverMonitor late-status views + Start-ride / RequestPayment mutations                    | ✅                             |
+| 4 turn 5  | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                            | ✅                             |
+| 5 turn 1  | Vehicle domain + DTO + mappers + in-memory fakes                                           | ✅                             |
+| 5 turn 2  | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring                      | ✅                             |
+| 5 turn 3  | VehicleList + VehicleRegistration screens                                                  | ✅                             |
+| 5 turn 4  | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                                   | ✅                             |
+| 6 turn 1  | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake                  | ✅                             |
+| 6 turn 2  | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring                | ✅                             |
+| 6 turn 3  | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)               | ✅                             |
+| 6 turn 4  | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)                  | ✅                             |
+| 6 turn 5  | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)             | ✅                             |
+| 7 turn 1  | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch                      | ✅                             |
+| 7 turn 2  | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation                   | ✅                             |
+| 7 turn 3  | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                       | ✅                             |
+| 8 turn 1  | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port                        | ✅                             |
+| 8 turn 2  | `useDriverNavigationViewModel` + screen + DriverMonitor integration                        | ✅                             |
+| 8 turn 3  | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close              | ✅                             |
+| 9 turn 1  | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                         | ✅                             |
+| 9 turn 2a | `PushToken` VO + `pushToken` on User entity + `PushNotificationService` interface          | ✅                             |
+| 9 turn 2b | `expo-notifications` install + `ExpoNotificationsAdapter` + `RegisterPushToken` + soft-ask | ✅                             |
+| 9 turn 2c | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close      | ✅                             |
+| 9 turn 3+ | Crashlytics + nav-screen polish + cleanup grab-bag                                         | Next                           |
+| 10        | Cutover from legacy yeride                                                                 | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
 / 1171 tests passing** (+9 tests over Turn 2's 152/1162; suite count
@@ -979,6 +1010,7 @@ new app writes to it.
 | `docs/PHASE_6_KICKOFF.md` + `docs/PHASE_6_TURN_{1,…}.md`                          | Phase 6 turn-by-turn record — read newest first when picking up payments / Stripe / tipping work                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `docs/PHASE_7_KICKOFF.md` + `docs/PHASE_7_TURN_{1,…}.md`                          | Phase 7 turn-by-turn record — read newest first when picking up background-GPS / geofence work                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `docs/PHASE_8_KICKOFF.md` + `docs/PHASE_8_TURN_{1,…}.md`                          | Phase 8 turn-by-turn record — read newest first when picking up Google Navigation SDK work                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `docs/PHASE_9_KICKOFF.md` + `docs/PHASE_9_TURN_{1,2,…}.md`                        | Phase 9 turn-by-turn record — read newest first when picking up push-notifications / Crashlytics / polish work                                                                                                                                                                                                                                                                                                                                                                                      |
 | `app.config.ts`                                                                   | Env-aware Expo config; threads Firebase + Maps API keys via `extra`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `scripts/patch-podfile.js`                                                        | THREE Podfile fixes for `@react-native-firebase` 24.x under `useFrameworks: 'static'` (see Troubleshooting)                                                                                                                                                                                                                                                                                                                                                                                         |
 | `eslint.config.js`                                                                | Boundaries rule + per-file overrides (DI container, logger, testing fakes)                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1525,5 +1557,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_1.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_2.md`),
 then ask.

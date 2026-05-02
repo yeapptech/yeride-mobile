@@ -83,6 +83,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: NAME_BY_ENV[APP_ENV],
   slug: 'yeride-next',
+  // EAS owner / project linkage (Phase 9 turn 2 sub-turn 2a — May 2026).
+  // Distinct from legacy yeride's project (different bundle ids:
+  // tech.yeapp.yeridenext.* vs tech.yeapp.yeride). The `extra.eas.projectId`
+  // bag is what `Notifications.getExpoPushTokenAsync({projectId})` reads
+  // to mint Expo-wrapped push tokens (sub-turn 2b's adapter consumes
+  // this via `Constants.expoConfig.extra.eas.projectId`).
+  owner: 'yeapptech',
   scheme: SCHEME_BY_ENV[APP_ENV],
   version: '0.1.0',
   orientation: 'portrait',
@@ -106,7 +113,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // + `NSLocationAlwaysAndWhenInUseUsageDescription`) are emitted by the
       // existing `expo-location` plugin block below, so we don't restate them
       // here.
-      UIBackgroundModes: ['location', 'fetch'],
+      // Phase 9 turn 2 sub-turn 2b adds `remote-notification` so APNs
+      // payloads can wake the app in the background — required for
+      // notification taps to fire `addNotificationResponseReceivedListener`
+      // when the user opens a push from the lock screen / notification
+      // center while the app is suspended (cold-start taps still flow
+      // through `getLastNotificationResponseAsync()` instead).
+      UIBackgroundModes: ['location', 'fetch', 'remote-notification'],
       BGTaskSchedulerPermittedIdentifiers: [
         'com.transistorsoft.fetch',
         'com.transistorsoft.customtask',
@@ -154,6 +167,30 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         cameraPermission:
           'Allow YeRide Next to use your camera so you can take photos of your vehicle.',
       },
+    ],
+    [
+      // Phase 9 turn 2 sub-turn 2b: `expo-notifications` plugin block.
+      // The plugin patches AndroidManifest.xml with the FCM default-icon /
+      // default-color meta-data and writes the iOS aps-environment
+      // entitlement. We rely on Expo's push API at runtime
+      // (`getExpoPushTokenAsync({projectId})`) so the deployed
+      // `yeride-functions/lib/notifications.js` `sendNotification` can
+      // route via Expo's API server-side — no Cloud Function changes
+      // required for the rewrite to plug in alongside legacy yeride.
+      //
+      // Icons / sounds default to the platform's app-icon notification
+      // render until the rewrite ships branded notification assets in a
+      // Phase 9 polish turn.
+      //
+      // `mode` controls iOS's `aps-environment` entitlement:
+      //   - 'development' for debug / devClient / EAS internal builds
+      //   - 'production'  for App Store / TestFlight builds
+      // Phase 9 turn 2's smoke targets `yeapp-stage` from a debug build,
+      // so 'development' is correct for dev + stage environments. The
+      // production env flips to 'production' so EAS production builds
+      // get the right APNs entitlement automatically.
+      'expo-notifications',
+      { mode: APP_ENV === 'production' ? 'production' : 'development' },
     ],
     [
       // Phase 7: background-aware location + geofence pipeline. The SDK's
@@ -306,6 +343,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // bundled string blob even when public). Without this set, the Wallet
     // surface renders an `'unconfigured'` empty state with a loud error.
     stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? null,
+    // EAS project linkage (Phase 9 turn 2 sub-turn 2a). Required by
+    // `Notifications.getExpoPushTokenAsync({projectId})` to mint
+    // Expo-wrapped push tokens. Distinct project from legacy yeride
+    // (different bundle ids → different EAS project from Expo's POV).
+    // Hardcoded — not env-driven — because the project is a single
+    // identity across dev/stage/production builds; the per-env split
+    // happens at the Firebase / APNs configuration layer instead.
+    eas: {
+      projectId: 'adb0a788-bf99-4a60-9424-f23266127854',
+    },
   },
   experiments: {
     typedRoutes: false,

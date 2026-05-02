@@ -4,6 +4,7 @@ import { Email } from '../Email';
 import { PaymentMethodId } from '../PaymentMethodId';
 import { PersonName } from '../PersonName';
 import { PhoneNumber } from '../PhoneNumber';
+import { PushToken } from '../PushToken';
 import { SavedPlace, SavedPlaceId } from '../SavedPlace';
 import { StripeAccountId } from '../StripeAccountId';
 import { StripeCustomerId } from '../StripeCustomerId';
@@ -18,6 +19,7 @@ import {
   setDefaultPaymentMethodId,
   setEmail,
   setEmailVerified,
+  setPushToken,
   setStripeAccountFlags,
   setStripeAccountId,
   setStripeCustomerId,
@@ -97,6 +99,7 @@ describe('User factories', () => {
       expect(r.emailVerified).toBe(false);
       expect(r.savedPlaces).toEqual([]);
       expect(r.avatarUrl).toBeNull();
+      expect(r.pushToken).toBeNull();
     });
 
     it('preserves provided Stripe customer id', () => {
@@ -121,6 +124,7 @@ describe('User factories', () => {
       expect(d.stripePayoutsEnabled).toBe(false);
       expect(d.activeVehicleId).toBeNull();
       expect(d.vehicleIds).toEqual([]);
+      expect(d.pushToken).toBeNull();
     });
   });
 
@@ -294,6 +298,66 @@ describe('Stripe state helpers', () => {
       new Date('2099-01-01Z'),
     );
     expect(same).toBe(enabled);
+  });
+});
+
+describe('Push-token helpers', () => {
+  function token(
+    value = 'ExponentPushToken[abc]',
+  ): ReturnType<typeof PushToken.create> extends infer R
+    ? R extends { ok: true; value: infer V }
+      ? V
+      : never
+    : never {
+    const r = PushToken.create(value);
+    if (!r.ok) throw r.error;
+    return r.value;
+  }
+
+  it('makeRider accepts an explicit pushToken', () => {
+    const r = makeRider({ ...baseArgs(), pushToken: token() });
+    expect(String(r.pushToken)).toBe('ExponentPushToken[abc]');
+  });
+
+  it('makeDriver accepts an explicit pushToken', () => {
+    const d = makeDriver({ ...baseArgs(), pushToken: token('fcmRawTokenABC') });
+    expect(String(d.pushToken)).toBe('fcmRawTokenABC');
+  });
+
+  it('setPushToken stores the token and bumps updatedAt', () => {
+    const u = makeRider(baseArgs());
+    const next = setPushToken(u, token(), LATER);
+    expect(String(next.pushToken)).toBe('ExponentPushToken[abc]');
+    expect(next.updatedAt).toBe(LATER);
+    expect(u.pushToken).toBeNull(); // original unchanged
+  });
+
+  it('setPushToken can clear with explicit null', () => {
+    const u = setPushToken(makeRider(baseArgs()), token(), FIXED_NOW);
+    const cleared = setPushToken(u, null, LATER);
+    expect(cleared.pushToken).toBeNull();
+    expect(cleared.updatedAt).toBe(LATER);
+  });
+
+  it('setPushToken is a no-op when the token is unchanged (same identity)', () => {
+    const t = token();
+    const u = setPushToken(makeRider(baseArgs()), t, FIXED_NOW);
+    const same = setPushToken(u, t, new Date('2099-01-01Z'));
+    expect(same).toBe(u);
+  });
+
+  it('setPushToken is a no-op when both old and new are null', () => {
+    const u = makeRider(baseArgs());
+    const same = setPushToken(u, null, LATER);
+    expect(same).toBe(u);
+  });
+
+  it('setPushToken works on Driver too (covers UserBase, not just Rider)', () => {
+    const d = makeDriver(baseArgs());
+    const next = setPushToken(d, token('fcmDriverTok'), LATER);
+    if (!isDriver(next)) throw new Error('expected driver narrowing');
+    expect(String(next.pushToken)).toBe('fcmDriverTok');
+    expect(next.activeVehicleId).toBeNull(); // driver-specific field preserved
   });
 });
 

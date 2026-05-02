@@ -431,4 +431,145 @@ jest.mock('@googlemaps/react-native-navigation-sdk', () => {
   };
 });
 
+// expo-notifications (Phase 9 turn 2 sub-turn 2b): the SDK's native
+// methods (`getExpoPushTokenAsync`, `requestPermissionsAsync`,
+// `addNotificationResponseReceivedListener`, etc.) are TurboModule-backed
+// and crash outside a real RN runtime. We provide a JS-only stub with:
+//
+//   1. The constants the adapter reads at module-load:
+//      `AndroidImportance.MAX`, `PermissionStatus.GRANTED`, etc.
+//
+//   2. Async methods (`getPermissionsAsync`, `requestPermissionsAsync`,
+//      `getExpoPushTokenAsync`, `getLastNotificationResponseAsync`,
+//      `setNotificationChannelAsync`) as `jest.fn()`s with happy-path
+//      defaults. Tests prime per-call behaviour with
+//      `.mockResolvedValueOnce(...)` / `.mockRejectedValueOnce(...)`.
+//
+//   3. Listener registrars (`addPushTokenListener`,
+//      `addNotificationResponseReceivedListener`) that store the callback
+//      in a per-bucket registry and return a `{ remove }` Subscription.
+//      `__emitTokenChange` / `__emitResponse` test helpers fan events to
+//      every registered callback.
+//
+// Per-test usage (loud-namespaced helpers):
+//
+//   import * as Notifications from 'expo-notifications';
+//   const sdk = Notifications as unknown as typeof mockNotifications;
+//   sdk.__emitResponse({ notification: { request: { content: { ... } } } });
+//   sdk.__reset();
+
+interface MockNotificationsListeners {
+  pushToken: Array<(event: { data: string; type: string }) => void>;
+  notificationResponse: Array<(event: unknown) => void>;
+  notification: Array<(event: unknown) => void>;
+}
+
+const mockNotificationsListeners: MockNotificationsListeners = {
+  pushToken: [],
+  notificationResponse: [],
+  notification: [],
+};
+
+const mockMakeNotificationsSubscription = (
+  bucket: keyof MockNotificationsListeners,
+  cb: unknown,
+): { remove: () => void } => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (mockNotificationsListeners[bucket] as Array<any>).push(cb as never);
+  return {
+    remove: () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const arr = mockNotificationsListeners[bucket] as Array<any>;
+      const idx = arr.indexOf(cb);
+      if (idx >= 0) arr.splice(idx, 1);
+    },
+  };
+};
+
+const mockNotifications = {
+  // Permission + Android-channel constants the adapter reads at module-load.
+  AndroidImportance: {
+    UNKNOWN: 0,
+    NONE: 1,
+    MIN: 2,
+    LOW: 3,
+    DEFAULT: 4,
+    HIGH: 5,
+    MAX: 5,
+  },
+  PermissionStatus: {
+    GRANTED: 'granted',
+    DENIED: 'denied',
+    UNDETERMINED: 'undetermined',
+  },
+  AndroidNotificationVisibility: {
+    UNKNOWN: 0,
+    PUBLIC: 1,
+    PRIVATE: 0,
+    SECRET: -1,
+  },
+
+  // Async methods. Defaults are happy-path; tests override per-call.
+  getPermissionsAsync: jest.fn().mockResolvedValue({
+    status: 'undetermined',
+    granted: false,
+    canAskAgain: true,
+    expires: 'never',
+  }),
+  requestPermissionsAsync: jest.fn().mockResolvedValue({
+    status: 'granted',
+    granted: true,
+    canAskAgain: false,
+    expires: 'never',
+  }),
+  getExpoPushTokenAsync: jest.fn().mockResolvedValue({
+    data: 'ExponentPushToken[mockTok123]',
+    type: 'expo',
+  }),
+  getDevicePushTokenAsync: jest.fn().mockResolvedValue({
+    data: 'mockDeviceTok',
+    type: 'fcm',
+  }),
+  setNotificationChannelAsync: jest.fn().mockResolvedValue({
+    id: 'default',
+    name: 'default',
+  }),
+  getLastNotificationResponseAsync: jest.fn().mockResolvedValue(null),
+  setNotificationHandler: jest.fn(),
+
+  // Listener registrars. Return Subscription with .remove().
+  addPushTokenListener: jest.fn(
+    (cb: (event: { data: string; type: string }) => void) =>
+      mockMakeNotificationsSubscription('pushToken', cb),
+  ),
+  addNotificationResponseReceivedListener: jest.fn(
+    (cb: (event: unknown) => void) =>
+      mockMakeNotificationsSubscription('notificationResponse', cb),
+  ),
+  addNotificationReceivedListener: jest.fn((cb: (event: unknown) => void) =>
+    mockMakeNotificationsSubscription('notification', cb),
+  ),
+  removeNotificationSubscription: jest.fn(),
+
+  // Test-only helpers — namespaced under `__` so they're loud at the call site.
+  __listeners: mockNotificationsListeners,
+  __emitTokenChange: (event: { data: string; type: string }): void => {
+    for (const cb of [...mockNotificationsListeners.pushToken]) cb(event);
+  },
+  __emitResponse: (event: unknown): void => {
+    for (const cb of [...mockNotificationsListeners.notificationResponse])
+      cb(event);
+  },
+  __emitNotification: (event: unknown): void => {
+    for (const cb of [...mockNotificationsListeners.notification]) cb(event);
+  },
+  __reset: (): void => {
+    mockNotificationsListeners.pushToken.length = 0;
+    mockNotificationsListeners.notificationResponse.length = 0;
+    mockNotificationsListeners.notification.length = 0;
+  },
+};
+
+jest.mock('expo-notifications', () => mockNotifications);
+
 export {};

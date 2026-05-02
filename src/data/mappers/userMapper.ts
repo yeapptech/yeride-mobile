@@ -4,6 +4,7 @@ import { Email } from '@domain/entities/Email';
 import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { PushToken } from '@domain/entities/PushToken';
 import { SavedPlace, SavedPlaceId } from '@domain/entities/SavedPlace';
 import { StripeAccountId } from '@domain/entities/StripeAccountId';
 import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
@@ -74,6 +75,11 @@ export function toDoc(user: User): UserDoc {
     })),
     createdDateTime: user.createdAt.toISOString(),
     updatedDateTime: user.updatedAt.toISOString(),
+    // Phase 9 turn 2: branded `PushToken` strips cleanly via `String(...)`;
+    // `null` stays null so the field doesn't get persisted as the string
+    // "null" (matches the legacy `users/{uid}.pushToken` shape — see
+    // `yeride/src/api/firebase/AuthUser.js:savePushToken`).
+    pushToken: user.pushToken !== null ? String(user.pushToken) : null,
   };
 
   if (user.role === 'rider') {
@@ -174,6 +180,7 @@ export function toDomain(
     savedPlaces: placesR.value,
     createdAt: createdAt.value,
     updatedAt: updatedAt.value,
+    pushToken: parsePushToken(doc.pushToken, uid),
   };
 
   if (doc.role === 'rider') {
@@ -265,6 +272,29 @@ function parsePaymentMethodId(
         code: r.error.code,
       },
     );
+    return null;
+  }
+  return r.value;
+}
+
+/**
+ * Validate a raw push-token string into a `PushToken`. Falls back to `null`
+ * (with a `LOG.warn`) on shape failure rather than crashing the whole user
+ * hydration — a malformed token on a single user doc shouldn't take down
+ * the app's auth flow. The `RegisterPushToken` use case (Phase 9 turn 2)
+ * will overwrite the bad value on next launch.
+ */
+function parsePushToken(
+  raw: string | null | undefined,
+  uid: UserId,
+): PushToken | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const r = PushToken.create(raw);
+  if (!r.ok) {
+    logger.warn('toDomain: malformed pushToken; treating as null', {
+      uid: String(uid),
+      code: r.error.code,
+    });
     return null;
   }
   return r.value;

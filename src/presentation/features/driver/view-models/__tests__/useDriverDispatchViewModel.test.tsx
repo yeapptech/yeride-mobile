@@ -12,6 +12,7 @@ import { Money } from '@domain/entities/Money';
 import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { PushToken } from '@domain/entities/PushToken';
 import { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
@@ -331,6 +332,64 @@ describe('useDriverDispatchViewModel', () => {
       expect(persisted.value.status).toBe('dispatched');
       expect(persisted.value.driver?.id).toBe(setup.uid);
     }
+  });
+
+  it("bakes the driver's pushToken into the dispatch snapshot when the user has one", async () => {
+    const setup = await setupSeededState({
+      driverOverrides: {
+        pushToken: unwrap(PushToken.create('ExponentPushToken[driverTok]')),
+      },
+    });
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.onAccept();
+    });
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalled();
+    });
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.driver?.pushToken).toBe(
+        'ExponentPushToken[driverTok]',
+      );
+    }
+  });
+
+  it("writes pushToken=null on the dispatch snapshot when the driver hasn't registered yet", async () => {
+    // Default setupSeededState has no pushToken on the driver — equivalent
+    // to "user has not granted notification permission yet". Snapshot
+    // should carry null, not crash.
+    const setup = await setupSeededState();
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.onAccept();
+    });
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalled();
+    });
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    if (persisted.ok) expect(persisted.value.driver?.pushToken).toBeNull();
   });
 
   it('onDecline pops back without calling DispatchRide', async () => {

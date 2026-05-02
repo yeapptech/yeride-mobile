@@ -27,9 +27,15 @@ import { z } from 'zod';
  *     reads either shape, prefers the flat fields, and writes both for
  *     legacy compatibility under `setDoc { merge: true }`.
  *
+ * Push token (Phase 9 turn 2):
+ *   - `pushToken` is a top-level string (matches legacy `users/{uid}.pushToken`
+ *     written by `yeride/src/api/firebase/AuthUser.js:savePushToken`).
+ *     Two on-the-wire formats: Expo wrapped (`ExponentPushToken[...]`) and
+ *     raw FCM/APNs. The deployed `yeride-functions/lib/notifications.js`
+ *     `sendNotification` is shape-agnostic via `Expo.isExpoPushToken()`.
+ *
  * Fields not yet populated in the rewrite:
  *   - vehicleIds / activeVehicleId — Phase 5.
- *   - pushToken — Phase 9.
  */
 
 const SavedPlaceDocSchema = z.object({
@@ -54,6 +60,11 @@ const BaseUserDocSchema = z.object({
   savedPlaces: z.array(SavedPlaceDocSchema).default([]),
   createdDateTime: z.string().min(1),
   updatedDateTime: z.string().nullish(),
+  // Phase 9 turn 2: device push-notification token. Stored permissively
+  // (any non-empty string passes zod parsing); the mapper validates the
+  // shape via `PushToken.create` and falls back to `null` on shape failure
+  // rather than crashing user hydration on a single malformed doc.
+  pushToken: z.string().nullish(),
 });
 
 const RiderDocSchema = BaseUserDocSchema.extend({

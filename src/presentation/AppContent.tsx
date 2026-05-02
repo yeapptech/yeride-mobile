@@ -1,11 +1,20 @@
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 
 import { isDriver, isRider, type User } from '@domain/entities/User';
+import { NotificationPermissionSheet } from '@presentation/components/notifications/NotificationPermissionSheet';
 import { useUseCases } from '@presentation/di';
-import { useActiveRideForGeofence, useGpsLifecycle } from '@presentation/hooks';
+import {
+  useActiveRideForGeofence,
+  useGpsLifecycle,
+  useNotificationResponseHandler,
+  usePushTokenRegistration,
+} from '@presentation/hooks';
 import { useCurrentUserQuery } from '@presentation/queries';
 import {
   useGpsStore,
+  useNotificationPermissionStatus,
+  useNotificationPermissionUiStore,
+  useNotificationSoftDismissedAt,
   useSessionStatus,
   useSessionStore,
 } from '@presentation/stores';
@@ -131,10 +140,74 @@ export function AppContent({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (sessionStatus === 'unauthenticated') {
       useGpsStore.getState().reset();
+      useNotificationPermissionUiStore.getState().reset();
     }
   }, [sessionStatus]);
 
-  return <>{children}</>;
+  /* ──────────── Phase 9 turn 2: push-notification registration ──────────── */
+
+  // Mount the push-token registration hook once, here at AppContent.
+  // The hook owns the SDK lifecycle (Android channel setup,
+  // permission-status mirror into Zustand, token registration on grant,
+  // token-refresh subscription). View-models read permission state via
+  // `useNotificationPermissionStatus()` selector.
+  //
+  // Pass the user only when registration is complete — same gate as
+  // GPS lifecycle. There's no point asking for notification permission
+  // before the user even has a Stripe customer / vehicle on file
+  // (legacy parity).
+  const userForPush = enabled ? user : null;
+  const { promptForPermission } = usePushTokenRegistration(userForPush);
+
+  // Notification-tap routing (Phase 9 turn 2 sub-turn 2c). Mounted
+  // unconditionally — taps should always route, even before
+  // registration completes (a deep-link from a prior tap should still
+  // land the user on the right screen). The hook reads
+  // `pushService.subscribeToNotificationResponse` for warm-state taps
+  // and `pushService.getLastNotificationResponse()` for the cold-start
+  // path. Routes via the shared `navigationRef` from
+  // `@presentation/navigation/navigationRef`.
+  useNotificationResponseHandler();
+
+  // Soft-ask sheet: visible when the user is fully registered, the OS
+  // permission is undetermined, and the user hasn't tapped "Not now"
+  // this session. Once the user dismisses, the sheet stays hidden
+  // until a sign-out / sign-in cycle resets the UI store.
+  const permissionStatus = useNotificationPermissionStatus();
+  const softDismissedAt = useNotificationSoftDismissedAt();
+  const setSoftDismissed = useNotificationPermissionUiStore(
+    (s) => s.setSoftDismissed,
+  );
+  const sheetVisible =
+    enabled && permissionStatus === 'undetermined' && softDismissedAt === null;
+  const promptingRef = useRef(false);
+
+  const handleEnable = useCallback((): void => {
+    if (promptingRef.current) return;
+    promptingRef.current = true;
+    void (async () => {
+      try {
+        await promptForPermission();
+      } finally {
+        promptingRef.current = false;
+      }
+    })();
+  }, [promptForPermission]);
+
+  const handleDismiss = useCallback((): void => {
+    setSoftDismissed(Date.now());
+  }, [setSoftDismissed]);
+
+  return (
+    <>
+      {children}
+      <NotificationPermissionSheet
+        visible={sheetVisible}
+        onEnable={handleEnable}
+        onDismiss={handleDismiss}
+      />
+    </>
+  );
 }
 
 /**

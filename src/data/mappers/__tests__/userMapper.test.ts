@@ -2,6 +2,7 @@ import { Email } from '@domain/entities/Email';
 import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { PushToken } from '@domain/entities/PushToken';
 import { StripeAccountId } from '@domain/entities/StripeAccountId';
 import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import {
@@ -479,5 +480,120 @@ describe('rider defaultPaymentMethodId round-trip (Phase 6 turn 2)', () => {
     const doc = toDoc(rider);
     if (doc.role !== 'rider') throw new Error('expected rider doc');
     expect(doc.defaultPaymentMethodId).toBeNull();
+  });
+});
+
+describe('pushToken round-trip (Phase 9 turn 2)', () => {
+  it('reads a populated Expo wrapped pushToken into a branded PushToken', () => {
+    const parsed = parseUserDoc({
+      email: 'ada@yeapp.tech',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      pushToken: 'ExponentPushToken[abc123XYZ]',
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(String(r.value.pushToken)).toBe('ExponentPushToken[abc123XYZ]');
+    }
+  });
+
+  it('reads a populated raw FCM pushToken into a branded PushToken', () => {
+    const parsed = parseUserDoc({
+      email: 'driver@yeapp.tech',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      role: 'driver',
+      createdDateTime: FIXED_NOW.toISOString(),
+      pushToken: 'fGz7yK_x6kE:APA91bH-_/+',
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    if (r.ok) expect(String(r.value.pushToken)).toBe('fGz7yK_x6kE:APA91bH-_/+');
+  });
+
+  it('hydrates with null pushToken when the field is missing', () => {
+    const parsed = parseUserDoc({
+      email: 'ada@yeapp.tech',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    if (r.ok) expect(r.value.pushToken).toBeNull();
+  });
+
+  it('falls back to null on a malformed pushToken rather than failing the whole hydration', () => {
+    const parsed = parseUserDoc({
+      email: 'ada@yeapp.tech',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      // Contains a space — fails both Expo regex AND raw-token regex.
+      pushToken: 'broken token with spaces',
+    });
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.pushToken).toBeNull();
+  });
+
+  it('writes a populated pushToken to the doc as a top-level string', () => {
+    const emailR = Email.create('ada@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Ada', last: 'Lovelace' });
+    const tokenR = PushToken.create('ExponentPushToken[abc]');
+    if (!emailR.ok || !nameR.ok || !tokenR.ok) throw new Error('setup');
+    const rider = makeRider({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+      pushToken: tokenR.value,
+    });
+    const doc = toDoc(rider);
+    expect(doc.pushToken).toBe('ExponentPushToken[abc]');
+  });
+
+  it('writes null when the user has no pushToken', () => {
+    const emailR = Email.create('ada@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Ada', last: 'Lovelace' });
+    if (!emailR.ok || !nameR.ok) throw new Error('setup');
+    const rider = makeRider({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+    const doc = toDoc(rider);
+    expect(doc.pushToken).toBeNull();
+  });
+
+  it('round-trips: domain → doc → domain preserves the pushToken value', () => {
+    const emailR = Email.create('ada@yeapp.tech');
+    const nameR = PersonName.create({ first: 'Ada', last: 'Lovelace' });
+    const tokenR = PushToken.create('ExponentPushToken[xyz]');
+    if (!emailR.ok || !nameR.ok || !tokenR.ok) throw new Error('setup');
+    const original = makeRider({
+      id: uid(),
+      email: emailR.value,
+      name: nameR.value,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+      pushToken: tokenR.value,
+    });
+    const doc = toDoc(original);
+    const parsed = parseUserDoc(doc);
+    if (!parsed.ok) throw parsed.error;
+    const r = toDomain(uid(), parsed.value);
+    if (!r.ok) throw r.error;
+    expect(String(r.value.pushToken)).toBe('ExponentPushToken[xyz]');
   });
 });

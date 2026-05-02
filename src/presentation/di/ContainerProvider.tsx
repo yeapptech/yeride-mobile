@@ -95,3 +95,31 @@ export function useNavigationSdk(): Container['navigationSdk'] {
   }
   return ctx.navigationSdk;
 }
+
+/**
+ * Hook returning the push-notifications SDK seam (Phase 9 turn 2 sub-turn 2b).
+ * Sibling of `useUseCases()` and `useBackgroundGeolocation()` because
+ * `usePushTokenRegistration` drives the SDK lifecycle directly
+ * (permission flow, token-refresh subscription, Android-channel setup
+ * at boot) and its responsibilities don't fit the stateless-use-case
+ * shape used by every other domain.
+ *
+ * Throws if used outside of a ContainerProvider — same contract as
+ * `useUseCases()`.
+ *
+ * Mounting rule:
+ *   - This hook is consumed exclusively by `usePushTokenRegistration`,
+ *     which mounts once at AppContent. Screens and view-models never
+ *     reach into the SDK directly; they read permission state via
+ *     `useNotificationPermissionStatus()` and trigger the OS prompt
+ *     via the soft-ask sheet's CTA.
+ */
+export function usePushNotificationService(): Container['pushNotifications'] {
+  const ctx = useContext(ContainerContext);
+  if (ctx === null) {
+    throw new Error(
+      'usePushNotificationService() called outside <ContainerProvider/>. Wrap your tree in <ContainerProvider/>.',
+    );
+  }
+  return ctx.pushNotifications;
+}

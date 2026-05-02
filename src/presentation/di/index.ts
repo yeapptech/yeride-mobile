@@ -2,6 +2,7 @@ export {
   ContainerProvider,
   useBackgroundGeolocation,
   useNavigationSdk,
+  usePushNotificationService,
   useUseCases,
 } from './ContainerProvider';
 export {

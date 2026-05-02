@@ -337,7 +337,17 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
       name: user.name,
       email: user.email,
       phoneNumber: user.phone,
-      pushToken: null,
+      // Phase 9 turn 2 sub-turn 2a: bake the rider's current push token
+      // into the trip snapshot so the deployed
+      // `yeride-functions/handlers/trip-event-created.js` can address
+      // notifications via `tripData.passenger.pushToken` (driver
+      // dispatched / arrived / payment events). `null` until the
+      // `RegisterPushToken` use case (sub-turn 2b) writes the token to
+      // the user doc; at that point new trip creates start picking it up
+      // here. Existing in-flight trips don't see the token retroactively
+      // — the legacy app has the same limitation (snapshot is captured
+      // at creation, not resolved live).
+      pushToken: user.pushToken !== null ? String(user.pushToken) : null,
       avatarUrl: user.avatarUrl,
       // Phase 6 turn 2: bake the rider's default payment method id into
       // the trip snapshot so the server-side `completeTrip` Cloud

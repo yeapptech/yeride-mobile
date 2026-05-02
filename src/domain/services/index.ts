@@ -13,3 +13,9 @@ export {
 export type { VinDecodeResult, VinDecoderService } from './VinDecoderService';
 export type { StripeServerService } from './StripeServerService';
 export type { PaymentCallableService } from './PaymentCallableService';
+export type {
+  NavigationIntent,
+  NotificationData,
+  NotificationResponse,
+  PushNotificationService,
+} from './PushNotificationService';

@@ -205,7 +205,13 @@ export function useDriverDispatchViewModel(
       // payload (not the branded ID type). Stringify the brand here so
       // the snapshot's wire shape stays unchanged from Phase 4.
       stripeAccountId: String(user.stripeAccountId),
-      pushToken: null,
+      // Phase 9 turn 2 sub-turn 2a: bake the driver's current push token
+      // into the dispatch snapshot so the deployed
+      // `yeride-functions/handlers/trip-event-created.js` can address
+      // tip notifications via `tripData.driver.pushToken` (the
+      // `tip_succeeded` arm reads this). `null` until
+      // `RegisterPushToken` (sub-turn 2b) writes it to the user doc.
+      pushToken: user.pushToken !== null ? String(user.pushToken) : null,
       avatarUrl: user.avatarUrl,
       vehicle: null, // VehicleSnapshot wiring lives in Phase 5
     });

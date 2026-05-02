@@ -17,6 +17,7 @@ import { LOG } from '@shared/logger';
 
 import { AppContent } from './AppContent';
 import { ContainerProvider } from './di';
+import { navigationRef } from './navigation/navigationRef';
 import { RootNavigator } from './navigation/RootNavigator';
 
 /**
@@ -127,7 +128,7 @@ export function App() {
             <QueryClientProvider client={queryClient}>
               <ContainerProvider>
                 <AppContent>
-                  <NavigationContainer>
+                  <NavigationContainer ref={navigationRef}>
                     <StatusBar style="auto" />
                     <RootNavigator />
                   </NavigationContainer>

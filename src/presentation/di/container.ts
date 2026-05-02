@@ -14,6 +14,8 @@ import { UpdateSavedPlace } from '@app/usecases/auth/UpdateSavedPlace';
 import { UploadAvatar } from '@app/usecases/auth/UploadAvatar';
 import { SubscribeToUserLocation } from '@app/usecases/location/SubscribeToUserLocation';
 import { UpdateUserLocation } from '@app/usecases/location/UpdateUserLocation';
+import { HandleNotificationResponse } from '@app/usecases/notifications/HandleNotificationResponse';
+import { RegisterPushToken } from '@app/usecases/notifications/RegisterPushToken';
 import { CreateAccountLoginLink } from '@app/usecases/payment/CreateAccountLoginLink';
 import { CreateConnectOnboardingLink } from '@app/usecases/payment/CreateConnectOnboardingLink';
 import { CreateSetupIntent } from '@app/usecases/payment/CreateSetupIntent';
@@ -65,6 +67,7 @@ import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@da
 import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } from '@data/repositories/FirestoreVehicleRepository';
 import type { BackgroundGeolocationClient as BackgroundGeolocationClientType } from '@data/services/BackgroundGeolocationClient';
 import type { CloudFunctionsService as CloudFunctionsServiceType } from '@data/services/CloudFunctionsService';
+import type { ExpoNotificationsAdapter as ExpoNotificationsAdapterType } from '@data/services/ExpoNotificationsAdapter';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
 import type { NavigationSdkClient as NavigationSdkClientType } from '@data/services/NavigationSdkClient';
 import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
@@ -80,6 +83,7 @@ import type {
 } from '@domain/repositories';
 import type {
   PaymentCallableService,
+  PushNotificationService,
   RoutesService,
   StripeServerService,
   VinDecoderService,
@@ -90,6 +94,7 @@ import type {
   FakeBackgroundGeolocationClient as FakeBackgroundGeolocationClientType,
   FakeCloudFunctionsService as FakeCloudFunctionsServiceType,
   FakeNavigationSdkClient as FakeNavigationSdkClientType,
+  FakePushNotificationService as FakePushNotificationServiceType,
   FakeRoutesService as FakeRoutesServiceType,
   FakeStripeServerService as FakeStripeServerServiceType,
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
@@ -195,6 +200,10 @@ export interface UseCases {
   rejectVehicle: RejectVehicle;
   decodeVin: DecodeVin;
 
+  // Push notifications (Phase 9 turn 2 sub-turn 2b + 2c)
+  registerPushToken: RegisterPushToken;
+  handleNotificationResponse: HandleNotificationResponse;
+
   // Payments / Stripe Connect / tipping (Phase 6 turn 2)
   ensureStripeCustomer: EnsureStripeCustomer;
   createSetupIntent: CreateSetupIntent;
@@ -240,6 +249,24 @@ export interface Container {
    * `TestContainerProvider`'s optional `navigationSdk` prop.
    */
   navigationSdk: NavigationSdkClientType | FakeNavigationSdkClientType;
+  /**
+   * Phase 9 turn 2: the `expo-notifications` SDK seam. Exposed alongside
+   * the other SDK seams rather than wrapped in a use case because the
+   * Phase-9 sub-turn 2b presentation hook `usePushTokenRegistration`
+   * drives the SDK directly (permission flow, token-refresh
+   * subscription, Android-channel setup at boot). The two use cases
+   * `RegisterPushToken` and `HandleNotificationResponse` (sub-turns 2b
+   * and 2c) accept a `PushNotificationService` interface so they
+   * compose cleanly against either the real or fake adapter.
+   *
+   * Sub-turn 2a wires the seam against `FakePushNotificationService` in
+   * BOTH branches (Firebase-configured and fakes-only) — the real
+   * `ExpoNotificationsAdapter` lands in sub-turn 2b along with the
+   * `expo-notifications` install + plugin block. Until then this slot
+   * is fake-backed in production; that's safe because no consumer
+   * touches it yet.
+   */
+  pushNotifications: PushNotificationService;
 }
 
 /**
@@ -258,6 +285,7 @@ export function makeUseCases(args: {
   vinDecoder: VinDecoderService;
   stripeServer: StripeServerService;
   paymentCallable: PaymentCallableService;
+  pushNotifications: PushNotificationService;
   clock?: () => Date;
 }): UseCases {
   const clock = args.clock ?? (() => new Date());
@@ -383,6 +411,13 @@ export function makeUseCases(args: {
       args.stripeServer,
     ),
     processTip: new ProcessTip(args.auth, args.rides, args.paymentCallable),
+    registerPushToken: new RegisterPushToken(
+      args.auth,
+      args.users,
+      args.pushNotifications,
+      clock,
+    ),
+    handleNotificationResponse: new HandleNotificationResponse(),
   };
 }
 
@@ -425,6 +460,13 @@ export function buildContainer(): Container {
   // `TestContainerProvider`; this branch is never hit under jest because
   // the SDK module is mocked globally in `jest.setup.ts`.
   const navigationSdk = buildNavigationSdkClient();
+
+  // Phase 9 turn 2 sub-turn 2a: PushNotificationService. Falls back to
+  // the fake until sub-turn 2b lands the `expo-notifications` install
+  // and the real `ExpoNotificationsAdapter`. The `Container.pushNotifications`
+  // slot is unobserved by every consumer until 2b, so a fake-backed
+  // production wiring is safe.
+  const pushNotifications = buildPushNotificationService();
 
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
@@ -475,9 +517,11 @@ export function buildContainer(): Container {
         vinDecoder,
         stripeServer,
         paymentCallable,
+        pushNotifications,
       }),
       bgGeolocation,
       navigationSdk,
+      pushNotifications,
     };
   }
 
@@ -508,9 +552,11 @@ export function buildContainer(): Container {
       vinDecoder,
       stripeServer,
       paymentCallable: new testing.FakeCloudFunctionsService(),
+      pushNotifications,
     }),
     bgGeolocation,
     navigationSdk,
+    pushNotifications,
   };
 }
 
@@ -555,6 +601,54 @@ function buildNavigationSdkClient(): NavigationSdkClientType {
     NavigationSdkClient: new () => NavigationSdkClientType;
   };
   return new dataNav.NavigationSdkClient();
+}
+
+/**
+ * Build the `PushNotificationService`. Phase 9 turn 2 sub-turn 2b wires
+ * the real `ExpoNotificationsAdapter` against `expo-notifications`.
+ *
+ * Decision rule:
+ *   - EAS projectId present in `Constants.expoConfig.extra.eas.projectId`
+ *     → real `ExpoNotificationsAdapter`. The adapter still degrades
+ *     gracefully on simulators (where APNs isn't registered) — `getCurrentToken`
+ *     returns `Result.err(NetworkError)` and the use case skips the write.
+ *   - EAS projectId missing → fall back to `FakePushNotificationService`
+ *     so dev / fakes-only builds boot without a Cloud-Functions tax. A
+ *     loud `LOG.warn` makes the degradation visible.
+ *
+ * Lazy-required from the appropriate side so the bundle never pulls
+ * `expo-notifications` into a fakes-only build. Tests use
+ * `TestContainerProvider`'s `pushNotifications` override slot — this
+ * builder is not exercised under jest because `expo-notifications` is
+ * mocked globally in `jest.setup.ts`.
+ */
+function buildPushNotificationService(): PushNotificationService {
+  if (hasEasProjectId()) {
+    const dataPush = require('@data/services/ExpoNotificationsAdapter') as {
+      ExpoNotificationsAdapter: new () => ExpoNotificationsAdapterType;
+    };
+    LOG.info('Container using ExpoNotificationsAdapter');
+    return new dataPush.ExpoNotificationsAdapter();
+  }
+  const testing = require('@shared/testing') as {
+    FakePushNotificationService: new () => FakePushNotificationServiceType;
+  };
+  LOG.warn(
+    'EAS project id not configured (extra.eas.projectId) — using ' +
+      'FakePushNotificationService. Push tokens will not register until ' +
+      '`app.config.ts.extra.eas.projectId` is set.',
+  );
+  return new testing.FakePushNotificationService();
+}
+
+function hasEasProjectId(): boolean {
+  const Constants = require('expo-constants') as {
+    default?: {
+      expoConfig?: { extra?: { eas?: { projectId?: string } } };
+    };
+  };
+  const id = Constants.default?.expoConfig?.extra?.eas?.projectId;
+  return typeof id === 'string' && id.length > 0;
 }
 
 /**

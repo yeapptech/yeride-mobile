@@ -2,6 +2,7 @@ import type { Email } from './Email';
 import type { PaymentMethodId } from './PaymentMethodId';
 import type { PersonName } from './PersonName';
 import type { PhoneNumber } from './PhoneNumber';
+import type { PushToken } from './PushToken';
 import type { Role } from './Role';
 import type { SavedPlace, SavedPlaceId } from './SavedPlace';
 import type { StripeAccountId } from './StripeAccountId';
@@ -37,6 +38,24 @@ export interface UserBase {
   readonly savedPlaces: readonly SavedPlace[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  /**
+   * Phase 9 turn 2: device push-notification token, captured by the
+   * `RegisterPushToken` use case after permission grant. Refreshed
+   * automatically when the SDK rotates the token (FCM rotates
+   * periodically; APNs rotates on app reinstall / device restore).
+   *
+   * Null when:
+   *   - user has not granted notification permission yet
+   *   - user denied permission
+   *   - registration has not yet run since auth (briefly null on first
+   *     load until the registration hook fires)
+   *
+   * Cloud Functions read this field directly off the user doc to address
+   * pushes (`yeride-functions/lib/notifications.js`'s `sendNotification`
+   * routes Expo-wrapped tokens to Expo's API and raw tokens to FCM via
+   * `Expo.isExpoPushToken()`).
+   */
+  readonly pushToken: PushToken | null;
 }
 
 /**
@@ -87,6 +106,7 @@ interface NewUserCommon {
   savedPlaces?: readonly SavedPlace[];
   createdAt: Date;
   updatedAt: Date;
+  pushToken?: PushToken | null;
 }
 
 /**
@@ -111,6 +131,7 @@ export function makeRider(
     savedPlaces: args.savedPlaces ?? [],
     createdAt: args.createdAt,
     updatedAt: args.updatedAt,
+    pushToken: args.pushToken ?? null,
     stripeCustomerId: args.stripeCustomerId ?? null,
     defaultPaymentMethodId: args.defaultPaymentMethodId ?? null,
   };
@@ -140,6 +161,7 @@ export function makeDriver(
     savedPlaces: args.savedPlaces ?? [],
     createdAt: args.createdAt,
     updatedAt: args.updatedAt,
+    pushToken: args.pushToken ?? null,
     stripeAccountId: args.stripeAccountId ?? null,
     stripeChargesEnabled: args.stripeChargesEnabled ?? false,
     stripePayoutsEnabled: args.stripePayoutsEnabled ?? false,
@@ -205,6 +227,24 @@ export function setAvatarUrl(
   now: Date,
 ): User {
   return { ...user, avatarUrl, updatedAt: now };
+}
+
+/**
+ * Return a new User with a different device push token (or `null` to clear
+ * it on permission revocation). No-op when the token is unchanged — the
+ * `RegisterPushToken` use case relies on this no-op short-circuit so it
+ * can call this helper on every app launch without churning `updatedAt`
+ * (and consequently invalidating user-doc caches).
+ *
+ * Phase 9 turn 2.
+ */
+export function setPushToken(
+  user: User,
+  pushToken: PushToken | null,
+  now: Date,
+): User {
+  if (user.pushToken === pushToken) return user;
+  return { ...user, pushToken, updatedAt: now };
 }
 
 /* ─────────────────────────── Saved-places helpers ──────────────── */

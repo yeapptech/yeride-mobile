@@ -11,6 +11,7 @@ import {
 import { FakeBackgroundGeolocationClient } from './FakeBackgroundGeolocationClient';
 import { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
 import { FakeNavigationSdkClient } from './FakeNavigationSdkClient';
+import { FakePushNotificationService } from './FakePushNotificationService';
 import { FakeRoutesService } from './FakeRoutesService';
 import { FakeStripeServerService } from './FakeStripeServerService';
 import { FakeVinDecoderService } from './FakeVinDecoderService';
@@ -59,6 +60,7 @@ export function TestContainerProvider({
   cloudFunctions,
   bgGeolocation,
   navigationSdk,
+  pushNotifications,
   useCases,
   children,
 }: {
@@ -75,6 +77,7 @@ export function TestContainerProvider({
   cloudFunctions?: FakeCloudFunctionsService;
   bgGeolocation?: FakeBackgroundGeolocationClient;
   navigationSdk?: FakeNavigationSdkClient;
+  pushNotifications?: FakePushNotificationService;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
@@ -94,6 +97,8 @@ export function TestContainerProvider({
   const bgGeolocationClient =
     bgGeolocation ?? new FakeBackgroundGeolocationClient();
   const navigationSdkClient = navigationSdk ?? new FakeNavigationSdkClient();
+  const pushNotificationsService =
+    pushNotifications ?? new FakePushNotificationService();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
@@ -106,12 +111,14 @@ export function TestContainerProvider({
     vinDecoder: vinDecoderService,
     stripeServer: stripeServerService,
     paymentCallable: cloudFunctionsService,
+    pushNotifications: pushNotificationsService,
   });
   const merged: UseCases = { ...base, ...useCases };
   const container: Container = {
     useCases: merged,
     bgGeolocation: bgGeolocationClient,
     navigationSdk: navigationSdkClient,
+    pushNotifications: pushNotificationsService,
   };
 
   // Every view-model test needs a QueryClientProvider — view-models

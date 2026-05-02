@@ -24,6 +24,11 @@ export type {
   NavSetDestinationsArgs,
   NavTermsResult,
 } from './FakeNavigationSdkClient';
+export { FakePushNotificationService } from './FakePushNotificationService';
+export type {
+  FakePushMethod,
+  FakePushSpies,
+} from './FakePushNotificationService';
 export { FakeRoutesService } from './FakeRoutesService';
 export { FakeStripeServerService } from './FakeStripeServerService';
 export type { FakeStripeServerSpies } from './FakeStripeServerService';
