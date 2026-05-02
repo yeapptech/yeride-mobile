@@ -406,7 +406,20 @@ export class FirestoreRideRepository implements RideRepository {
   ): Result<Ride, NotFoundError> {
     const parsed = rideMapper.parseRideDoc(raw);
     if (!parsed.ok) {
-      logger.warn('ride doc failed schema validation', { id });
+      // Surface which field(s) failed so we can debug doc-shape drift
+      // without round-tripping through Firestore Console. Path + code
+      // are PII-safe; we deliberately omit zod's `message` (which can
+      // echo the offending value for some validators).
+      const issues = extractZodIssues(parsed.error.cause);
+      const topLevelKeys =
+        raw !== null && typeof raw === 'object'
+          ? Object.keys(raw as Record<string, unknown>).sort()
+          : [];
+      logger.warn('ride doc failed schema validation', {
+        id,
+        issues,
+        topLevelKeys,
+      });
       return Result.err(
         new NotFoundError({
           code: 'ride_corrupt',
@@ -442,4 +455,27 @@ function errCode(e: unknown): string {
     return String((e as { code: unknown }).code);
   }
   return 'unknown';
+}
+
+/**
+ * Extract `{path, code}` entries from a zod error stored in
+ * `ValidationError.cause`. Path + code are diagnostic-safe (no values),
+ * so they're fine to log even though raw doc values would be PII.
+ *
+ * Defensive: not every cause is a zod error, and zod's API has shifted
+ * over majors — we duck-type against `.issues` and handle missing
+ * fields gracefully instead of throwing inside a logger call.
+ */
+function extractZodIssues(
+  cause: unknown,
+): readonly { path: string; code: string }[] {
+  if (cause === null || typeof cause !== 'object') return [];
+  const maybeIssues = (cause as { issues?: unknown }).issues;
+  if (!Array.isArray(maybeIssues)) return [];
+  return maybeIssues.slice(0, 10).map((issue: unknown) => {
+    const i = issue as { path?: unknown; code?: unknown };
+    const path = Array.isArray(i.path) ? i.path.join('.') : '<unknown>';
+    const code = typeof i.code === 'string' ? i.code : '<unknown>';
+    return { path, code };
+  });
 }

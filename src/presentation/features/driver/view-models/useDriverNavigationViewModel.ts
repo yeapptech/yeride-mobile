@@ -83,6 +83,7 @@ export type DriverNavigationErrorKind =
   | 'route_not_found'
   | 'network'
   | 'permission'
+  | 'location_unknown'
   | 'api_not_authorized'
   | 'unknown';
 
@@ -296,6 +297,22 @@ export function useDriverNavigationViewModel(
 
 /* ───── Helpers ───── */
 
+/**
+ * The Google Navigation SDK reports two distinct flavours of "no
+ * location" via two separate `RouteStatus` values; we surface them as
+ * distinct error sub-kinds so the UX copy can be actionable in each
+ * case.
+ *
+ *   - `LOCATION_DISABLED` → `'permission'`. CoreLocation reports the
+ *     app is not authorized OR Location Services is system-disabled.
+ *     Recovery: user opens Settings → YeRide → Location → grant.
+ *
+ *   - `LOCATION_UNKNOWN`  → `'location_unknown'`. App IS authorized
+ *     but no fix is currently available (cold-start GPS, indoor, weak
+ *     signal, or — frequently in dev — iOS Simulator without a
+ *     `Features → Location` selection). Recovery: wait, move outside,
+ *     or set a simulator location.
+ */
 function mapRouteStatusToErrorKind(
   status: NavRouteStatus,
 ): DriverNavigationErrorKind {
@@ -308,8 +325,9 @@ function mapRouteStatusToErrorKind(
     case 'network_error':
       return 'network';
     case 'location_disabled':
-    case 'location_unknown':
       return 'permission';
+    case 'location_unknown':
+      return 'location_unknown';
     case 'quota_check_failed':
     case 'route_canceled':
     case 'unknown':
@@ -330,7 +348,9 @@ function defaultMessageFor(subKind: DriverNavigationErrorKind): string {
     case 'network':
       return 'Navigation network error. Check your connection and try again.';
     case 'permission':
-      return 'Location permission is required for navigation.';
+      return 'Location permission is off. Grant access in Settings → YeRide → Location to start navigation.';
+    case 'location_unknown':
+      return "Waiting for a GPS fix. Move outdoors or check your signal, then tap Try again.";
     case 'api_not_authorized':
       return 'Navigation is not authorized for this app. Please contact support.';
     case 'unknown':

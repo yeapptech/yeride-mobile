@@ -16,6 +16,8 @@ import { LOG } from '@shared/logger';
 
 import { UserDocSchema, type UserDoc } from '../dto/UserDoc';
 
+import { normalizeLegacyPhone } from './_shared/normalizeLegacyPhone';
+
 const logger = LOG.extend('userMapper');
 
 /**
@@ -151,10 +153,13 @@ export function toDomain(
   if (!nameR.ok) return nameR;
 
   // Accept either field name; prefer the new canonical `phoneNumber`.
+  // Normalise legacy yeride's permissive phone shapes ("(954) 555-1234",
+  // "9545551234", etc.) to E.164 before handing to the strict
+  // PhoneNumber.create. See `_shared/normalizeLegacyPhone.ts`.
   const rawPhone = doc.phoneNumber ?? doc.phone ?? null;
   let phone: PhoneNumber | null = null;
   if (rawPhone !== null && rawPhone !== '') {
-    const phoneR = PhoneNumber.create(rawPhone);
+    const phoneR = PhoneNumber.create(normalizeLegacyPhone(rawPhone));
     if (!phoneR.ok) return phoneR;
     phone = phoneR.value;
   }

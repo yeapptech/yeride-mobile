@@ -31,14 +31,18 @@ import {
   type CancellationDoc,
   type DropoffEndpointDoc,
   type EmbeddedDirectionsDoc,
+  type EndpointAddressField,
   type DriverDoc as LegacyDriverDoc,
   type PassengerDoc as LegacyPassengerDoc,
   type RideServiceEmbeddedDoc as LegacyRideServiceEmbeddedDoc,
   type VehicleSnapshotDoc as LegacyVehicleSnapshotDoc,
+  type LegacyPlaceAddress,
   type PickupEndpointDoc,
   type RideDoc,
   type RoutePreferenceDoc,
 } from '../dto/RideDoc';
+
+import { normalizeLegacyPhone } from './_shared/normalizeLegacyPhone';
 
 /**
  * Bidirectional mapper between Firestore `trips/{tripId}` documents and the
@@ -155,7 +159,7 @@ function passengerToDomain(
   if (!nameR.ok) return nameR;
   const emailR = Email.create(p.email);
   if (!emailR.ok) return emailR;
-  const phoneR = PhoneNumber.create(p.phoneNumber);
+  const phoneR = PhoneNumber.create(normalizeLegacyPhone(p.phoneNumber));
   if (!phoneR.ok) return phoneR;
   return PassengerSnapshot.create({
     id: idR.value,
@@ -177,7 +181,7 @@ function driverToDomain(
   if (!nameR.ok) return nameR;
   const emailR = Email.create(d.email);
   if (!emailR.ok) return emailR;
-  const phoneR = PhoneNumber.create(d.phoneNumber);
+  const phoneR = PhoneNumber.create(normalizeLegacyPhone(d.phoneNumber));
   if (!phoneR.ok) return phoneR;
   let vehicle: VehicleSnapshot | null = null;
   if (d.vehicle) {
@@ -251,31 +255,147 @@ function rideServiceToDomain(
 function pickupToDomain(
   p: PickupEndpointDoc,
 ): Result<Endpoint, ValidationError> {
-  const locR = Coordinates.create(p.latitude, p.longitude);
-  if (!locR.ok) return locR;
-  const directionsR = embeddedDirectionsToRoute(p.directions ?? null);
-  if (!directionsR.ok) return directionsR;
-  return Endpoint.create({
-    location: locR.value,
-    address: p.address,
-    placeName: p.placeName ?? null,
-    directions: directionsR.value,
-  });
+  return endpointToDomain(p, 'pickup');
 }
 
 function dropoffToDomain(
   d: DropoffEndpointDoc,
 ): Result<Endpoint, ValidationError> {
-  const locR = Coordinates.create(d.latitude, d.longitude);
+  return endpointToDomain(d, 'dropoff');
+}
+
+/**
+ * Shared pickup/dropoff → domain mapper. Sources coordinates and address
+ * from whichever legacy or canonical path is populated:
+ *
+ *   coords:  top-level lat/lng
+ *         → address.geometry.location.{lat,lng}  (legacy Google Places)
+ *         → directions.startLocation/endLocation (legacy Routes API)
+ *
+ *   address: top-level string  (canonical rewrite)
+ *         → address.formatted_address           (legacy Places — preferred)
+ *         → address.description / .name / .vicinity  (legacy fallbacks)
+ *
+ * Returns ValidationError when neither source yields a usable value, so
+ * the read path skips a partially-filled trip cleanly instead of
+ * crashing. The error code distinguishes coords-vs-address misses so
+ * downstream observability can spot which legacy field is the gap.
+ */
+function endpointToDomain(
+  e: PickupEndpointDoc | DropoffEndpointDoc,
+  kind: 'pickup' | 'dropoff',
+): Result<Endpoint, ValidationError> {
+  const coords = resolveEndpointCoords(e, kind);
+  if (!coords) {
+    return Result.err(
+      new ValidationError({
+        code:
+          kind === 'pickup'
+            ? 'ride_doc_missing_pickup_coords'
+            : 'ride_doc_missing_dropoff_coords',
+        message: `${kind} has no resolvable coordinates (top-level / address.geometry / directions.${kind === 'pickup' ? 'startLocation' : 'endLocation'} all empty)`,
+        field: kind,
+      }),
+    );
+  }
+  const locR = Coordinates.create(coords.lat, coords.lng);
   if (!locR.ok) return locR;
-  const directionsR = embeddedDirectionsToRoute(d.directions ?? null);
+
+  const addressStr = resolveEndpointAddressString(e.address);
+  if (addressStr === null) {
+    return Result.err(
+      new ValidationError({
+        code:
+          kind === 'pickup'
+            ? 'ride_doc_missing_pickup_address'
+            : 'ride_doc_missing_dropoff_address',
+        message: `${kind} has no resolvable address string`,
+        field: `${kind}.address`,
+      }),
+    );
+  }
+
+  const placeName = resolveEndpointPlaceName(e.address, e.placeName);
+
+  const directionsR = embeddedDirectionsToRoute(e.directions ?? null);
   if (!directionsR.ok) return directionsR;
   return Endpoint.create({
     location: locR.value,
-    address: d.address,
-    placeName: d.placeName ?? null,
+    address: addressStr,
+    placeName,
     directions: directionsR.value,
   });
+}
+
+function resolveEndpointCoords(
+  e: PickupEndpointDoc | DropoffEndpointDoc,
+  kind: 'pickup' | 'dropoff',
+): { lat: number; lng: number } | null {
+  if (typeof e.latitude === 'number' && typeof e.longitude === 'number') {
+    return { lat: e.latitude, lng: e.longitude };
+  }
+  // Try legacy `address.geometry.location.{lat,lng}` (Google Places shape).
+  if (e.address !== null && e.address !== undefined && isPlaceObject(e.address)) {
+    const loc = e.address.geometry?.location;
+    if (
+      loc &&
+      typeof loc.lat === 'number' &&
+      typeof loc.lng === 'number'
+    ) {
+      return { lat: loc.lat, lng: loc.lng };
+    }
+  }
+  // Fall through to embedded directions endpoint coords.
+  if (e.directions) {
+    const fallback =
+      kind === 'pickup' ? e.directions.startLocation : e.directions.endLocation;
+    if (
+      fallback &&
+      typeof fallback.latitude === 'number' &&
+      typeof fallback.longitude === 'number' &&
+      // Skip the {0,0} placeholder Routes API helper writes for missing
+      // endpoints — would silently misplace a pickup at the equator.
+      !(fallback.latitude === 0 && fallback.longitude === 0)
+    ) {
+      return { lat: fallback.latitude, lng: fallback.longitude };
+    }
+  }
+  return null;
+}
+
+function resolveEndpointAddressString(
+  addr: EndpointAddressField | null | undefined,
+): string | null {
+  if (typeof addr === 'string') {
+    return addr.length > 0 ? addr : null;
+  }
+  if (addr === null || addr === undefined) return null;
+  // Legacy Google Places object — prefer the most specific human-readable
+  // string available. Order matches what the legacy app surfaces in UI.
+  const candidate =
+    addr.formatted_address ?? addr.description ?? addr.name ?? addr.vicinity;
+  return typeof candidate === 'string' && candidate.length > 0
+    ? candidate
+    : null;
+}
+
+function resolveEndpointPlaceName(
+  addr: EndpointAddressField | null | undefined,
+  explicitPlaceName: string | null | undefined,
+): string | null {
+  if (typeof explicitPlaceName === 'string' && explicitPlaceName.length > 0) {
+    return explicitPlaceName;
+  }
+  if (addr !== null && addr !== undefined && isPlaceObject(addr)) {
+    if (typeof addr.name === 'string' && addr.name.length > 0) return addr.name;
+  }
+  return null;
+}
+
+function isPlaceObject(
+  addr: EndpointAddressField,
+): addr is LegacyPlaceAddress {
+  return typeof addr === 'object' && addr !== null;
 }
 
 function embeddedDirectionsToRoute(

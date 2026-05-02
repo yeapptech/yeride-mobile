@@ -34,6 +34,27 @@ const VehicleSnapshotDocSchema = z.object({
   photos: z.array(z.string()).default([]),
 });
 
+/**
+ * Legacy yeride writes `passenger.defaultPaymentMethod` as the FULL Stripe
+ * PaymentMethod object (`{id, card: {brand, last4, ...}, ...}`); the
+ * rewrite writes a bare id string. Preprocess to extract `.id` from the
+ * object form so the canonical `string | null | undefined` validator
+ * succeeds in either case. See `RideSelect.handlePaymentMethodSelected`
+ * in legacy yeride for the source of the object shape.
+ */
+const PassengerDefaultPaymentMethodSchema = z.preprocess((val) => {
+  if (
+    val !== null &&
+    val !== undefined &&
+    typeof val === 'object' &&
+    !Array.isArray(val)
+  ) {
+    const id = (val as Record<string, unknown>).id;
+    return typeof id === 'string' ? id : null;
+  }
+  return val;
+}, z.string().nullish());
+
 const PassengerDocSchema = z.object({
   id: z.string().min(1),
   firstName: z.string().min(1).max(80),
@@ -42,7 +63,7 @@ const PassengerDocSchema = z.object({
   phoneNumber: z.string().min(1),
   pushToken: z.string().nullish(),
   avatarUrl: z.string().nullish(),
-  defaultPaymentMethod: z.string().nullish(),
+  defaultPaymentMethod: PassengerDefaultPaymentMethodSchema,
 });
 
 const DriverDocSchema = z.object({
@@ -56,6 +77,25 @@ const DriverDocSchema = z.object({
   avatarUrl: z.string().nullish(),
   vehicle: VehicleSnapshotDocSchema.nullish(),
 });
+
+/**
+ * Legacy yeride's `TripContext` initialState writes `driver: {}` (empty
+ * object) for awaiting_driver trips — a placeholder before any driver is
+ * assigned. The rewrite writes `driver: <full DriverDoc>` post-dispatch
+ * and omits the field pre-dispatch. To read both shapes, preprocess any
+ * empty-or-id-less object value down to `null` BEFORE the inner schema
+ * validates.
+ */
+const DriverDocOrNullishSchema = z.preprocess((val) => {
+  if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+    const obj = val as Record<string, unknown>;
+    if (Object.keys(obj).length === 0) return null;
+    // Defensive: if `id` is missing or empty the doc carries no real
+    // driver info even if a few fields are populated. Treat as absent.
+    if (typeof obj.id !== 'string' || obj.id.length === 0) return null;
+  }
+  return val;
+}, DriverDocSchema.nullish());
 
 const RideServiceEmbeddedSchema = z.object({
   id: z.string().min(1),
@@ -71,11 +111,46 @@ const RideServiceEmbeddedSchema = z.object({
 });
 
 /**
+ * Legacy yeride's `GoogleMapsAPI.computeRoutes` stores leg endpoints
+ * as `{lat, lng}` (Google Maps JS SDK convention); the rewrite writes
+ * `{latitude, longitude}` (Routes API convention). Preprocess to map
+ * the legacy form to the canonical form before the inner schema
+ * validates. See legacy yeride `GoogleMapsAPI.js:407-418`.
+ */
+const LegOrLatLngEndpointSchema = z.preprocess((val) => {
+  if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+    const obj = val as Record<string, unknown>;
+    if (
+      typeof obj.lat === 'number' &&
+      typeof obj.lng === 'number' &&
+      typeof obj.latitude !== 'number' &&
+      typeof obj.longitude !== 'number'
+    ) {
+      return { latitude: obj.lat, longitude: obj.lng };
+    }
+  }
+  return val;
+}, z.object({
+  latitude: z.number().finite(),
+  longitude: z.number().finite(),
+}).optional());
+
+/**
  * Embedded route directions. The schema is intentionally permissive — the
  * legacy app started writing this object before the rewrite's curated
  * FieldMask was finalised, so older documents are missing fields like
  * `routeToken` or `localizedValues`. Anything not present becomes `null`
  * at the mapper boundary.
+ *
+ * Two legacy shape concessions:
+ *   - `startLocation` / `endLocation` may be `{lat, lng}` instead of
+ *     `{latitude, longitude}` — legacy `GoogleMapsAPI.computeRoutes`
+ *     normalises Routes API output to the lat/lng form for storage.
+ *     Preprocessed via `LegOrLatLngEndpointSchema`.
+ *   - `tollInfo` may be `null` (legacy writes `route.travelAdvisory?
+ *     .tollInfo || null` — explicit null when no tolls). The rewrite's
+ *     prior `.optional()` only allowed `undefined`. Switched to
+ *     `.nullish()`.
  */
 const EmbeddedDirectionsSchema = z.object({
   distanceMeters: z.number().finite().gte(0).optional(),
@@ -84,21 +159,11 @@ const EmbeddedDirectionsSchema = z.object({
   durationText: z.string().optional(),
   polyline: z.string().optional(),
   encodedPolyline: z.string().optional(),
-  routeToken: z.string().optional(),
+  routeToken: z.string().nullish(),
   description: z.string().optional(),
   routeLabels: z.array(z.string()).optional(),
-  startLocation: z
-    .object({
-      latitude: z.number().finite(),
-      longitude: z.number().finite(),
-    })
-    .optional(),
-  endLocation: z
-    .object({
-      latitude: z.number().finite(),
-      longitude: z.number().finite(),
-    })
-    .optional(),
+  startLocation: LegOrLatLngEndpointSchema,
+  endLocation: LegOrLatLngEndpointSchema,
   tollInfo: z
     .object({
       estimatedPrice: z
@@ -111,13 +176,64 @@ const EmbeddedDirectionsSchema = z.object({
         )
         .optional(),
     })
-    .optional(),
+    .nullish(),
 });
 
+/**
+ * Legacy yeride writes endpoint addresses as the FULL Google Places
+ * details object (`{description, formatted_address, geometry: {location:
+ * {lat, lng}}, name, place_id, types, vicinity}`); the rewrite writes a
+ * bare string. We accept either shape at parse time and let the mapper
+ * extract the canonical address string + (when needed) the coordinates.
+ * See legacy yeride `RideRouteSearch.onSetPickupAddress` for the source.
+ *
+ * `passthrough()` so unknown Google fields don't get stripped — the
+ * mapper may reach for any of them.
+ */
+const LegacyPlaceAddressSchema = z
+  .object({
+    description: z.string().optional(),
+    formatted_address: z.string().optional(),
+    name: z.string().optional(),
+    vicinity: z.string().optional(),
+    place_id: z.string().optional(),
+    geometry: z
+      .object({
+        location: z
+          .object({
+            lat: z.number().finite().optional(),
+            lng: z.number().finite().optional(),
+          })
+          .optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+export const EndpointAddressFieldSchema = z.union([
+  z.string(),
+  LegacyPlaceAddressSchema,
+]);
+
+/**
+ * Pickup / dropoff endpoint shape.
+ *
+ * Three legacy shape concessions vs. the canonical rewrite shape:
+ *   1. `latitude` / `longitude` may be absent at the top level — legacy
+ *      stores them nested at `address.geometry.location.{lat,lng}` (or in
+ *      `directions.startLocation/endLocation`). The mapper sources from
+ *      whichever path is populated.
+ *   2. `address` may be the Google Places object instead of a bare
+ *      string. Mapper extracts `formatted_address` (preferred),
+ *      `description`, `name`, or `vicinity` in that order.
+ *   3. All three may be absent/null on a partially-filled trip the
+ *      legacy app never finalised — mapper returns ValidationError so
+ *      the read path skips the doc cleanly instead of crashing.
+ */
 const PickupEndpointDocSchema = z.object({
-  latitude: z.number().finite().gte(-90).lte(90),
-  longitude: z.number().finite().gte(-180).lte(180),
-  address: z.string().min(1).max(500),
+  latitude: z.number().finite().gte(-90).lte(90).optional(),
+  longitude: z.number().finite().gte(-180).lte(180).optional(),
+  address: EndpointAddressFieldSchema.nullish(),
   placeName: z.string().nullish(),
   startedAt: ISO_DATE.nullish(),
   completedAt: ISO_DATE.nullish(),
@@ -129,9 +245,9 @@ const PickupEndpointDocSchema = z.object({
 });
 
 const DropoffEndpointDocSchema = z.object({
-  latitude: z.number().finite().gte(-90).lte(90),
-  longitude: z.number().finite().gte(-180).lte(180),
-  address: z.string().min(1).max(500),
+  latitude: z.number().finite().gte(-90).lte(90).optional(),
+  longitude: z.number().finite().gte(-180).lte(180).optional(),
+  address: EndpointAddressFieldSchema.nullish(),
   placeName: z.string().nullish(),
   startedAt: ISO_DATE.nullish(),
   completedAt: ISO_DATE.nullish(),
@@ -190,7 +306,7 @@ const RoutePreferenceDocSchema = z.object({
 
 export const RideDocSchema = z.object({
   passenger: PassengerDocSchema,
-  driver: DriverDocSchema.nullish(),
+  driver: DriverDocOrNullishSchema,
   rideService: RideServiceEmbeddedSchema,
   // Status enum accepts BOTH the canonical rewrite value (`'cancelled'`)
   // and the two legacy values written by the Cloud Function
@@ -234,3 +350,5 @@ export type PickupEndpointDoc = z.infer<typeof PickupEndpointDocSchema>;
 export type DropoffEndpointDoc = z.infer<typeof DropoffEndpointDocSchema>;
 export type CancellationDoc = z.infer<typeof CancellationDocSchema>;
 export type RoutePreferenceDoc = z.infer<typeof RoutePreferenceDocSchema>;
+export type EndpointAddressField = z.infer<typeof EndpointAddressFieldSchema>;
+export type LegacyPlaceAddress = z.infer<typeof LegacyPlaceAddressSchema>;

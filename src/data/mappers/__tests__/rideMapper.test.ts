@@ -338,6 +338,424 @@ describe('toDomain — legacy field shape tolerance', () => {
   });
 });
 
+// Phase 9 cleanup. Legacy yeride writes awaiting_driver trip docs in
+// these shapes — confirmed against an actual on-disk doc
+// (LdUV7hRhkDUuu6a5QdI1) that crashed schema validation against the
+// rewrite's stricter DTOs. These tests pin the tolerant-read contract
+// so a future cleanup doesn't accidentally re-tighten the schema and
+// break the data co-existence rule.
+describe('toDomain — legacy yeride awaiting_driver trip shape', () => {
+  /**
+   * Build a "legacy-style" awaiting_driver doc by hand. Doesn't reuse
+   * `freshRide() + toDoc()` because we want explicit control over the
+   * shape — the canonical writer wouldn't emit any of these legacy
+   * structures.
+   */
+  function legacyAwaitingDriverDoc(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+      },
+      // Legacy `TripContext` initialState writes `driver: {}`.
+      driver: {},
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      status: 'awaiting_driver',
+      createdDateTime: T_CREATED.toISOString(),
+      // Pickup with the legacy Google Places shape: lat/lng nested in
+      // address.geometry.location, address itself is the full Place
+      // details object.
+      pickup: {
+        address: {
+          description: 'Sunrise Lakes',
+          formatted_address: 'Sunrise Lakes, Sunrise, FL 33323, USA',
+          name: 'Sunrise Lakes',
+          place_id: 'ChIJ123pickup',
+          types: ['neighborhood'],
+          vicinity: 'Sunrise',
+          geometry: {
+            location: { lat: 26.1488, lng: -80.2737 },
+          },
+        },
+      },
+      dropoff: {
+        address: {
+          description: 'Cleary Blvd',
+          formatted_address: 'Cleary Blvd, Plantation, FL, USA',
+          name: 'Cleary Blvd',
+          place_id: 'ChIJ123dropoff',
+          types: ['route'],
+          vicinity: 'Plantation',
+          geometry: {
+            location: { lat: 26.1224, lng: -80.2638 },
+          },
+        },
+      },
+      // Legacy top-level fields the DTO ignores (Zod default-strip).
+      id: 'LdUV7hRhkDUuu6a5QdI1',
+      isDriverAtPickup: false,
+      isDriverAtDropoff: false,
+      showPickupExitWarning: false,
+      showDropoffExitWarning: false,
+      schedulePickupAt: null,
+      serviceArea: { id: 'broward', name: 'Broward County' },
+      ...overrides,
+    };
+  }
+
+  it('reads a real-world legacy awaiting_driver doc end-to-end', () => {
+    // The doc shape that crashed in production (id LdUV7hRhkDUuu6a5QdI1).
+    const doc = legacyAwaitingDriverDoc();
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('LdUV7hRhkDUuu6a5QdI1', parsed));
+    expect(round.status).toBe('awaiting_driver');
+    expect(round.driver).toBeNull();
+    expect(round.pickup.location.latitude).toBeCloseTo(26.1488, 4);
+    expect(round.pickup.location.longitude).toBeCloseTo(-80.2737, 4);
+    expect(round.pickup.address).toBe(
+      'Sunrise Lakes, Sunrise, FL 33323, USA',
+    );
+    expect(round.pickup.placeName).toBe('Sunrise Lakes');
+    expect(round.dropoff.location.latitude).toBeCloseTo(26.1224, 4);
+    expect(round.dropoff.location.longitude).toBeCloseTo(-80.2638, 4);
+    expect(round.passenger.defaultPaymentMethod).toBeNull();
+  });
+
+  it('treats `driver: {}` (legacy initialState) as null', () => {
+    const doc = legacyAwaitingDriverDoc({ driver: {} });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.driver).toBeNull();
+  });
+
+  it('treats `driver: {someField: ""}` with no real id as null', () => {
+    // Defensive: occasionally legacy partially populates the driver
+    // object (e.g. pushToken without id) — still no real driver info.
+    const doc = legacyAwaitingDriverDoc({
+      driver: { id: '', firstName: 'X' },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.driver).toBeNull();
+  });
+
+  it('extracts coords from address.geometry.location when top-level lat/lng absent', () => {
+    const doc = legacyAwaitingDriverDoc();
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.pickup.location.latitude).toBeCloseTo(26.1488, 4);
+    expect(round.pickup.location.longitude).toBeCloseTo(-80.2737, 4);
+  });
+
+  it('extracts coords from directions.startLocation when address has no geometry', () => {
+    const doc = legacyAwaitingDriverDoc({
+      pickup: {
+        // No top-level lat/lng. Address object without geometry.
+        address: { formatted_address: 'A pickup address with no geometry' },
+        directions: {
+          startLocation: { latitude: 26.5, longitude: -80.5 },
+        },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.pickup.location.latitude).toBeCloseTo(26.5, 4);
+    expect(round.pickup.location.longitude).toBeCloseTo(-80.5, 4);
+  });
+
+  it('extracts address string from formatted_address (preferred)', () => {
+    const doc = legacyAwaitingDriverDoc({
+      pickup: {
+        address: {
+          formatted_address: 'Preferred address',
+          description: 'Should not be picked',
+          name: 'Place Name',
+          geometry: { location: { lat: 26.1, lng: -80.1 } },
+        },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.pickup.address).toBe('Preferred address');
+  });
+
+  it('falls back to description when formatted_address is absent', () => {
+    const doc = legacyAwaitingDriverDoc({
+      pickup: {
+        address: {
+          description: 'Description fallback',
+          name: 'Place Name',
+          geometry: { location: { lat: 26.1, lng: -80.1 } },
+        },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.pickup.address).toBe('Description fallback');
+  });
+
+  it('surfaces address.name into placeName when explicit placeName absent', () => {
+    const doc = legacyAwaitingDriverDoc();
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.pickup.placeName).toBe('Sunrise Lakes');
+  });
+
+  it('extracts `id` from passenger.defaultPaymentMethod object form', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+        // Legacy writes the FULL Stripe PaymentMethod object.
+        defaultPaymentMethod: {
+          id: 'pm_legacy_xxx',
+          card: { brand: 'visa', last4: '4242' },
+          type: 'card',
+        },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.defaultPaymentMethod).toBe('pm_legacy_xxx');
+  });
+
+  it('returns ValidationError when no source yields pickup coords', () => {
+    const doc = legacyAwaitingDriverDoc({
+      pickup: {
+        address: { formatted_address: 'Unresolvable address' },
+        // No directions, no top-level lat/lng, no address.geometry.
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const r = toDomain('test-id', parsed);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('ride_doc_missing_pickup_coords');
+    }
+  });
+
+  it('skips the {0,0} placeholder when sourcing from directions', () => {
+    // Routes API helpers in the rewrite write {0,0} for missing endpoints.
+    // The mapper must not trust those — would silently locate the pickup
+    // at the equator.
+    const doc = legacyAwaitingDriverDoc({
+      pickup: {
+        address: { formatted_address: 'Address with placeholder directions' },
+        directions: {
+          startLocation: { latitude: 0, longitude: 0 },
+        },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const r = toDomain('test-id', parsed);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('ride_doc_missing_pickup_coords');
+    }
+  });
+
+  it('round-trips the canonical rewrite shape unaffected', () => {
+    // Regression guard: the new tolerant readers must not change the
+    // round-trip behaviour for docs the rewrite writes itself.
+    const ride = freshRide();
+    const doc = toDoc(ride);
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.passenger.email.value).toBe('ada@yeapp.tech');
+    expect(round.pickup.address).toBe('Miami pickup');
+    expect(round.pickup.location.latitude).toBeCloseTo(25.7617, 4);
+    expect(round.dropoff.address).toBe('Fort Lauderdale dropoff');
+  });
+
+  // Legacy `GoogleMapsAPI.computeRoutes` stores route legs as
+  // `{lat, lng}` (Google Maps JS SDK convention). The rewrite's Routes
+  // API path uses `{latitude, longitude}`. Preprocessor normalises.
+  it('accepts legacy `{lat, lng}` shape on directions endpoints', () => {
+    const doc = legacyAwaitingDriverDoc({
+      pickup: {
+        latitude: 26.1488,
+        longitude: -80.2737,
+        address: 'Sunrise Lakes',
+        directions: {
+          distanceMeters: 5_000,
+          durationSeconds: 600,
+          // Legacy lat/lng shape — preprocessor maps to latitude/longitude.
+          startLocation: { lat: 26.1488, lng: -80.2737 },
+          endLocation: { lat: 26.1224, lng: -80.2638 },
+          encodedPolyline: '_p~iF',
+          tollInfo: null,
+        },
+      },
+      dropoff: {
+        latitude: 26.1224,
+        longitude: -80.2638,
+        address: 'Cleary Blvd',
+        directions: {
+          distanceMeters: 5_000,
+          durationSeconds: 600,
+          startLocation: { lat: 26.1488, lng: -80.2737 },
+          endLocation: { lat: 26.1224, lng: -80.2638 },
+          encodedPolyline: '_p~iF',
+          tollInfo: null,
+        },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.dropoff.directions?.startLocation.latitude).toBeCloseTo(
+      26.1488,
+      4,
+    );
+    expect(round.dropoff.directions?.endLocation.longitude).toBeCloseTo(
+      -80.2638,
+      4,
+    );
+  });
+
+  it('accepts `tollInfo: null` (no-tolls leg from legacy)', () => {
+    const doc = legacyAwaitingDriverDoc({
+      dropoff: {
+        latitude: 26.1224,
+        longitude: -80.2638,
+        address: 'Cleary Blvd',
+        directions: {
+          distanceMeters: 5_000,
+          durationSeconds: 600,
+          tollInfo: null,
+        },
+      },
+    });
+    const r = parseRideDoc(doc);
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts `routeToken: null` (legacy may write null instead of omit)', () => {
+    const doc = legacyAwaitingDriverDoc({
+      dropoff: {
+        latitude: 26.1224,
+        longitude: -80.2638,
+        address: 'Cleary Blvd',
+        directions: {
+          distanceMeters: 5_000,
+          durationSeconds: 600,
+          routeToken: null,
+        },
+      },
+    });
+    const r = parseRideDoc(doc);
+    expect(r.ok).toBe(true);
+  });
+
+  // Legacy yeride's UserProfile zod regex accepts country-code-less
+  // phones; many historical docs have the raw 10-digit US form. The
+  // rewrite's PhoneNumber.create requires E.164. The mapper normalises
+  // at the boundary so the entity invariant stays strict for fresh
+  // writes.
+  it('normalises a 10-digit US passenger phone to E.164', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '9545551234',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.phoneNumber.value).toBe('+19545551234');
+  });
+
+  it('normalises a parens/dashes-formatted US passenger phone to E.164', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '(954) 555-1234',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.phoneNumber.value).toBe('+19545551234');
+  });
+
+  it('normalises an 11-digit "1xxxxxxxxxx" passenger phone to E.164', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '19545551234',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.phoneNumber.value).toBe('+19545551234');
+  });
+
+  it('passes through an already-E.164 passenger phone unchanged', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+447911123456',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.phoneNumber.value).toBe('+447911123456');
+  });
+
+  it('does not silently misclassify a non-NANP digit string', () => {
+    // 9 digits is too short to be NANP; mapper should pass it through
+    // and let PhoneNumber.create surface the failure instead of
+    // prepending +1 and creating a wrong number.
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '954555123',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const r = toDomain('test-id', parsed);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      // Either phone_missing_country_code (passes through; no +) or
+      // phone_too_short. Both are correct rejections — we just want to
+      // confirm we didn't silently auto-prepend +1.
+      expect(
+        r.error.code === 'phone_missing_country_code' ||
+          r.error.code === 'phone_too_short',
+      ).toBe(true);
+    }
+  });
+});
+
 // Phase 8 turn 3 regression coverage. The deployed Cloud Function
 // `cancelTrip` writes a flat shape: status='passenger_canceled' /
 // 'driver_canceled' (snake_case), cancelReason as a top-level *string*,

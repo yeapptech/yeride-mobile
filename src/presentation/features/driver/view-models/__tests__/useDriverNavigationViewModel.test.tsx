@@ -160,6 +160,7 @@ describe('useDriverNavigationViewModel', () => {
         | 'route_not_found'
         | 'network'
         | 'permission'
+        | 'location_unknown'
         | 'unknown';
     }> = [
       { status: 'no_route_found', subKind: 'route_not_found' },
@@ -167,8 +168,12 @@ describe('useDriverNavigationViewModel', () => {
       { status: 'invalid_place_id', subKind: 'route_not_found' },
       { status: 'duplicate_waypoints_error', subKind: 'route_not_found' },
       { status: 'network_error', subKind: 'network' },
+      // The SDK distinguishes "Location Services off / app unauthorised"
+      // (LOCATION_DISABLED → 'permission') from "authorised but no fix"
+      // (LOCATION_UNKNOWN → 'location_unknown'). The two subKinds carry
+      // different actionable copy. See `defaultMessageFor` JSDoc.
       { status: 'location_disabled', subKind: 'permission' },
-      { status: 'location_unknown', subKind: 'permission' },
+      { status: 'location_unknown', subKind: 'location_unknown' },
       { status: 'quota_check_failed', subKind: 'unknown' },
       { status: 'route_canceled', subKind: 'unknown' },
       { status: 'unknown', subKind: 'unknown' },
@@ -196,6 +201,48 @@ describe('useDriverNavigationViewModel', () => {
         expect(fake.spies.startGuidanceCalls).toBe(0);
       });
     }
+
+    it('surfaces distinct user-facing copy for permission vs location_unknown', async () => {
+      // Regression guard: the whole point of the split is that the two
+      // arms produce different actionable text. If a refactor ever
+      // collapses them back to the same message, this fails loudly.
+      const permFake = new FakeNavigationSdkClient();
+      permFake.seedRouteStatus('location_disabled');
+      const { result: permResult } = renderHook(
+        (args: DriverNavigationViewModelArgs) =>
+          useDriverNavigationViewModel(args),
+        {
+          wrapper: makeWrapper(permFake),
+          initialProps: { title: 'Pickup', coords: PICKUP, onMapReady: true },
+        },
+      );
+      await waitFor(() => {
+        expect(permResult.current.state.kind).toBe('error');
+      });
+
+      const noFixFake = new FakeNavigationSdkClient();
+      noFixFake.seedRouteStatus('location_unknown');
+      const { result: noFixResult } = renderHook(
+        (args: DriverNavigationViewModelArgs) =>
+          useDriverNavigationViewModel(args),
+        {
+          wrapper: makeWrapper(noFixFake),
+          initialProps: { title: 'Pickup', coords: PICKUP, onMapReady: true },
+        },
+      );
+      await waitFor(() => {
+        expect(noFixResult.current.state.kind).toBe('error');
+      });
+
+      const permState = permResult.current.state;
+      const noFixState = noFixResult.current.state;
+      if (permState.kind !== 'error' || noFixState.kind !== 'error') {
+        throw new Error('expected both states to be error');
+      }
+      expect(permState.message).not.toBe(noFixState.message);
+      expect(permState.message.toLowerCase()).toContain('settings');
+      expect(noFixState.message.toLowerCase()).toContain('gps');
+    });
   });
 
   describe('error: SDK throws', () => {
