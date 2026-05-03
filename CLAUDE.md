@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 3, 2026 (Phase 9 turn 3 sub-turn 3c — dev-only force-crash entry point + Debug-bridge crash() swallow finding; Phase 9 Turn 3 closed)
+**Last updated:** May 3, 2026 (Phase 9 Turn 6 closed — observability cleanup grab-bag: rawMeta channel + ErrorBoundary + boundaries-rule migration)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,61 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 6 closed.** Observability cleanup grab-bag covering
+the two follow-ups Turn 3's close logged. (1) The
+`recordError`-via-`LOG`-sanitize gap surfaced in 3b is fixed by a
+parallel `rawMeta` channel through the logger pipeline:
+`LogTransport.log` extends additively from `(level, scope, message,
+meta?)` to `(level, scope, message, meta?, rawMeta?)`; `Logger.write`
+passes the original (un-sanitized) `meta` through as `rawMeta` so
+`CrashlyticsLogTransport.extractError(rawMeta ?? meta)` survives the
+`sanitizeForLogging` step that strips `Error` instances to plain
+`{name, message, stack}` objects. `ConsoleTransport` ignores
+`rawMeta` (text output must not leak PII). The kickoff considered
+preserve-Error-through-sanitize and audit-and-fix-call-sites; the
+parallel-channel won because (a) creates a real PII leak surface
+(`error.message` on Stripe / Cloud Function rejections embeds
+tokens + URLs) and (c) is brittle (silent regression on every new
+`LOG.error('scope', e)` site). Headline regression test in
+`Logger.test.ts` proves end-to-end: `LOG.error('scope',
+errorInstance)` reaches `recordError` with reference identity
+preserved (pre-fix this test would fail). (2) `<ErrorBoundary/>`
+shipped at `src/presentation/components/error/ErrorBoundary.tsx` —
+function-component wrapper around an inner class component
+(React's `componentDidCatch` is class-only). Wrapper reads
+`useCrashReporting()` and passes the adapter into the class as a
+prop. `componentDidCatch` fires
+`crashReporting.recordError(error, 'ErrorBoundary')` + a
+`crashReporting.log(...)` breadcrumb carrying the React component
+stack; both wrapped in try/catch + LOG-fallback so a synchronous
+SDK throw doesn't break the fallback render. Reset semantics: the
+"Try again" CTA bumps a `resetCount` in the wrapper passed as `key`
+to the inner class — React responds by unmounting + remounting,
+clearing `caughtError` and re-rendering children fresh
+(React-recommended pattern over conditionally clearing internal
+state). Mounted in `App.tsx` between `<ContainerProvider/>` and
+`<AppContent/>` (so `useCrashReporting()` resolves) — documented
+trade-off: a throw inside the container's `useMemo` would land
+above the boundary, acceptable since `buildContainer()` has no
+failure modes today. Fallback UI hides debug details
+(`error.name: error.message`) in production builds — only `__DEV__`
+shows them. Opportunistic third ship: ESLint
+`boundaries/element-types` migrated to v6 `boundaries/dependencies`
+with the new object-selector schema (same five `from → allow`
+rules, same enforcement semantics) — silences the deprecation
+warning that's been emitted since the v6 plugin upgrade in Phase 9
+Turn 1. Acceptance: **180 suites / 1515 tests** (+1 suite / +16
+tests over Turn 3 close at 179/1499 — at the lower end of the
+kickoff's "+2 to +4 / +15 to +25" estimate band; most new tests
+landed in the existing logger suites rather than new ones).
+Brittle-React-double-invocation note in the "if children still
+throw after Try again" test: assert
+`recordErrorCalls > initialCount` rather than `=== 2` because
+React 19 in dev may double-invoke `componentDidCatch` to surface
+buggy error-handling logic. **No native rebuild required** for
+Turn 6 — pure JS/TS work. RNFirebase modular-API migration
+deferred per kickoff Q3 (its own turn or Phase 10 cutover prep).
 
 **Phase 9 Turn 3 closed.** Sub-turn 3c shipped the only piece of UI
 surface in the entire turn: a `<DevToolsSection/>` component with
@@ -495,6 +550,7 @@ pending (Turn 5).
 | Phase 9 turn 3a | Crashlytics SDK seam — adapter + fake + DI + multi-transport logger | ✅     |
 | Phase 9 turn 3b | Crashlytics lifecycle hook + global error handler + transport mount | ✅     |
 | Phase 9 turn 3c | Dev-only force-crash entry point + Firebase Console smoke           | ✅     |
+| Phase 9 turn 6  | rawMeta channel + `<ErrorBoundary/>` + boundaries-rule migration    | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -566,7 +622,7 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 3b | `useCrashReportingLifecycle` + AppContent integration + global JS error handler            | ✅                             |
 | 9 turn 3c | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                | ✅                             |
 | 9 turn 4+ | DriverNavigation polish + SDK telemetry + cleanup grab-bag                                 | Pending                        |
-| 9 turn 6  | recordError-via-LOG-sanitize fix + `<ErrorBoundary/>` + cleanup grab-bag                   | Pending                        |
+| 9 turn 6  | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                   | ✅                             |
 | 10        | Cutover from legacy yeride                                                                 | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites

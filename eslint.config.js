@@ -96,29 +96,45 @@ module.exports = [
       'react-hooks/exhaustive-deps': 'warn',
 
       // ───── Architecture: dependency rule ─────
-      // Using the legacy `boundaries/element-types` rule. It emits a v6
-      // deprecation warning; migration to `boundaries/dependencies` with the
-      // new object-selector schema is tracked as a follow-up. The rule still
-      // works correctly and enforces the layer boundaries.
+      // Phase 9 turn 6 — migrated from the legacy `boundaries/element-types`
+      // rule to the v6 `boundaries/dependencies` rule with the
+      // object-selector schema. Same five `from → allow` rules; same
+      // enforcement semantics. The migration silences the v6 deprecation
+      // warning that's been emitted on every lint run since the plugin
+      // upgrade.
       //
       // `shared` is allowed to depend on `domain` because domain is the
       // architectural floor — small helpers like `formatDomainError` that
       // know about DomainError live legitimately in shared. The rule is
       // *not* a guard against depending on stable abstractions; it's a
       // guard against depending on volatile ones (data/presentation).
-      'boundaries/element-types': [
+      'boundaries/dependencies': [
         'error',
         {
           default: 'disallow',
           rules: [
-            { from: 'domain', allow: ['domain', 'shared'] },
-            { from: 'app', allow: ['domain', 'app', 'shared'] },
-            { from: 'data', allow: ['domain', 'data', 'shared'] },
             {
-              from: 'presentation',
-              allow: ['domain', 'app', 'presentation', 'shared'],
+              from: { type: 'domain' },
+              allow: { to: { type: ['domain', 'shared'] } },
             },
-            { from: 'shared', allow: ['domain', 'shared'] },
+            {
+              from: { type: 'app' },
+              allow: { to: { type: ['domain', 'app', 'shared'] } },
+            },
+            {
+              from: { type: 'data' },
+              allow: { to: { type: ['domain', 'data', 'shared'] } },
+            },
+            {
+              from: { type: 'presentation' },
+              allow: {
+                to: { type: ['domain', 'app', 'presentation', 'shared'] },
+              },
+            },
+            {
+              from: { type: 'shared' },
+              allow: { to: { type: ['domain', 'shared'] } },
+            },
           ],
         },
       ],
@@ -181,7 +197,7 @@ module.exports = [
     ],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
-      'boundaries/element-types': 'off',
+      'boundaries/dependencies': 'off',
     },
   },
   // Logger transport: this file IS the architectural sentinel that the rest

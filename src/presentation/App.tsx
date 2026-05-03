@@ -16,6 +16,7 @@ import { getStripePublishableKey } from '@shared/env';
 import { LOG } from '@shared/logger';
 
 import { AppContent } from './AppContent';
+import { ErrorBoundary } from './components/error/ErrorBoundary';
 import { ContainerProvider } from './di';
 import { navigationRef } from './navigation/navigationRef';
 import { RootNavigator } from './navigation/RootNavigator';
@@ -36,9 +37,12 @@ import { RootNavigator } from './navigation/RootNavigator';
  *                                    context hook and push it into our adapter.
  *           QueryClientProvider    ← TanStack Query for server cache
  *             ContainerProvider    ← DI container (use cases)
- *               AppContent         ← auth listener + session bootstrapping
- *                 NavigationContainer ← React Navigation
- *                   RootNavigator  ← conditional auth/main routing
+ *               ErrorBoundary      ← Phase 9 turn 6 — render-phase error
+ *                                    capture; reads useCrashReporting()
+ *                                    from the DI container
+ *                 AppContent       ← auth listener + session bootstrapping
+ *                   NavigationContainer ← React Navigation
+ *                     RootNavigator ← conditional auth/main routing
  *
  * `<StripeProvider/>` is mounted ABOVE `<ContainerProvider/>` so
  * `useStripe()` is callable from any screen — the Phase 6 turn 4 Connect
@@ -127,12 +131,14 @@ export function App() {
           >
             <QueryClientProvider client={queryClient}>
               <ContainerProvider>
-                <AppContent>
-                  <NavigationContainer ref={navigationRef}>
-                    <StatusBar style="auto" />
-                    <RootNavigator />
-                  </NavigationContainer>
-                </AppContent>
+                <ErrorBoundary>
+                  <AppContent>
+                    <NavigationContainer ref={navigationRef}>
+                      <StatusBar style="auto" />
+                      <RootNavigator />
+                    </NavigationContainer>
+                  </AppContent>
+                </ErrorBoundary>
               </ContainerProvider>
             </QueryClientProvider>
           </NavSdkProvider>

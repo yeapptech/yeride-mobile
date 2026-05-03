@@ -43,7 +43,13 @@ import type { LogLevel, LogTransport } from './Logger';
 export class CrashlyticsLogTransport implements LogTransport {
   constructor(private readonly crashReporting: CrashReportingService) {}
 
-  log(level: LogLevel, scope: string, message: string, meta?: unknown): void {
+  log(
+    level: LogLevel,
+    scope: string,
+    message: string,
+    meta?: unknown,
+    rawMeta?: unknown,
+  ): void {
     // Breadcrumb fan-out — every level. Format mirrors the
     // `[scope] message` shape the console transport produces, so a
     // crash report's breadcrumb section is human-readable next to the
@@ -53,8 +59,18 @@ export class CrashlyticsLogTransport implements LogTransport {
 
     // Non-fatal error fan-out — only at error level, only when meta
     // carries a real Error.
+    //
+    // **Phase 9 turn 6**: prefer `rawMeta` over `meta` for the
+    // extraction. The logger pipeline strips `Error` instances via
+    // `sanitizeForLogging` before they reach `meta` — converting them
+    // to plain `{name, message, stack}` objects that fail
+    // `extractError`'s `instanceof Error` check. The `rawMeta` channel
+    // carries the un-sanitized original payload precisely so this
+    // transport can still see the real Error reference. Falling back
+    // to `meta` keeps direct `transport.log(...)` test calls (which
+    // bypass the logger pipeline) working with the 4-arg form.
     if (level === 'error') {
-      const err = extractError(meta);
+      const err = extractError(rawMeta ?? meta);
       if (err !== null) {
         // The `name` arg to recordError tags the issue domain in
         // Firebase Console for triage (e.g. `'YeRide:RIDE'`,

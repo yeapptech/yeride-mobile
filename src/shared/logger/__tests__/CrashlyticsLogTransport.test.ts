@@ -100,6 +100,64 @@ describe('CrashlyticsLogTransport — recordError trigger (error level only)', (
   });
 });
 
+describe('CrashlyticsLogTransport — rawMeta channel (Phase 9 turn 6)', () => {
+  /**
+   * When called via the production logger pipeline, `meta` is the
+   * `sanitizeForLogging`-stripped view (Errors converted to plain
+   * `{name, message, stack}` objects) and `rawMeta` is the original
+   * Error reference. The transport must read `rawMeta` to satisfy
+   * `instanceof Error`.
+   *
+   * The `?? meta` fallback in `extractError` keeps the existing
+   * direct-call tests above (which only pass meta as the 4th arg)
+   * working — those tests stand in for direct uses outside the
+   * logger pipeline.
+   */
+  it('reads rawMeta when present (LOG pipeline shape)', async () => {
+    const fake = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fake);
+    const err = new Error('original');
+    // Mimic exactly what `Logger.write` produces: meta is the sanitized
+    // plain-object stand-in (NOT instanceof Error), rawMeta is the
+    // original reference.
+    const sanitizedStandIn = { name: err.name, message: err.message };
+    transport.log('error', 'RIDE', 'failed', sanitizedStandIn, err);
+    await flushMicrotasks();
+    const recorded = fake.getRecordedErrors();
+    expect(recorded).toHaveLength(1);
+    // Reference identity — the SAME Error reference must reach
+    // `recordError`, not the sanitized stand-in.
+    expect(recorded[0]?.error).toBe(err);
+  });
+
+  it('rawMeta wins over meta when both could yield an Error', async () => {
+    const fake = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fake);
+    const metaErr = new Error('meta-source');
+    const rawErr = new Error('raw-source');
+    transport.log('error', 'RIDE', 'failed', metaErr, rawErr);
+    await flushMicrotasks();
+    const recorded = fake.getRecordedErrors();
+    expect(recorded).toHaveLength(1);
+    // rawMeta is the canonical channel for the production pipeline;
+    // when both have an Error the rawMeta wins.
+    expect(recorded[0]?.error).toBe(rawErr);
+  });
+
+  it('falls back to meta when rawMeta is absent (backward-compat for direct calls)', async () => {
+    const fake = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fake);
+    const err = new Error('meta only');
+    // 4-arg form — no rawMeta. This is what every test in the previous
+    // describe blocks does.
+    transport.log('error', 'RIDE', 'failed', err);
+    await flushMicrotasks();
+    const recorded = fake.getRecordedErrors();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.error).toBe(err);
+  });
+});
+
 describe('CrashlyticsLogTransport — failure isolation', () => {
   it('a recordError rejection does NOT throw out of log()', async () => {
     const fake = new FakeCrashReportingService();

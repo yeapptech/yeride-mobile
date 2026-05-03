@@ -19,8 +19,37 @@ import { sanitizeForLogging } from './sanitize';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/**
+ * Transport contract.
+ *
+ * The optional 5th `rawMeta` argument (Phase 9 turn 6) carries the
+ * **original** un-sanitized meta payload alongside `meta` (the
+ * `sanitizeForLogging`-stripped view). Two kinds of transports use the
+ * two channels:
+ *
+ *   - **Text-output transports** (`ConsoleTransport`) read `meta` only —
+ *     they emit human-readable lines and must never leak PII.
+ *   - **Telemetry transports** (`CrashlyticsLogTransport`'s
+ *     non-fatal-error fan-out) read `rawMeta` so they can detect
+ *     `instanceof Error` — which `sanitizeForLogging` strips by
+ *     converting Errors to plain `{name, message, stack}` objects. The
+ *     telemetry transport still passes the FORMATTED `[scope] message`
+ *     string into the breadcrumb buffer, so the un-sanitized rawMeta
+ *     never reaches Firebase Console — only the Error reference itself
+ *     is followed for `recordError`.
+ *
+ * `rawMeta` is optional so that direct `transport.log(...)` calls in
+ * tests still work with the 4-arg form (the transport falls back to
+ * `meta` when `rawMeta` is absent).
+ */
 export interface LogTransport {
-  log(level: LogLevel, scope: string, message: string, meta?: unknown): void;
+  log(
+    level: LogLevel,
+    scope: string,
+    message: string,
+    meta?: unknown,
+    rawMeta?: unknown,
+  ): void;
 }
 
 const LEVEL_RANK: Record<LogLevel, number> = {
@@ -31,9 +60,17 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 };
 
 export class ConsoleTransport implements LogTransport {
-  log(level: LogLevel, scope: string, message: string, meta?: unknown): void {
+  log(
+    level: LogLevel,
+    scope: string,
+    message: string,
+    meta?: unknown,
+    _rawMeta?: unknown,
+  ): void {
     const tag = `[${scope}]`;
     const args: unknown[] = [tag, message];
+    // `meta` is the sanitized view; `_rawMeta` is intentionally ignored
+    // here because text-output must never leak PII.
     if (meta !== undefined) args.push(meta);
     // We deliberately avoid `console.log` (banned by ESLint), but `debug`,
     // `info`, `warn`, and `error` are all available and route to the
@@ -94,12 +131,18 @@ export class CompositeTransport implements LogTransport {
     return this.transports.slice();
   }
 
-  log(level: LogLevel, scope: string, message: string, meta?: unknown): void {
+  log(
+    level: LogLevel,
+    scope: string,
+    message: string,
+    meta?: unknown,
+    rawMeta?: unknown,
+  ): void {
     // Iterate over a snapshot so a transport that mutates the list (e.g.
     // self-detaching on first error) doesn't break iteration.
     for (const t of [...this.transports]) {
       try {
-        t.log(level, scope, message, meta);
+        t.log(level, scope, message, meta, rawMeta);
       } catch {
         // Per-transport failure is silently swallowed: logging must
         // never break the calling code, and we can't recursively log
@@ -173,7 +216,11 @@ class Logger {
   private write(level: LogLevel, message: string, meta?: unknown): void {
     if (LEVEL_RANK[level] < LEVEL_RANK[this.minLevel]) return;
     const safeMeta = meta === undefined ? undefined : sanitizeForLogging(meta);
-    this.transport.log(level, this.scope, message, safeMeta);
+    // Phase 9 turn 6 — pass the original `meta` through as the optional
+    // 5th `rawMeta` arg. The console transport ignores it; the
+    // CrashlyticsLogTransport reads it so `extractError`'s
+    // `instanceof Error` check survives the sanitize step.
+    this.transport.log(level, this.scope, message, safeMeta, meta);
   }
 }
 
