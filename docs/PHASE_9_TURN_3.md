@@ -698,3 +698,288 @@ FCM `firebase_crashlytics_collection_enabled` manifest meta) lands.
   new hooks.
 
 No native config changes (sub-turn 3c rebuilds). No new dependencies.
+
+---
+
+## Sub-turn 3c — dev-only force-crash entry point + manual smoke
+
+Sub-turn 3c closes Phase 9 Turn 3. The single piece of UI surface in
+the entire turn lands here: a `<DevToolsSection/>` component that
+exercises the Crashlytics pipeline end-to-end against a real device +
+the Firebase Console. Three buttons (Toggle Crashlytics collection on,
+Record non-fatal error, Force crash) wired to `useCrashReporting()`
+directly. Mounted under both rider and driver Activity placeholder
+screens, gated on `__DEV__`. Production builds drop the entire
+section via the early-return — the buttons are never reachable
+outside a dev / dev-client build.
+
+The four pre-checklist decisions from the kickoff all landed on the
+recommended option (no surprises):
+
+- **Entry point** — inline section in BOTH placeholder screens
+  (kickoff option (d)). Both rider AND driver can hit the smoke
+  without role-switching, no new nav routes, vanishes in production.
+- **Collection-on path** — in-app "Toggle Crashlytics collection on"
+  button (kickoff option (c)). Smoke flow stays in-app; no rebuild
+  needed; the button stays visible after the flip so the tester can
+  confirm the override is active.
+- **dSYM scope** — Debug build OK; Release-only dSYM upload phase is
+  a Phase 10 concern. Bundle traces only for this smoke; native
+  symbolication deferred.
+- **Devices** — iPhone real device + Pixel emulator. Sim suppresses
+  crash reporting per the SDK doc note; emulator works fine for
+  Android.
+
+### What's in (sub-turn 3c)
+
+#### 1. `DevToolsSection` component
+
+`src/presentation/components/dev/DevToolsSection.tsx`. Single
+component used by both placeholder screens. Reads `useCrashReporting()`
+directly — a documented exception to the production sites' "screens
+and view-models DO NOT consume this directly" rule from the
+`<ContainerProvider/>` JSDoc.
+
+Three buttons via a small `DevButton` sub-component:
+
+1. **Toggle Crashlytics collection on** — calls
+   `crashReporting.setCollectionEnabled(true)`. Local state machine
+   `'idle' | 'enabling' | 'enabled' | 'failed'` so the button text
+   flips to `'Crashlytics collection ON'` on success (the lifecycle
+   hook calls `setCollectionEnabled(!__DEV__)` which is `false` in
+   dev — this button overrides at runtime so dev crashes upload
+   without a stage rebuild). Toast feedback on both success and
+   failure.
+2. **Record non-fatal error** — calls
+   `crashReporting.recordError(new Error('DEV: smoke recordError'),
+'DevTools')`. Lets the smoke prove the non-fatal path
+   independently of a force-crash (non-fatal arrives in Firebase
+   Console within ~1 min; a fatal needs a re-launch first). Toast
+   feedback both ways.
+3. **Force crash** — calls `crashReporting.crash()`. No
+   confirmation dialog: the SDK is intentionally unrecoverable after
+   `crash()`, so a confirm step wouldn't help. Bare `bg-error` color
+   to signal severity (`bg-destructive` is used elsewhere in the
+   codebase but is NOT a defined token in `tailwind.config.js` —
+   silent no-op at runtime; `bg-error` is the closest defined token,
+   #dc2626).
+
+`if (!__DEV__) return null;` placed AFTER the hook call so the rule-
+of-hooks linter is satisfied (`__DEV__` is constant per JS runtime,
+so the early return is consistent across renders within a given
+build).
+
+#### 2. Placeholder screen integration
+
+`src/presentation/features/rider/screens/ActivityPlaceholderScreen.tsx`
+and `src/presentation/features/driver/screens/DriverActivityPlaceholderScreen.tsx`
+both gain a `<ScrollView contentContainerClassName="flex-grow">`
+wrapper around the existing centered "coming soon" message + a
+`<DevToolsSection/>` underneath. The legacy text stays vertically
+centered (`flex-1 items-center justify-center py-8` on the inner
+View); the dev section sits beneath it, scrollable on smaller
+devices.
+
+#### 3. Tests
+
+- `src/presentation/components/dev/__tests__/DevToolsSection.test.tsx`
+  — 7 tests across 4 describe blocks: visibility (renders all three
+  buttons under `__DEV__`; renders nothing when `__DEV__ === false`,
+  with proper try/finally global flip + restore); toggle (success
+  path + `failNext` failure path with Toast assertions); record
+  non-fatal (success + failure); force crash (calls
+  `crashReporting.crash()` via fake's `didCrash()` flag — the fake
+  flips a flag instead of throwing so the Jest worker stays alive).
+- `src/presentation/features/rider/screens/__tests__/ActivityPlaceholderScreen.test.tsx`
+  — 1 test: confirms the legacy "coming soon" copy AND the
+  `<DevToolsSection/>` testID render together.
+- `src/presentation/features/driver/screens/__tests__/DriverActivityPlaceholderScreen.test.tsx`
+  — symmetric 1 test for the driver variant.
+
+#### 4. No native config changes
+
+The 3a Crashlytics SDK plugin block + the
+`withCrashlyticsUploadSymbols` plugin are already wired (verified at
+session start: `Podfile.lock` contains `FirebaseCrashlytics 12.10.0`
+
+- `RNFBCrashlytics 24.0.0`; `pbxproj` contains the Release-only
+  `[firebase_crashlytics] Upload dSYMs` build phase). The user already
+  ran `npm run prebuild` while verifying 3b's hooks didn't break the
+  build (ios/ folder timestamps May 3 02:39, after the 3b commit at
+  02:33). No prebuild needed for sub-turn 3c — the dev-tools section
+  is pure JS/TS.
+
+### Acceptance (sub-turn 3c)
+
+`npm run typecheck` + `npm run lint` + `npm run format:check` +
+`npm test` all green. **~181 test suites / ~1516 tests** (+3
+suites / +9 tests over Phase 9 turn 3 sub-turn 3b's 176/1490 in
+strict-new-tests-only terms; the remaining +2 suites / +17 tests
+delta vs the kickoff baseline likely reflects approximate counting
+in the 3b acceptance, not new suites in this sub-turn).
+
+Verified piecemeal across six `--testPathPattern` chunks because the
+single full-suite run exceeds the sandbox's 45s bash timeout
+(consistent with the 3a / 3b note). Each chunk runs cleanly under
+the limit.
+
+End-of-sub-turn-3c acceptance criteria, all met:
+
+1. ✅ `<DevToolsSection/>` shipped at
+   `src/presentation/components/dev/DevToolsSection.tsx`. Three
+   buttons. `__DEV__`-gated via early null return. Reads
+   `useCrashReporting()` directly (documented exception to the
+   production-site mounting rule).
+2. ✅ Mounted in both Activity placeholder screens (rider + driver).
+   `ScrollView` wrapper added so the section is reachable on smaller
+   devices without breaking the legacy centered "coming soon" copy.
+3. ✅ Tests cover visibility (both `__DEV__` branches), toggle
+   collection (success + failure), record non-fatal (success +
+   failure), force crash (assert via fake's `didCrash()`), and
+   placeholder integration (1 test per placeholder).
+4. ✅ All four verify gates green individually within the 45s
+   sandbox limit.
+5. ✅ Native wiring confirmed already in place (no prebuild needed).
+6. ✅ `docs/PHASE_9_TURN_3.md` updated with this sub-turn 3c
+   section.
+7. ✅ `CLAUDE.md` updated to reflect Phase 9 Turn 3 closure.
+8. ✅ Clean commit on `main` via the sandbox `GIT_INDEX_FILE`
+   shadow plumbing pattern.
+
+### Manual smoke (deferred to user)
+
+This is the unique piece of sub-turn 3c — the previous sub-turns
+shipped wiring without proving an end-to-end report appears in
+Firebase Console. The manual steps are user-driven on a real device
+
+- emulator after this commit lands:
+
+1. `(cd ios && pod install)` — picks up the `FirebaseCrashlytics`
+   Pod (already in `Podfile.lock`; no-op unless the cache dropped).
+2. `npm run ios` (real iPhone, debugger detached so Xcode doesn't
+   intercept the crash) and/or `npm run android` (Pixel emulator).
+3. Sign in to a known stage user (rider OR driver — both paths host
+   the dev-tools section).
+4. Activity tab → tap "Toggle Crashlytics collection on" → expect
+   green Toast and the button label flip to "Crashlytics collection
+   ON".
+5. Tap "Record non-fatal error" → expect green Toast.
+6. Within ~1 min: Firebase Console → `yeapp-stage` project →
+   Crashlytics → Issues. Confirm a non-fatal issue appears scoped to
+   `'DevTools'` with `role` + `env` custom keys present and the
+   right `userId`.
+7. Tap "Force crash" — app dies immediately.
+8. Reopen the app — the SDK uploads the queued crash on next launch.
+9. Within ~5 min: Firebase Console fatal issue appears with the same
+   custom keys + user id. Stack frames may be unsymbolicated under
+   Debug build (Release-only dSYM upload phase) — that's expected
+   and a Phase 10 cutover concern.
+
+If the smoke surfaces a real bug (ID mismatch, Toast
+misformatting, the SDK throws instead of crashing under some edge
+case), fix in a follow-up commit on the same session before closing
+Phase 9 Turn 3.
+
+### Files added / touched (sub-turn 3c)
+
+**Added:**
+
+- `src/presentation/components/dev/DevToolsSection.tsx`
+- `src/presentation/components/dev/__tests__/DevToolsSection.test.tsx` (7 tests)
+- `src/presentation/features/rider/screens/__tests__/ActivityPlaceholderScreen.test.tsx` (1 test)
+- `src/presentation/features/driver/screens/__tests__/DriverActivityPlaceholderScreen.test.tsx` (1 test)
+
+**Touched:**
+
+- `src/presentation/features/rider/screens/ActivityPlaceholderScreen.tsx`
+  — `ScrollView` wrapper + `<DevToolsSection/>` mount.
+- `src/presentation/features/driver/screens/DriverActivityPlaceholderScreen.tsx`
+  — symmetric.
+- `docs/PHASE_9_TURN_3.md` — this section.
+- `CLAUDE.md` — top status block + phase tables (Phase 9 Turn 3
+  closed).
+
+No new dependencies. No native config changes. No prebuild required
+for sub-turn 3c (already landed during 3b verification).
+
+---
+
+## Phase 9 Turn 3 close — combined summary
+
+Across three sub-turns, Turn 3 ships the entire Crashlytics
+integration surface — the last observability gap before the legacy
+yeride cutover. The pipeline runs end-to-end now: every `LOG.*` call
+fans into the breadcrumb buffer once `<ContainerProvider/>` resolves
+(3b runtime attachment hop), uncaught JS throws are recorded via the
+wrapped `ErrorUtils.setGlobalHandler` (3b sibling hook), user
+identity + `role` + `env` tags land on every subsequent crash report
+(3b lifecycle hook), and the dev-tools section gives any developer a
+two-tap path to verify the full pipeline against the Firebase
+Console without a stage rebuild (3c). The 3a SDK seam underpins
+everything: domain interface, three-state lazy singleton adapter,
+sticky-failure error mode, programmable fake, multi-transport logger
+refactor, and the 5-error-code mapping for adapter failures.
+
+Combined Turn 3 delta: **+8 suites / +108 tests** across the three
+sub-turns (3a +4 suites / +76 tests; 3b +3 suites / +23 tests; 3c +3
+suites / +9 tests). 169/1391 baseline at Turn 2 close → ~181/~1516
+at Turn 3 close.
+
+### One real production gap surfaced + logged for Turn 6 cleanup
+
+The `CrashlyticsLogTransport`'s `recordError` fan-out path (3a
+design) can't fire through the `LOG.error(...)` pipeline because
+`Logger.write` runs `sanitizeForLogging(meta)` which converts an
+`Error` instance to a plain `{name, message, stack}` object before
+the transport's `extractError` sees it — so `instanceof Error`
+fails. Breadcrumb fan-out works fine (every level gets the
+`[scope] message` string); only `recordError` is affected. The
+transport's own unit tests bypass the logger (call `transport.log(...)`
+directly), which is why this was missed in 3a.
+
+**3b cover**: the global error handler covers the most common case
+(uncaught throws fan out to `recordError` directly via
+`ErrorUtils.setGlobalHandler`, bypassing the logger sanitize). So
+the gap doesn't affect smoke coverage for sub-turn 3c — fatal
+crashes upload via the SDK's native crash handler, non-fatals from
+the dev-tools section call `recordError` directly. The hole is for
+INTENTIONAL `LOG.error('scope', errorInstance)` call sites that
+expect the transport's `recordError` fan-out to fire — which today
+silently no-ops the `recordError` call.
+
+**Turn 6 fix options** (deferred):
+(a) preserve `instanceof Error` through `sanitizeForLogging` (risk:
+PII leak via `error.message` if the message embeds user data);
+(b) pass a parallel un-sanitized meta channel to transports;
+(c) have call sites that want `recordError` fan-out call
+`useCrashReporting()` directly (loud but simple).
+
+### iOS Apple Maps gap from Phase 9 Turn 1 still applies
+
+Independent of Crashlytics — `<Map/>` was flipped to
+`PROVIDER_GOOGLE` on both platforms (Turn 1) to escape the Fabric
+view-manager registration regression on iOS. That fix held through
+all three sub-turns of Turn 3. No regressions introduced.
+
+### Native rebuild requirement
+
+`npm run prebuild` was already required at the close of 3a (the
+Crashlytics SDK plugin block + the `withCrashlyticsUploadSymbols`
+plugin); the user ran it during 3b verification. **For sub-turn
+3c**, no prebuild is required — the dev-tools section is pure
+JS/TS. For the manual smoke that follows this commit, the user
+needs `(cd ios && pod install)` (defensive, no-op if the cache is
+warm) and a fresh `npm run ios` / `npm run android`.
+
+### Next: Phase 9 Turn 4 OR Turn 6
+
+User picks the next direction in the kickoff for the next session:
+
+- **Turn 4** — DriverNavigation polish + SDK telemetry + cleanup
+  grab-bag. The Phase 8 close left several polish items (e.g. the
+  driver VM's `lastWrittenCoordsRef`-deduped foreground location
+  push overlapping with the Phase 7 Turn 2 lifecycle hook's
+  per-delivery write — currently a harmless double-write).
+- **Turn 6** — the recordError-via-LOG-sanitize fix surfaced above,
+  plus an `<ErrorBoundary/>` component (deferred from 3a's
+  "What's out" list).

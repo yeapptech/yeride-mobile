@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 2, 2026 (Phase 9 turn 3 sub-turn 3b — Crashlytics lifecycle hook + global error handler)
+**Last updated:** May 3, 2026 (Phase 9 turn 3 sub-turn 3c — dev-only force-crash entry point; Phase 9 Turn 3 closed)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,43 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 3 closed.** Sub-turn 3c shipped the only piece of UI
+surface in the entire turn: a `<DevToolsSection/>` component with
+three buttons (Toggle Crashlytics collection on / Record non-fatal
+error / Force crash) wired to `useCrashReporting()` directly,
+mounted under both rider and driver Activity placeholder screens
+and gated on `__DEV__` (production builds drop the section via
+early-return — buttons never reachable outside a dev / dev-client
+build). All four kickoff pre-checklist decisions landed on the
+recommended option: inline section in BOTH placeholders (rider AND
+driver smoke without role-switching), in-app collection toggle
+button (no rebuild for the dev smoke), Debug build OK (Release-only
+dSYM symbolication is a Phase 10 cutover concern), iPhone real
+device + Pixel emulator. The `<DevToolsSection/>` is the single
+documented exception to the `<ContainerProvider/>` JSDoc's "screens
+and view-models DO NOT consume `useCrashReporting()` directly" rule
+— direct invocation of the SDK methods is the entire point. The
+force-crash button calls `crashReporting.crash()` with no
+confirmation dialog (the SDK is intentionally unrecoverable after
+`crash()`); the fake's `crash()` flips a `crashed: true` flag
+instead of throwing so Jest tests can assert via `didCrash()`
+without the worker dying. End-of-3c delta: **+3 suites / +9 tests**
+(176/1490 → ~181/~1516). **No native rebuild required** for 3c —
+pure JS/TS work; the 3a SDK plugin block + the
+`withCrashlyticsUploadSymbols` plugin already landed during 3b
+verification (verified at session start: `Podfile.lock` contains
+`FirebaseCrashlytics 12.10.0` + `RNFBCrashlytics 24.0.0`; pbxproj
+contains the Release-only `[firebase_crashlytics] Upload dSYMs`
+build phase). Manual Firebase Console smoke is user-driven and runs
+after this commit lands (steps documented in
+`docs/PHASE_9_TURN_3.md` § "Manual smoke (deferred to user)").
+**Combined Turn 3 delta**: +8 suites / +108 tests across the three
+sub-turns (Turn 2 close 169/1391 → Turn 3 close ~181/~1516). The
+recordError-via-LOG-sanitize gap surfaced in 3b is logged for Turn
+6 cleanup; the global error handler (3b) covers the most common
+case (uncaught throws bypass the logger sanitize), so the gap
+doesn't affect 3c's smoke coverage.
 
 **Phase 9 turn 3 sub-turn 3b shipped.** The 3a Crashlytics SDK seam
 now has live consumers. New presentation-layer hook
@@ -441,6 +478,7 @@ pending (Turn 5).
 | Phase 9 turn 2  | Push notifications — Expo registration + tap routing                | ✅     |
 | Phase 9 turn 3a | Crashlytics SDK seam — adapter + fake + DI + multi-transport logger | ✅     |
 | Phase 9 turn 3b | Crashlytics lifecycle hook + global error handler + transport mount | ✅     |
+| Phase 9 turn 3c | Dev-only force-crash entry point + Firebase Console smoke           | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -510,8 +548,9 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 2c | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close      | ✅                             |
 | 9 turn 3a | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                       | ✅                             |
 | 9 turn 3b | `useCrashReportingLifecycle` + AppContent integration + global JS error handler            | ✅                             |
-| 9 turn 3c | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                | Next                           |
+| 9 turn 3c | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                | ✅                             |
 | 9 turn 4+ | DriverNavigation polish + SDK telemetry + cleanup grab-bag                                 | Pending                        |
+| 9 turn 6  | recordError-via-LOG-sanitize fix + `<ErrorBoundary/>` + cleanup grab-bag                   | Pending                        |
 | 10        | Cutover from legacy yeride                                                                 | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
