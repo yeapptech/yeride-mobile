@@ -1,4 +1,12 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  type ReactNode,
+} from 'react';
+
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 
 import { buildContainer, type Container, type UseCases } from './container';
 
@@ -15,12 +23,36 @@ interface ContainerProviderProps {
 
 /**
  * Provides the DI container to the React tree. Wrap the app root in this once.
+ *
+ * Phase 9 turn 3 sub-turn 3b: also attaches the `CrashlyticsLogTransport`
+ * to the singleton `LOG` once the container resolves, and detaches on
+ * unmount. Keyed on the resolved container reference so a rare prop-swap
+ * (tests) re-wires cleanly. The transport is always attached — even in
+ * dev / fakes-only builds where `crashReporting` is the in-memory fake;
+ * the fake silently records breadcrumbs to memory, so the runtime
+ * behavior of every consumer of `LOG.*` is unchanged whether or not
+ * Firebase is configured.
  */
 export function ContainerProvider({
   container,
   children,
 }: ContainerProviderProps) {
   const value = useMemo(() => container ?? buildContainer(), [container]);
+
+  // Phase 9 turn 3 sub-turn 3b — runtime attachment hop. The
+  // `CrashlyticsLogTransport` can't be attached at logger module-load
+  // because the SDK isn't available until the DI container resolves.
+  // Mounting it here ties the transport's lifetime to the provider's,
+  // so a test that mounts + unmounts the provider doesn't leak the
+  // transport across tests.
+  useEffect(() => {
+    const transport = new CrashlyticsLogTransport(value.crashReporting);
+    LOG.addTransport(transport);
+    return () => {
+      LOG.removeTransport(transport);
+    };
+  }, [value]);
+
   return (
     <ContainerContext.Provider value={value}>
       {children}

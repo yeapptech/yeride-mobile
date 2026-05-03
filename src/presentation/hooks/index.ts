@@ -14,3 +14,8 @@ export {
 } from './useActiveRideForGeofence';
 export { usePushTokenRegistration } from './usePushTokenRegistration';
 export { useNotificationResponseHandler } from './useNotificationResponseHandler';
+export {
+  useCrashReportingLifecycle,
+  type UseCrashReportingLifecycleArgs,
+} from './useCrashReportingLifecycle';
+export { useGlobalErrorHandler } from './useGlobalErrorHandler';

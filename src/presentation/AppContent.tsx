@@ -5,6 +5,8 @@ import { NotificationPermissionSheet } from '@presentation/components/notificati
 import { useUseCases } from '@presentation/di';
 import {
   useActiveRideForGeofence,
+  useCrashReportingLifecycle,
+  useGlobalErrorHandler,
   useGpsLifecycle,
   useNotificationResponseHandler,
   usePushTokenRegistration,
@@ -18,6 +20,7 @@ import {
   useSessionStatus,
   useSessionStore,
 } from '@presentation/stores';
+import { ENV } from '@shared/env';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('AppContent');
@@ -143,6 +146,23 @@ export function AppContent({ children }: { children: ReactNode }) {
       useNotificationPermissionUiStore.getState().reset();
     }
   }, [sessionStatus]);
+
+  /* ──────────── Phase 9 turn 3 sub-turn 3b: Crashlytics ──────────── */
+
+  // Configure the Crashlytics SDK: collection toggle on first mount,
+  // setUserId + setAttributes({role, env}) after auth resolves, clear
+  // identity on sign-out. Mirrors the legacy
+  // `yeride/AppContent.js` post-userSubscribe block (lines ~380-390)
+  // and sign-out clear (line ~547). The `CrashlyticsLogTransport`
+  // attached from `<ContainerProvider/>` covers the breadcrumb +
+  // non-fatal-error stream.
+  useCrashReportingLifecycle({ user, env: ENV.EXPO_PUBLIC_APP_ENV });
+
+  // Wrap RN's global JS error handler so uncaught throws are recorded
+  // to Crashlytics before the red-box / silent crash. Mounted as a
+  // sibling hook (kickoff decision (c)) for cleaner test boundary +
+  // ESLint scoping.
+  useGlobalErrorHandler();
 
   /* ──────────── Phase 9 turn 2: push-notification registration ──────────── */
 
