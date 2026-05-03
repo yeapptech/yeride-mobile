@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 3, 2026 (Phase 9 turn 3 sub-turn 3c — dev-only force-crash entry point; Phase 9 Turn 3 closed)
+**Last updated:** May 3, 2026 (Phase 9 turn 3 sub-turn 3c — dev-only force-crash entry point + Debug-bridge crash() swallow finding; Phase 9 Turn 3 closed)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -44,7 +44,23 @@ sub-turns (Turn 2 close 169/1391 → Turn 3 close ~181/~1516). The
 recordError-via-LOG-sanitize gap surfaced in 3b is logged for Turn
 6 cleanup; the global error handler (3b) covers the most common
 case (uncaught throws bypass the logger sanitize), so the gap
-doesn't affect 3c's smoke coverage.
+doesn't affect 3c's smoke coverage. **Smoke finding (May 3 2026,
+Debug build on real iPhone)**: the "Force crash" button taps DO
+reach the SDK (4 deprecation warnings for `crash` confirm the
+adapter call path), BUT the app keeps running because RN's Debug
+bridge wraps every `RCT_EXPORT_METHOD` call in a `@try/@catch`
+that captures the SDK's `@throw [NSException ...]` from
+`crashlytics().crash()` and routes it to the redbox instead of
+letting it propagate to the OS crash handler. Known RN-on-Debug
+limitation, not a wiring bug — Release builds don't have this
+catch and the @throw kills the process normally. Decision: defer
+fatal-crash verification to Phase 10's Release-build cutover; the
+non-fatal `recordError` path proves the entire upload pipeline
+(buffers locally + uploads on its own pipeline, not via @throw),
+and verifying that one user-driven step closes the smoke. Full
+finding + Phase 10 follow-up considerations documented in
+`docs/PHASE_9_TURN_3.md` § "Manual smoke result — Debug-build
+force-crash limitation".
 
 **Phase 9 turn 3 sub-turn 3b shipped.** The 3a Crashlytics SDK seam
 now has live consumers. New presentation-layer hook

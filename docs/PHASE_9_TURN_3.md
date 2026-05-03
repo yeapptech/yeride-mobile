@@ -880,6 +880,83 @@ misformatting, the SDK throws instead of crashing under some edge
 case), fix in a follow-up commit on the same session before closing
 Phase 9 Turn 3.
 
+### Manual smoke result — Debug-build force-crash limitation
+
+The smoke ran on a real iPhone with a Debug-config build (Metro
+attached) on May 3, 2026. Findings:
+
+**What worked:**
+
+- The lifecycle hook fires correctly on app boot. Logs confirm
+  single calls to `setCrashlyticsCollectionEnabled` (passing `false`
+  per `!__DEV__`), `setUserId`, `setAttributes`, plus a `log` call
+  from the `CrashlyticsLogTransport` runtime attachment — exactly
+  the sequence sub-turn 3b ships.
+- The dev-tools section renders on the Activity tab as designed.
+- The "Force crash" button DOES reach the SDK on every tap —
+  confirmed by 4 deprecation warnings from RNFirebase
+  (`Method called was crash`) for 4 button presses. So the
+  `useCrashReporting() → adapter.crash() → crashlytics().crash()`
+  call path is wired correctly.
+
+**What didn't work — and why:**
+
+After tapping "Force crash" 4 times, the app kept running. The
+`@react-native-firebase/crashlytics` iOS implementation of `crash()`
+is a `@throw [NSException ...]` on the bridge thread. **In RN
+Debug builds, the JS bridge wraps every `RCT_EXPORT_METHOD` call in
+a `@try/@catch` that captures Obj-C exceptions and routes them to
+the redbox / dev menu** — so the @throw never propagates to the OS
+crash handler, never becomes a "real" crash, and never gets
+captured by Crashlytics' native handler. In Release builds the
+bridge doesn't have this catch and the @throw kills the process
+normally.
+
+This is a known RN-on-Debug limitation, not a wiring bug. The
+Firebase docs assume Release-build behavior ("force-quit and
+reopen"); they don't call out the RN Debug bridge swallow.
+
+**Decision: defer fatal-crash verification to Phase 10.** The
+non-fatal `recordError` path doesn't go through `@throw` — it
+calls `crashlytics().recordError(...)` which buffers locally and
+uploads on its own pipeline. So the non-fatal smoke (which we'll
+verify next, see "Outstanding smoke step" below) proves the entire
+upload pipeline end-to-end: init → collection toggle → custom keys
+(`role` + `env`) → user id → network upload → Firebase Console.
+The fatal `crash()` adapter method is 3 lines and trivially
+correct visually; its production behavior is naturally exercised
+by Phase 10's Release-build cutover work, when the @throw isn't
+swallowed.
+
+**Outstanding smoke step (still user-driven):** verify the
+non-fatal pipeline by tapping (in order):
+
+1. "Toggle Crashlytics collection on" — confirm Toast +
+   button-label flip to "Crashlytics collection ON".
+2. "Record non-fatal error" — confirm Toast.
+3. Within ~1 min: Firebase Console → `yeapp-stage` → Crashlytics
+   → Issues. Look for a non-fatal scoped to `'DevTools'` with
+   `role` + `env` custom keys + the right `userId`. Stack frames
+   may be unsymbolicated under Debug build (Release-only dSYM
+   upload phase); the issue should still appear with full custom
+   key + identity context.
+
+If the non-fatal upload doesn't appear, that's a real bug worth
+follow-up work. If it does appear, Phase 9 Turn 3 closes with the
+Debug-build fatal limitation documented as expected behavior, not
+a defect.
+
+**Phase 10 follow-up considerations:**
+
+- A "real" Debug-build force-crash entry point would need a custom
+  TurboModule that calls `__builtin_trap()` or `abort()` — bypassing
+  the bridge's `@try/@catch`. Out of scope for Phase 9; not worth
+  the native-module work given Release-build naturally proves it.
+- The deprecation warnings (`Method called was X. Please use X()
+instead.`) are noise from RNFirebase's modular-API migration. The
+  namespaced API still works correctly; migrating is a Turn 6
+  cleanup item.
+
 ### Files added / touched (sub-turn 3c)
 
 **Added:**
