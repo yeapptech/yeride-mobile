@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 3, 2026 (Phase 9 Turn 6 closed — observability cleanup grab-bag: rawMeta channel + ErrorBoundary + boundaries-rule migration)
+**Last updated:** May 3, 2026 (Phase 9 Turn 4 closed — DriverNavigation polish + SDK telemetry: foreground-push removal + 5 warn→error flips for chain-fatal sites)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,57 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 4 closed.** DriverNavigation polish + SDK telemetry,
+spending the rawMeta channel that Turn 6 landed. Two ships, both
+in-band of the kickoff scope. (1) `useDriverMonitorViewModel`'s
+foreground location push effect (lines ~263-289 of the pre-Turn-4
+file: `lastWrittenCoordsRef` ref + the `useEffect` that deduped a
+per-coordinate write to `locations/{userId}`) is removed. The
+`useUpdateLocationMutation` import + the `useCurrentUserId` import +
+the `UserLocation` + `Coordinates` imports + the `driverLocation`
+arg field on `DriverMonitorViewModelArgs` all go with it; the
+`DriverMonitorScreen` call site updates to `useDriverMonitorViewModel({
+rideId })`. The Phase 7 Turn 2 `useGpsLifecycle` hook (mounted exactly
+once at AppContent) is now the single source of location writes — its
+location-subscription path fires `useUpdateLocationMutation.mutate(...)`
+per SDK delivery, gated by AppContent's `enabled` predicate (driver
+with `stripeChargesEnabled && stripePayoutsEnabled`) which already
+covers the same window the legacy `gpsStart(200)` gate did. The
+harmless double-write that landed in Phase 7 is gone with no
+end-user-visible behavior change. The VM JSDoc renumbers paragraphs
+(was 7, now 6) and gains a closing paragraph documenting the
+lifecycle hand-off. (2) Five chain-fatal `logger.warn` sites flip to
+`logger.error` so the rawMeta channel fans them out to `recordError`:
+nav VM lines 202 (`setDestinations failed`) / 213 (`non-OK route
+status`) / 225 (`startGuidance failed`) + monitor VM lines 418 (`terms
+dialog failed`) / 434 (`navigation init failed`). Four of the five
+already passed `Result.err.error` (a `DomainError`) so reference
+identity flows directly through to `recordError`. The fifth (`non-OK
+route status`) constructs an `Error` at the LOG site
+(`new Error(\`navigation_route_status: ${status}
+(subKind=${subKind})\`)`) so Crashlytics can group reports by the
+underlying `NavRouteStatus`value. Cleanup-best-effort sites (teardown`stopGuidance`/`cleanup`errors at nav VM lines 278 / 282) and the
+deliberate-user-choice site (terms-declined-by-user at monitor VM line
+428) intentionally stay at their existing levels — declining is not
+an error, and teardown failures don't affect the next trip. Each new`LOG.error`site has a regression test (3 nav VM + 2 monitor VM) that
+attaches a`CrashlyticsLogTransport`to the singleton`LOG`, drives
+the VM through the failure path, and asserts on
+`fakeCrash.getRecordedErrors()`— proves reference identity (or
+constructed-Error message substring for the route-status site) AND the
+correct`name` field (`'YeRide:DriverNavigationVM'`/`'YeRide:DriverMonitorVM'`). Pattern mirrors `Logger.test.ts:244-267`.
+The `useNavigationSdkConnector`hook was audited and found to have no
+error paths — pure controller bridge with two debug-level
+breadcrumbs, intentionally untouched. End-of-Turn-4 acceptance:
+**180 suites / 1519 tests** (+0 suites / +4 tests over Turn 6's
+180/1515 — 5 new telemetry tests minus 1 dropped foreground-push
+dedup test; at the lower end of the kickoff's "+3 to +9 tests"
+estimate band). **No native rebuild required** for Turn 4 — pure
+JS/TS work; no new dependencies; no plugin patches. Manual smoke
+checklist for the user is documented in`docs/PHASE_9_TURN_4.md` §
+"Smoke checklist (user-driven)" — confirms the foreground-push
+removal didn't regress driver-monitor map polylines / pickup-geofence
+flip / odometer reads.
 
 **Phase 9 Turn 6 closed.** Observability cleanup grab-bag covering
 the two follow-ups Turn 3's close logged. (1) The
@@ -551,6 +602,7 @@ pending (Turn 5).
 | Phase 9 turn 3b | Crashlytics lifecycle hook + global error handler + transport mount | ✅     |
 | Phase 9 turn 3c | Dev-only force-crash entry point + Firebase Console smoke           | ✅     |
 | Phase 9 turn 6  | rawMeta channel + `<ErrorBoundary/>` + boundaries-rule migration    | ✅     |
+| Phase 9 turn 4  | DriverNavigation polish + SDK telemetry + foreground-push removal   | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -621,7 +673,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 3a | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                       | ✅                             |
 | 9 turn 3b | `useCrashReportingLifecycle` + AppContent integration + global JS error handler            | ✅                             |
 | 9 turn 3c | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                | ✅                             |
-| 9 turn 4+ | DriverNavigation polish + SDK telemetry + cleanup grab-bag                                 | Pending                        |
+| 9 turn 4  | DriverNavigation polish + SDK telemetry + foreground-push removal                          | ✅                             |
+| 9 turn 5+ | Future Phase 9 polish (location-push exhaustion / GPS lifecycle telemetry / RNFirebase)    | Pending                        |
 | 9 turn 6  | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                   | ✅                             |
 | 10        | Cutover from legacy yeride                                                                 | Pending                        |
 

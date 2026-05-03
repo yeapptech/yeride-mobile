@@ -26,9 +26,10 @@ import { UserId } from '@domain/entities/UserId';
 import { AuthorizationError, NetworkError } from '@domain/errors';
 import { useDriverStatusStore, useGpsStore } from '@presentation/stores';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import {
+  FakeCrashReportingService,
   FakeNavigationSdkClient,
-  InMemoryLocationRepository,
   InMemoryRideRepository,
   TestContainerProvider,
 } from '@shared/testing';
@@ -73,7 +74,6 @@ function usd(m: number) {
 const MIAMI = unwrap(Coordinates.create(25.7617, -80.1918));
 const FORT_LAUDERDALE = unwrap(Coordinates.create(26.1224, -80.1373));
 const DRIVER_LOC = unwrap(Coordinates.create(25.79, -80.2));
-const DRIVER_LOC_MOVED = unwrap(Coordinates.create(25.795, -80.205));
 const RIDE_ID = unwrap(RideId.create('rideForMonitor1234567'));
 const DRIVER_ID = unwrap(UserId.create('driverxxxxxxxxxxxxxxxxxxxxxx'));
 
@@ -205,18 +205,16 @@ function makePaymentFailedRide(): Ride {
 
 interface SeededState {
   ridesRepo: InMemoryRideRepository;
-  locationsRepo: InMemoryLocationRepository;
 }
 
 function setupSeededState(opts?: { seedRide?: Ride }): SeededState {
   const ridesRepo = new InMemoryRideRepository();
-  const locationsRepo = new InMemoryLocationRepository();
   if (opts?.seedRide) {
     ridesRepo.seed(opts.seedRide);
   }
   // Production wires this in AppContent's auth observer; emulate it here.
   useSessionStore.getState().setSignedIn(DRIVER_ID);
-  return { ridesRepo, locationsRepo };
+  return { ridesRepo };
 }
 
 function withTestContainer(
@@ -226,7 +224,6 @@ function withTestContainer(
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       rides={setup.ridesRepo}
-      locations={setup.locationsRepo}
       {...(fakes?.navigationSdk ? { navigationSdk: fakes.navigationSdk } : {})}
     >
       {children}
@@ -282,7 +279,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -298,7 +294,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -315,7 +310,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -349,7 +343,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -394,7 +387,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -437,7 +429,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -467,7 +458,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -514,7 +504,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -543,44 +532,12 @@ describe('useDriverMonitorViewModel', () => {
     expect(mockReset).toHaveBeenCalledTimes(1);
   });
 
-  it('writes location once per fresh coordinate (dedup ref)', async () => {
-    const setup = setupSeededState({ seedRide: makeDispatchedRide() });
-    const { rerender } = renderHook(
-      (props: { coords: Coordinates | null }) =>
-        useDriverMonitorViewModel({
-          rideId: RIDE_ID,
-          driverLocation: props.coords,
-        }),
-      {
-        wrapper: withTestContainer(setup),
-        initialProps: { coords: DRIVER_LOC },
-      },
-    );
-
-    // First write fires off the initial coordinate.
-    await waitFor(() => {
-      expect(setup.locationsRepo.spies.updateLocation).toBe(1);
-    });
-
-    // Same coordinates again — should NOT fire a second write.
-    rerender({ coords: DRIVER_LOC });
-    await new Promise((r) => setTimeout(r, 30));
-    expect(setup.locationsRepo.spies.updateLocation).toBe(1);
-
-    // A new coordinate fires a new write.
-    rerender({ coords: DRIVER_LOC_MOVED });
-    await waitFor(() => {
-      expect(setup.locationsRepo.spies.updateLocation).toBe(2);
-    });
-  });
-
   it("ride flipping into 'completed' fires the terminal reset", async () => {
     const setup = setupSeededState({ seedRide: makeDispatchedRide() });
     const { result, rerender } = renderHook(
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -621,7 +578,6 @@ describe('useDriverMonitorViewModel', () => {
       () =>
         useDriverMonitorViewModel({
           rideId: RIDE_ID,
-          driverLocation: DRIVER_LOC,
         }),
       { wrapper: withTestContainer(setup) },
     );
@@ -652,7 +608,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup) },
       );
@@ -679,7 +634,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup) },
       );
@@ -709,7 +663,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup) },
       );
@@ -741,7 +694,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup) },
       );
@@ -876,7 +828,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -917,7 +868,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -952,7 +902,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -989,7 +938,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -1024,7 +972,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -1066,7 +1013,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -1091,7 +1037,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -1123,7 +1068,6 @@ describe('useDriverMonitorViewModel', () => {
         () =>
           useDriverMonitorViewModel({
             rideId: RIDE_ID,
-            driverLocation: DRIVER_LOC,
           }),
         { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
       );
@@ -1139,6 +1083,130 @@ describe('useDriverMonitorViewModel', () => {
       // Settled — flag should reset.
       expect(result.current.isLaunchingNavigation).toBe(false);
       expect(mockNavigate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Phase 9 turn 4 — telemetry: chain-fatal LOG.error sites in
+   * `onLaunchNavigation` must reach
+   * `CrashlyticsLogTransport.recordError` via the rawMeta channel
+   * (Phase 9 turn 6 contract). Pattern mirrors `Logger.test.ts:244-267`.
+   *
+   * Two sites covered:
+   *   - terms-dialog Result.err — error reference flows directly
+   *   - non-terms init Result.err — error reference flows directly
+   *
+   * Excluded: terms-declined-by-user is a deliberate user choice and
+   * stays at LOG.info (no recordError fan-out — declining is not an
+   * error).
+   */
+  describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 4)', () => {
+    /** Drains the microtask queue so async `void`-fired SDK calls land. */
+    const flushMicrotasks = () => Promise.resolve();
+
+    it('terms-dialog Result.err → recordError fires with the error reference', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const fake = new FakeNavigationSdkClient();
+        // First init returns terms_not_accepted → triggers terms dialog.
+        fake.failNext({
+          method: 'init',
+          error: new AuthorizationError({
+            code: 'navigation_terms_not_accepted',
+            message: 'terms',
+          }),
+        });
+        // Then the terms dialog itself fails with a network error.
+        const seededTermsError = new NetworkError({
+          code: 'navigation_show_terms_failed',
+          message: 'terms dialog crashed',
+        });
+        fake.failNext({
+          method: 'showTermsAndConditionsDialog',
+          error: seededTermsError,
+        });
+
+        const setup = setupSeededState({
+          seedRide: makeDispatchedRide(),
+        });
+        const { result } = renderHook(
+          () =>
+            useDriverMonitorViewModel({
+              rideId: RIDE_ID,
+            }),
+          { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+        );
+        await waitFor(() => {
+          expect(result.current.ride).not.toBeNull();
+        });
+
+        await act(async () => {
+          await result.current.onLaunchNavigation();
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededTermsError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe('YeRide:DriverMonitorVM');
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:DriverMonitorVM] terms dialog failed',
+          ]),
+        );
+        // Sanity: navigation never fired.
+        expect(mockNavigate).not.toHaveBeenCalled();
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('init Result.err (non-terms branch) → recordError fires with the error reference', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const seededInitError = new NetworkError({
+          code: 'navigation_init_network_error',
+          message: 'init transport down',
+        });
+        const fake = new FakeNavigationSdkClient();
+        fake.failNext({ method: 'init', error: seededInitError });
+
+        const setup = setupSeededState({
+          seedRide: makeDispatchedRide(),
+        });
+        const { result } = renderHook(
+          () =>
+            useDriverMonitorViewModel({
+              rideId: RIDE_ID,
+            }),
+          { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+        );
+        await waitFor(() => {
+          expect(result.current.ride).not.toBeNull();
+        });
+
+        await act(async () => {
+          await result.current.onLaunchNavigation();
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededInitError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe('YeRide:DriverMonitorVM');
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:DriverMonitorVM] navigation init failed',
+          ]),
+        );
+        expect(mockNavigate).not.toHaveBeenCalled();
+      } finally {
+        LOG.removeTransport(transport);
+      }
     });
   });
 });

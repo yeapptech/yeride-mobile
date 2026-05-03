@@ -94,7 +94,6 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
   useNavigationSdkConnector();
   const vm = useDriverMonitorViewModel({
     rideId,
-    driverLocation: currentLocation.coordinates,
   });
 
   const sheetRef = useRef<BottomSheet>(null);

@@ -3,11 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toast from 'react-native-toast-message';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
-import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { TripEvent } from '@domain/entities/TripEvent';
-import { UserLocation } from '@domain/entities/UserLocation';
 import { useNavigationSdk, useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
@@ -15,14 +13,12 @@ import {
   useCancelRideAsDriverMutation,
   useRequestPaymentMutation,
   useStartRideMutation,
-  useUpdateLocationMutation,
 } from '@presentation/queries';
 import {
   useDriverStatusStore,
   useGpsCurrentOdometer,
   useGpsIsInsidePickupGeofence,
 } from '@presentation/stores';
-import { useCurrentUserId } from '@presentation/stores/useSessionStore';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('DriverMonitorVM');
@@ -41,13 +37,7 @@ const logger = LOG.extend('DriverMonitorVM');
  *      events panel (Phase 9 polish) is a pure rendering add. Returned
  *      but not yet consumed by any status view.
  *
- *   3. Foreground location push: when the screen feeds in a fresh
- *      driver coordinate, write `users/{driverId}.location`. Uses the
- *      same `lastWrittenCoordsRef` dedup pattern as
- *      `useDriverHomeViewModel`. Phase 7 swaps the foreground source for
- *      the background-aware `useGpsLifecycle`.
- *
- *   4. Mode mirror into `useDriverStatusStore`. The store flag is what
+ *   3. Mode mirror into `useDriverStatusStore`. The store flag is what
  *      DriverHome / the tabs / a future Earnings surface read; we keep
  *      it in lock-step with the live ride.
  *        - `dispatched`             → 'dispatched'
@@ -56,7 +46,7 @@ const logger = LOG.extend('DriverMonitorVM');
  *        - `cancelled`              → 'online_idle' (driver re-joins
  *                                     the queue)
  *
- *   5. `arrivedAtPickup` UI flag, derived (Phase 7 turn 3) from
+ *   4. `arrivedAtPickup` UI flag, derived (Phase 7 turn 3) from
  *      `useGpsIsInsidePickupGeofence() || manualOverride`. The geofence
  *      half is event-driven by `useGpsLifecycle`'s pickup-geofence
  *      registration (mounted at AppContent). The manual override
@@ -69,7 +59,7 @@ const logger = LOG.extend('DriverMonitorVM');
  *      `'en_route_to_pickup'` ↔ `'at_pickup'` distinction (no server
  *      write — UI-only).
  *
- *   6. Three Cloud-Function-or-direct-write mutations:
+ *   5. Three Cloud-Function-or-direct-write mutations:
  *
  *        - `cancel({reason, odometerMeters?})` — wraps
  *          `useCancelRideAsDriverMutation` (driver-allowed code set
@@ -85,17 +75,21 @@ const logger = LOG.extend('DriverMonitorVM');
  *          `completeTrip` Cloud Function for server-side fare math
  *          (now against real GPS distance).
  *
- *   7. Terminal redirects on `cancelled` AND `completed`: both fire
+ *   6. Terminal redirects on `cancelled` AND `completed`: both fire
  *      `navigation.reset({ index: 0, routes: [{ name: 'DriverTabs' }] })`.
  *      `payment_failed` is intentionally NOT a terminal redirect — the
  *      driver stays on the screen and sees the failure card with the
  *      "Close trip" CTA. `redirectedRef` guards against re-firing
  *      across re-renders.
  *
- * Driver location is passed in by the screen (which owns
- * `useCurrentLocation`) — same testability seam DriverDispatch uses.
- * Tests can drive the VM with synthetic coordinates without an
- * `expo-location` mock.
+ * Phase 9 turn 4 removed the VM-owned foreground location push
+ * (`lastWrittenCoordsRef` + `useUpdateLocationMutation`). The
+ * Phase 7 turn 2 `useGpsLifecycle` hook (mounted exactly once at
+ * AppContent) now owns location writes — its location subscription
+ * fires `useUpdateLocationMutation.mutate(...)` per SDK delivery,
+ * gated by AppContent's `enabled` predicate which already covers
+ * the driver-on-trip state. The VM no longer takes a
+ * `driverLocation` arg.
  */
 
 export type DriverMonitorStatus =
@@ -165,19 +159,16 @@ export interface UseDriverMonitorViewModel {
 
 export interface DriverMonitorViewModelArgs {
   readonly rideId: RideId;
-  readonly driverLocation: Coordinates | null;
 }
 
 export function useDriverMonitorViewModel(
   args: DriverMonitorViewModelArgs,
 ): UseDriverMonitorViewModel {
-  const { rideId, driverLocation } = args;
+  const { rideId } = args;
   const useCases = useUseCases();
   const navigation = useNavigation<DriverStackNavigation>();
   const navigationSdk = useNavigationSdk();
-  const driverId = useCurrentUserId();
   const setMode = useDriverStatusStore((s) => s.setMode);
-  const updateLocationMutation = useUpdateLocationMutation();
   const cancelMutation = useCancelRideAsDriverMutation();
   const startMutation = useStartRideMutation();
   const requestPaymentMutation = useRequestPaymentMutation();
@@ -255,38 +246,6 @@ export function useDriverMonitorViewModel(
         return;
     }
   }, [ride, setMode]);
-
-  // ── Foreground location push ──────────────────────────────────
-  // Same dedup-ref pattern as `useDriverHomeViewModel`. The screen drives
-  // the source coordinate via `useCurrentLocation`; we only fire when
-  // it actually changes.
-  const lastWrittenCoordsRef = useRef<Coordinates | null>(null);
-  useEffect(() => {
-    if (!driverId || !driverLocation) return;
-    if (
-      lastWrittenCoordsRef.current &&
-      lastWrittenCoordsRef.current.equals(driverLocation)
-    ) {
-      return;
-    }
-    const locationR = UserLocation.create({
-      userId: driverId,
-      location: driverLocation,
-      speed: null,
-      updatedAt: new Date(),
-      tripTracking: null,
-    });
-    if (!locationR.ok) {
-      logger.warn('updateLocation: build failed', locationR.error);
-      return;
-    }
-    lastWrittenCoordsRef.current = driverLocation;
-    updateLocationMutation.mutate(locationR.value, {
-      onError: (e: unknown) => {
-        logger.warn('updateLocation: mutation failed', e);
-      },
-    });
-  }, [driverId, driverLocation, updateLocationMutation]);
 
   // ── Real odometer (Phase 7 turn 3) ─────────────────────────────
   // `useGpsLifecycle` (mounted at AppContent) drives
@@ -415,7 +374,12 @@ export function useDriverMonitorViewModel(
       if (!initR.ok && initR.error.code === 'navigation_terms_not_accepted') {
         const termsR = await navigationSdk.showTermsAndConditionsDialog();
         if (!termsR.ok) {
-          logger.warn('terms dialog failed', termsR.error);
+          // Phase 9 turn 4 — chain-fatal: the user can't proceed
+          // without accepting terms, and the dialog itself errored
+          // (not a deliberate decline). Flip warn→error so the
+          // rawMeta channel fans out to `recordError`. `termsR.error`
+          // is a `DomainError`.
+          logger.error('terms dialog failed', termsR.error);
           Toast.show({
             type: 'error',
             text1: 'Could not show terms dialog. Please try again.',
@@ -424,14 +388,19 @@ export function useDriverMonitorViewModel(
         }
         if (!termsR.value.accepted) {
           // User declined. Don't badger them with a Toast — declining
-          // is a deliberate choice.
+          // is a deliberate choice. Stays at info level (no
+          // recordError fan-out — declining is not an error).
           logger.info('terms declined by user');
           return;
         }
         initR = await navigationSdk.init();
       }
       if (!initR.ok) {
-        logger.warn('navigation init failed', initR.error);
+        // Phase 9 turn 4 — chain-fatal: navigation init failed for a
+        // reason other than terms-not-accepted (network, auth, etc.).
+        // Flip warn→error so the rawMeta channel fans out to
+        // `recordError`. `initR.error` is a `DomainError`.
+        logger.error('navigation init failed', initR.error);
         Toast.show({
           type: 'error',
           text1: 'Navigation unavailable',

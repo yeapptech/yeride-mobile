@@ -199,7 +199,11 @@ export function useDriverNavigationViewModel(
       const setR = await navigationSdk.setDestinations(setArgs);
       if (cancelled) return;
       if (!setR.ok) {
-        logger.warn('setDestinations failed', setR.error);
+        // Phase 9 turn 4 — chain-fatal failure surfaces in the error
+        // overlay; flip warn→error so the rawMeta channel fans out to
+        // `recordError`. `setR.error` is a `DomainError` (subclass of
+        // `Error`) so reference identity is preserved end-to-end.
+        logger.error('setDestinations failed', setR.error);
         setState({
           kind: 'error',
           subKind: 'network',
@@ -210,7 +214,18 @@ export function useDriverNavigationViewModel(
       const status: NavRouteStatus = setR.value;
       if (status !== 'ok') {
         const subKind = mapRouteStatusToErrorKind(status);
-        logger.warn('non-OK route status', { status, subKind });
+        // Phase 9 turn 4 — chain-fatal: the SDK reports a non-OK
+        // status (e.g. NO_ROUTE_FOUND, LOCATION_DISABLED) but did not
+        // throw. Construct an Error so the rawMeta channel can fan
+        // out to `recordError`; bake the status code into the message
+        // so Crashlytics can group reports by the underlying status.
+        // The `{status, subKind}` object remains in the message text
+        // for the breadcrumb stream — see scope `'non-OK route
+        // status'`.
+        logger.error(
+          'non-OK route status',
+          new Error(`navigation_route_status: ${status} (subKind=${subKind})`),
+        );
         setState({
           kind: 'error',
           subKind,
@@ -222,7 +237,10 @@ export function useDriverNavigationViewModel(
       const startR = await navigationSdk.startGuidance();
       if (cancelled) return;
       if (!startR.ok) {
-        logger.warn('startGuidance failed', startR.error);
+        // Phase 9 turn 4 — chain-fatal failure (driver can't drive);
+        // flip warn→error so the rawMeta channel fans out to
+        // `recordError`. `startR.error` is a `DomainError`.
+        logger.error('startGuidance failed', startR.error);
         setState({
           kind: 'error',
           subKind: 'unknown',

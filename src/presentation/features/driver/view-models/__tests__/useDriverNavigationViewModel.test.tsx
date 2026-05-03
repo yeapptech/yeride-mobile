@@ -3,7 +3,9 @@ import type { ReactNode } from 'react';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { NetworkError } from '@domain/errors';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import {
+  FakeCrashReportingService,
   FakeNavigationSdkClient,
   TestContainerProvider,
 } from '@shared/testing';
@@ -488,6 +490,157 @@ describe('useDriverNavigationViewModel', () => {
       expect(['uninitialized', 'initializing', 'arrived']).toContain(
         result.current.state.kind,
       );
+    });
+  });
+
+  /**
+   * Phase 9 turn 4 — telemetry: chain-fatal LOG.error sites must reach
+   * `CrashlyticsLogTransport.recordError` via the rawMeta channel
+   * (Phase 9 turn 6 contract). Pattern mirrors `Logger.test.ts:244-267`:
+   * attach the transport to the singleton LOG, drive the VM through
+   * the failure path, drain microtasks, assert on the fake.
+   *
+   * Three sites covered:
+   *   - `setDestinations` Result.err  — error reference flows directly
+   *   - non-OK NavRouteStatus         — error is constructed at the
+   *                                     LOG site; assert on message
+   *   - `startGuidance` Result.err    — error reference flows directly
+   */
+  describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 4)', () => {
+    /** Drains the microtask queue so async `void`-fired SDK calls land. */
+    const flushMicrotasks = () => Promise.resolve();
+
+    it('setDestinations Result.err → recordError fires with the error reference', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const seededError = new NetworkError({
+          code: 'navigation_setdestinations_failed',
+          message: 'transport down',
+        });
+        const fake = new FakeNavigationSdkClient();
+        fake.failNext({ method: 'setDestinations', error: seededError });
+        const { result } = renderHook(
+          (args: DriverNavigationViewModelArgs) =>
+            useDriverNavigationViewModel(args),
+          {
+            wrapper: makeWrapper(fake),
+            initialProps: {
+              title: 'Pickup',
+              coords: PICKUP,
+              onMapReady: true,
+            },
+          },
+        );
+        await waitFor(() => {
+          expect(result.current.state.kind).toBe('error');
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Reference identity — the rawMeta channel preserves the
+        // original Error through `sanitizeForLogging` (Phase 9 turn 6).
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe('YeRide:DriverNavigationVM');
+        // Breadcrumb still fans out at the formatted-string level.
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:DriverNavigationVM] setDestinations failed',
+          ]),
+        );
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('non-OK NavRouteStatus → recordError fires with a constructed Error carrying the status code', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const fake = new FakeNavigationSdkClient();
+        fake.seedRouteStatus('no_route_found');
+        const { result } = renderHook(
+          (args: DriverNavigationViewModelArgs) =>
+            useDriverNavigationViewModel(args),
+          {
+            wrapper: makeWrapper(fake),
+            initialProps: {
+              title: 'Pickup',
+              coords: PICKUP,
+              onMapReady: true,
+            },
+          },
+        );
+        await waitFor(() => {
+          expect(result.current.state.kind).toBe('error');
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Find the recorded Error whose message names the status code.
+        const statusRecord = recorded.find(
+          (r) =>
+            r.error instanceof Error &&
+            r.error.message.includes('no_route_found'),
+        );
+        expect(statusRecord).toBeDefined();
+        expect(statusRecord?.name).toBe('YeRide:DriverNavigationVM');
+        // Breadcrumb scope text remains "non-OK route status" so the
+        // status code lives only on the recorded Error (not in the
+        // human-readable breadcrumb stream).
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:DriverNavigationVM] non-OK route status',
+          ]),
+        );
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('startGuidance Result.err → recordError fires with the error reference', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const seededError = new NetworkError({
+          code: 'navigation_start_guidance_failed',
+          message: 'engine offline',
+        });
+        const fake = new FakeNavigationSdkClient();
+        fake.failNext({ method: 'startGuidance', error: seededError });
+        const { result } = renderHook(
+          (args: DriverNavigationViewModelArgs) =>
+            useDriverNavigationViewModel(args),
+          {
+            wrapper: makeWrapper(fake),
+            initialProps: {
+              title: 'Pickup',
+              coords: PICKUP,
+              onMapReady: true,
+            },
+          },
+        );
+        await waitFor(() => {
+          expect(result.current.state.kind).toBe('error');
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe('YeRide:DriverNavigationVM');
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:DriverNavigationVM] startGuidance failed',
+          ]),
+        );
+      } finally {
+        LOG.removeTransport(transport);
+      }
     });
   });
 });
