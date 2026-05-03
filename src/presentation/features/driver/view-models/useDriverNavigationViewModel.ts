@@ -350,7 +350,7 @@ function defaultMessageFor(subKind: DriverNavigationErrorKind): string {
     case 'permission':
       return 'Location permission is off. Grant access in Settings → YeRide → Location to start navigation.';
     case 'location_unknown':
-      return "Waiting for a GPS fix. Move outdoors or check your signal, then tap Try again.";
+      return 'Waiting for a GPS fix. Move outdoors or check your signal, then tap Try again.';
     case 'api_not_authorized':
       return 'Navigation is not authorized for this app. Please contact support.';
     case 'unknown':

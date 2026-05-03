@@ -123,3 +123,34 @@ export function usePushNotificationService(): Container['pushNotifications'] {
   }
   return ctx.pushNotifications;
 }
+
+/**
+ * Hook returning the Crashlytics seam (Phase 9 turn 3 sub-turn 3a).
+ * Sibling of `useUseCases()` and the other SDK-seam hooks because the
+ * lifecycle hook (`useCrashReportingLifecycle` — sub-turn 3b) and the
+ * logger transport (`CrashlyticsLogTransport` — sub-turn 3a) both drive
+ * the SDK directly rather than through a stateless use case.
+ *
+ * Throws if used outside of a ContainerProvider — same contract as
+ * `useUseCases()`.
+ *
+ * Mounting rule:
+ *   - The lifecycle hook (sub-turn 3b) consumes this once, mounted at
+ *     AppContent. It calls `setCollectionEnabled(__DEV__ ? false : true)`
+ *     on first mount, `setUserId(uid)` after auth resolves, and
+ *     `setAttributes({role, env})` to tag reports for triage.
+ *   - The logger transport setup (sub-turn 3a, run from the
+ *     `<ContainerProvider/>` body itself) consumes this to attach the
+ *     Crashlytics breadcrumb / non-fatal-error transport to the
+ *     singleton `LOG`.
+ *   - Screens and view-models DO NOT consume this directly.
+ */
+export function useCrashReporting(): Container['crashReporting'] {
+  const ctx = useContext(ContainerContext);
+  if (ctx === null) {
+    throw new Error(
+      'useCrashReporting() called outside <ContainerProvider/>. Wrap your tree in <ContainerProvider/>.',
+    );
+  }
+  return ctx.crashReporting;
+}

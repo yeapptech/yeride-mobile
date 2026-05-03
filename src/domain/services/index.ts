@@ -19,3 +19,4 @@ export type {
   NotificationResponse,
   PushNotificationService,
 } from './PushNotificationService';
+export type { CrashReportingService } from './CrashReportingService';

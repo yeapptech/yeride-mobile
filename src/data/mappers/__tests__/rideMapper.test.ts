@@ -426,9 +426,7 @@ describe('toDomain — legacy yeride awaiting_driver trip shape', () => {
     expect(round.driver).toBeNull();
     expect(round.pickup.location.latitude).toBeCloseTo(26.1488, 4);
     expect(round.pickup.location.longitude).toBeCloseTo(-80.2737, 4);
-    expect(round.pickup.address).toBe(
-      'Sunrise Lakes, Sunrise, FL 33323, USA',
-    );
+    expect(round.pickup.address).toBe('Sunrise Lakes, Sunrise, FL 33323, USA');
     expect(round.pickup.placeName).toBe('Sunrise Lakes');
     expect(round.dropoff.location.latitude).toBeCloseTo(26.1224, 4);
     expect(round.dropoff.location.longitude).toBeCloseTo(-80.2638, 4);

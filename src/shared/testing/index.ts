@@ -14,6 +14,12 @@ export type {
   CloudFunctionsMethod,
   FakeCloudFunctionsSpies,
 } from './FakeCloudFunctionsService';
+export { FakeCrashReportingService } from './FakeCrashReportingService';
+export type {
+  FakeCrashReportingMethod,
+  FakeCrashReportingSpies,
+  RecordedCrashError,
+} from './FakeCrashReportingService';
 export { FakeNavigationSdkClient } from './FakeNavigationSdkClient';
 export type {
   FakeNavigationSdkMethod,

@@ -572,4 +572,69 @@ const mockNotifications = {
 
 jest.mock('expo-notifications', () => mockNotifications);
 
+// @react-native-firebase/crashlytics (Phase 9 turn 3): the SDK's default
+// export is a callable singleton accessor `crashlytics()` that returns a
+// module instance whose methods are TurboModule-backed and crash outside a
+// real RN runtime. The shape:
+//
+//   crashlytics(): {
+//     log(msg): void
+//     recordError(err, name?): void
+//     setUserId(uid): Promise<null>
+//     setAttributes(attrs): Promise<null>
+//     setCrashlyticsCollectionEnabled(enabled): Promise<null>
+//     crash(): void  // would actually crash a real device
+//     ...
+//   }
+//
+// The mock returns the SAME singleton instance on every call (the SDK
+// memoizes natively, our mock memoizes in JS) so per-test mock setup via
+// `(crashlytics().log as jest.Mock).mockImplementation(...)` flows through
+// to subsequent calls. `crash()` is a `jest.fn()` here — it does NOT crash
+// the test runner — so the dev "Force crash" tests can assert it fired
+// without taking the Jest worker down.
+//
+// Per-test usage:
+//
+//   import crashlytics from '@react-native-firebase/crashlytics';
+//   const c = crashlytics();
+//   (c.recordError as jest.Mock).mockClear();
+//   // ...exercise code...
+//   expect(c.recordError).toHaveBeenCalledWith(expect.any(Error), 'Foo');
+
+interface MockCrashlyticsModule {
+  isCrashlyticsCollectionEnabled: boolean;
+  log: jest.Mock;
+  recordError: jest.Mock;
+  setUserId: jest.Mock;
+  setAttribute: jest.Mock;
+  setAttributes: jest.Mock;
+  setCrashlyticsCollectionEnabled: jest.Mock;
+  crash: jest.Mock;
+  checkForUnsentReports: jest.Mock;
+  deleteUnsentReports: jest.Mock;
+  didCrashOnPreviousExecution: jest.Mock;
+  sendUnsentReports: jest.Mock;
+}
+
+const mockCrashlyticsInstance: MockCrashlyticsModule = {
+  isCrashlyticsCollectionEnabled: true,
+  log: jest.fn(),
+  recordError: jest.fn(),
+  setUserId: jest.fn().mockResolvedValue(null),
+  setAttribute: jest.fn().mockResolvedValue(null),
+  setAttributes: jest.fn().mockResolvedValue(null),
+  setCrashlyticsCollectionEnabled: jest.fn().mockResolvedValue(null),
+  crash: jest.fn(),
+  checkForUnsentReports: jest.fn().mockResolvedValue(false),
+  deleteUnsentReports: jest.fn().mockResolvedValue(undefined),
+  didCrashOnPreviousExecution: jest.fn().mockResolvedValue(false),
+  sendUnsentReports: jest.fn(),
+};
+
+jest.mock('@react-native-firebase/crashlytics', () => ({
+  __esModule: true,
+  default: jest.fn(() => mockCrashlyticsInstance),
+}));
+
 export {};

@@ -117,23 +117,28 @@ const RideServiceEmbeddedSchema = z.object({
  * the legacy form to the canonical form before the inner schema
  * validates. See legacy yeride `GoogleMapsAPI.js:407-418`.
  */
-const LegOrLatLngEndpointSchema = z.preprocess((val) => {
-  if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if (
-      typeof obj.lat === 'number' &&
-      typeof obj.lng === 'number' &&
-      typeof obj.latitude !== 'number' &&
-      typeof obj.longitude !== 'number'
-    ) {
-      return { latitude: obj.lat, longitude: obj.lng };
+const LegOrLatLngEndpointSchema = z.preprocess(
+  (val) => {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      const obj = val as Record<string, unknown>;
+      if (
+        typeof obj.lat === 'number' &&
+        typeof obj.lng === 'number' &&
+        typeof obj.latitude !== 'number' &&
+        typeof obj.longitude !== 'number'
+      ) {
+        return { latitude: obj.lat, longitude: obj.lng };
+      }
     }
-  }
-  return val;
-}, z.object({
-  latitude: z.number().finite(),
-  longitude: z.number().finite(),
-}).optional());
+    return val;
+  },
+  z
+    .object({
+      latitude: z.number().finite(),
+      longitude: z.number().finite(),
+    })
+    .optional(),
+);
 
 /**
  * Embedded route directions. The schema is intentionally permissive — the

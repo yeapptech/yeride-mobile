@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 2, 2026 (Phase 9 turn 2 — push notifications closed)
+**Last updated:** May 2, 2026 (Phase 9 turn 3 sub-turn 3a — Crashlytics SDK seam wired)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,34 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 turn 3 sub-turn 3a shipped.** Crashlytics SDK seam fully wired
+behind a single composition-root, Container-mounted slot. The
+`CrashReportingService` domain interface (6 methods: collection
+toggle / user id / attributes / record-error / log breadcrumb / sync
+force-crash); the real `FirebaseCrashlyticsAdapter` (three-state lazy
+singleton cache with sticky-failure mode; 5 mapped error codes); the
+programmable `FakeCrashReportingService` (seed/spy/failNext/reset
+seams); the multi-transport `Logger` refactor (new `CompositeTransport`
++ `addTransport`/`removeTransport` so the Crashlytics transport can
+attach at runtime once the DI container resolves); the
+`CrashlyticsLogTransport` (every level → breadcrumb buffer; error
+level + Error meta → `recordError`; failure-isolated `void` async
+fan-out). Custom keys are `role` + `env` (legacy parity, NOT
+service-area / vehicle id as the kickoff guessed). Native config:
+`@react-native-firebase/crashlytics@^24.0.0` (matches the existing
+RNFirebase 24.x stack), the SDK Expo plugin block + the ported
+`plugins/withCrashlyticsUploadSymbols.js` (Release-only Xcode build
+phase running `${PODS_ROOT}/FirebaseCrashlytics/run`). Container slot
+unobserved by every consumer until 3b, so a fake-backed production
+wiring is safe — every Container code path is exercised today.
+End-of-3a delta: **+4 suites / +76 tests** (169/1391 → 173/1467).
+**`npm run prebuild` is required before the next iOS / Android build**
+so the SDK plugin's native config lands (iOS dSYM upload phase +
+Android FCM `firebase_crashlytics_collection_enabled` manifest meta).
+Sub-turns 3b (lifecycle hook + `<ContainerProvider/>` runtime
+attachment + global JS error handler) and 3c (dev-only force-crash
+entry point + manual smoke against Firebase Console) still pending.
 
 **Phase 9 turn 2 shipped.** Push notifications operational end-to-end.
 Three sub-turns: 2a wired the domain + data plumbing for `pushToken`
@@ -366,6 +394,7 @@ pending (Turn 5).
 | Phase 8 turn 3 | First device-build smoke (iOS + Android) + Phase 8 close            | ✅     |
 | Phase 9 turn 1 | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE  | ✅     |
 | Phase 9 turn 2 | Push notifications — Expo registration + tap routing                | ✅     |
+| Phase 9 turn 3a | Crashlytics SDK seam — adapter + fake + DI + multi-transport logger | ✅    |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -433,7 +462,10 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 2a | `PushToken` VO + `pushToken` on User entity + `PushNotificationService` interface          | ✅                             |
 | 9 turn 2b | `expo-notifications` install + `ExpoNotificationsAdapter` + `RegisterPushToken` + soft-ask | ✅                             |
 | 9 turn 2c | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close      | ✅                             |
-| 9 turn 3+ | Crashlytics + nav-screen polish + cleanup grab-bag                                         | Next                           |
+| 9 turn 3a | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                       | ✅                             |
+| 9 turn 3b | `useCrashReportingLifecycle` + AppContent integration + global JS error handler            | Next                           |
+| 9 turn 3c | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                | Pending                        |
+| 9 turn 4+ | DriverNavigation polish + SDK telemetry + cleanup grab-bag                                 | Pending                        |
 | 10        | Cutover from legacy yeride                                                                 | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites

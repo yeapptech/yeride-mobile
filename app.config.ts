@@ -273,7 +273,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // sets useFrameworks but the Podfile mutation happens at the dangerous-mod
     // stage which runs after all native config plugins.
     ...(iosFirebaseConfig && androidFirebaseConfig
-      ? ['@react-native-firebase/app', './plugins/withFirebasePodfileFix.js']
+      ? [
+          '@react-native-firebase/app',
+          '@react-native-firebase/crashlytics',
+          './plugins/withFirebasePodfileFix.js',
+          './plugins/withCrashlyticsUploadSymbols.js',
+        ]
       : []),
     [
       'expo-build-properties',

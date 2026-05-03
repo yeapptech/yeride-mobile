@@ -1,6 +1,7 @@
 export {
   ContainerProvider,
   useBackgroundGeolocation,
+  useCrashReporting,
   useNavigationSdk,
   usePushNotificationService,
   useUseCases,

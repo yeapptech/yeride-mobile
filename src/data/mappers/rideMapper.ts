@@ -335,13 +335,13 @@ function resolveEndpointCoords(
     return { lat: e.latitude, lng: e.longitude };
   }
   // Try legacy `address.geometry.location.{lat,lng}` (Google Places shape).
-  if (e.address !== null && e.address !== undefined && isPlaceObject(e.address)) {
+  if (
+    e.address !== null &&
+    e.address !== undefined &&
+    isPlaceObject(e.address)
+  ) {
     const loc = e.address.geometry?.location;
-    if (
-      loc &&
-      typeof loc.lat === 'number' &&
-      typeof loc.lng === 'number'
-    ) {
+    if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
       return { lat: loc.lat, lng: loc.lng };
     }
   }
@@ -392,9 +392,7 @@ function resolveEndpointPlaceName(
   return null;
 }
 
-function isPlaceObject(
-  addr: EndpointAddressField,
-): addr is LegacyPlaceAddress {
+function isPlaceObject(addr: EndpointAddressField): addr is LegacyPlaceAddress {
   return typeof addr === 'object' && addr !== null;
 }
 

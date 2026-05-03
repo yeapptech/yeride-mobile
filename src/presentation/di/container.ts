@@ -68,6 +68,7 @@ import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } fro
 import type { BackgroundGeolocationClient as BackgroundGeolocationClientType } from '@data/services/BackgroundGeolocationClient';
 import type { CloudFunctionsService as CloudFunctionsServiceType } from '@data/services/CloudFunctionsService';
 import type { ExpoNotificationsAdapter as ExpoNotificationsAdapterType } from '@data/services/ExpoNotificationsAdapter';
+import type { FirebaseCrashlyticsAdapter as FirebaseCrashlyticsAdapterType } from '@data/services/FirebaseCrashlyticsAdapter';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
 import type { NavigationSdkClient as NavigationSdkClientType } from '@data/services/NavigationSdkClient';
 import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
@@ -82,6 +83,7 @@ import type {
   VehicleStorageRepository,
 } from '@domain/repositories';
 import type {
+  CrashReportingService,
   PaymentCallableService,
   PushNotificationService,
   RoutesService,
@@ -93,6 +95,7 @@ import { LOG } from '@shared/logger';
 import type {
   FakeBackgroundGeolocationClient as FakeBackgroundGeolocationClientType,
   FakeCloudFunctionsService as FakeCloudFunctionsServiceType,
+  FakeCrashReportingService as FakeCrashReportingServiceType,
   FakeNavigationSdkClient as FakeNavigationSdkClientType,
   FakePushNotificationService as FakePushNotificationServiceType,
   FakeRoutesService as FakeRoutesServiceType,
@@ -267,6 +270,22 @@ export interface Container {
    * touches it yet.
    */
   pushNotifications: PushNotificationService;
+  /**
+   * Phase 9 turn 3: the Crashlytics seam. Exposed alongside the other
+   * SDK seams rather than wrapped in a use case because the lifecycle
+   * hook (`useCrashReportingLifecycle` — sub-turn 3b) drives the SDK
+   * directly (collection toggle on boot, `setUserId` after auth,
+   * `setAttributes` for role/env tagging), and the logger transport
+   * (`CrashlyticsLogTransport` — sub-turn 3a) reads it for breadcrumb
+   * + non-fatal error fan-out.
+   *
+   * Real adapter (`FirebaseCrashlyticsAdapter`) wires in the
+   * Firebase-configured branch; fakes-only builds use
+   * `FakeCrashReportingService` so dev / unit-test boots don't pull the
+   * native Crashlytics module. Tests use `TestContainerProvider`'s
+   * `crashReporting` override slot to inject a programmable fake.
+   */
+  crashReporting: CrashReportingService;
 }
 
 /**
@@ -468,6 +487,11 @@ export function buildContainer(): Container {
   // production wiring is safe.
   const pushNotifications = buildPushNotificationService();
 
+  // Phase 9 turn 3 sub-turn 3a: CrashReportingService. Real adapter wires
+  // when Firebase is configured; fakes-only builds use the in-memory fake
+  // so unit boots don't pull `@react-native-firebase/crashlytics`.
+  const crashReporting = buildCrashReportingService();
+
   if (isFirebaseConfigured()) {
     const dataAuth = require('@data/repositories/FirebaseAuthRepository') as {
       FirebaseAuthRepository: new () => FirebaseAuthRepositoryType;
@@ -522,6 +546,7 @@ export function buildContainer(): Container {
       bgGeolocation,
       navigationSdk,
       pushNotifications,
+      crashReporting,
     };
   }
 
@@ -557,6 +582,7 @@ export function buildContainer(): Container {
     bgGeolocation,
     navigationSdk,
     pushNotifications,
+    crashReporting,
   };
 }
 
@@ -639,6 +665,42 @@ function buildPushNotificationService(): PushNotificationService {
       '`app.config.ts.extra.eas.projectId` is set.',
   );
   return new testing.FakePushNotificationService();
+}
+
+/**
+ * Build the `CrashReportingService`. Phase 9 turn 3 sub-turn 3a wires
+ * the real `FirebaseCrashlyticsAdapter` when Firebase config files are
+ * present; otherwise falls back to `FakeCrashReportingService`.
+ *
+ * Decision rule:
+ *   - `isFirebaseConfigured()` → real adapter. The collection-enabled
+ *     toggle is set later by `useCrashReportingLifecycle` (sub-turn 3b)
+ *     based on `__DEV__` (off in dev, on in stage + production).
+ *   - otherwise → fake. Unit / fakes-only builds don't pull the
+ *     native Crashlytics module.
+ *
+ * Lazy-required from the appropriate side so the bundle never pulls
+ * `@react-native-firebase/crashlytics` into a fakes-only build. Tests
+ * use `TestContainerProvider`'s `crashReporting` override slot — this
+ * builder is not exercised under jest because the SDK module is mocked
+ * globally in `jest.setup.ts`.
+ */
+function buildCrashReportingService(): CrashReportingService {
+  if (isFirebaseConfigured()) {
+    const dataCrash = require('@data/services/FirebaseCrashlyticsAdapter') as {
+      FirebaseCrashlyticsAdapter: new () => FirebaseCrashlyticsAdapterType;
+    };
+    LOG.info('Container using FirebaseCrashlyticsAdapter');
+    return new dataCrash.FirebaseCrashlyticsAdapter();
+  }
+  const testing = require('@shared/testing') as {
+    FakeCrashReportingService: new () => FakeCrashReportingServiceType;
+  };
+  LOG.warn(
+    'Firebase not configured — using FakeCrashReportingService. ' +
+      'Crashlytics reporting is disabled in this build.',
+  );
+  return new testing.FakeCrashReportingService();
 }
 
 function hasEasProjectId(): boolean {

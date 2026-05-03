@@ -10,6 +10,7 @@ import {
 
 import { FakeBackgroundGeolocationClient } from './FakeBackgroundGeolocationClient';
 import { FakeCloudFunctionsService } from './FakeCloudFunctionsService';
+import { FakeCrashReportingService } from './FakeCrashReportingService';
 import { FakeNavigationSdkClient } from './FakeNavigationSdkClient';
 import { FakePushNotificationService } from './FakePushNotificationService';
 import { FakeRoutesService } from './FakeRoutesService';
@@ -61,6 +62,7 @@ export function TestContainerProvider({
   bgGeolocation,
   navigationSdk,
   pushNotifications,
+  crashReporting,
   useCases,
   children,
 }: {
@@ -78,6 +80,7 @@ export function TestContainerProvider({
   bgGeolocation?: FakeBackgroundGeolocationClient;
   navigationSdk?: FakeNavigationSdkClient;
   pushNotifications?: FakePushNotificationService;
+  crashReporting?: FakeCrashReportingService;
   useCases?: Partial<UseCases>;
   children: ReactNode;
 }) {
@@ -99,6 +102,8 @@ export function TestContainerProvider({
   const navigationSdkClient = navigationSdk ?? new FakeNavigationSdkClient();
   const pushNotificationsService =
     pushNotifications ?? new FakePushNotificationService();
+  const crashReportingService =
+    crashReporting ?? new FakeCrashReportingService();
   const base = makeUseCases({
     auth: authRepo,
     users: usersRepo,
@@ -119,6 +124,7 @@ export function TestContainerProvider({
     bgGeolocation: bgGeolocationClient,
     navigationSdk: navigationSdkClient,
     pushNotifications: pushNotificationsService,
+    crashReporting: crashReportingService,
   };
 
   // Every view-model test needs a QueryClientProvider — view-models
