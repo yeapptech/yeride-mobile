@@ -570,20 +570,149 @@ schema-rejection path will stop firing in Firebase Console.
 
 ---
 
+## Smoke fix #2 — TripPayment.amount unit mismatch (cents vs dollars)
+
+The user-driven smoke surfaced a second payment-pipeline bug after
+the receipt-schema fix landed and the `tipDriver` Cloud Function
+patch deployed: the receipt rendered, the tip flow worked, but
+the dollar amounts displayed were 100x larger than reality. A $5
+fare and $5 tip rendered as `$500.00` each, totalling `$1000.00`.
+
+### Root cause
+
+`src/data/mappers/tripPaymentMapper.ts:43` was reading the wire
+`doc.amount` field via `Money.fromMajor(doc.amount, 'USD')` —
+treating it as a dollar value. But the Stripe webhook server
+(`yeride-stripe-server/stripe/routes.js:132`) writes:
+
+```js
+transaction.set(paymentDoc, {
+  ...
+  amount: pi.amount,             // INTEGER CENTS (Stripe-native)
+  amountInDollars,               // dollars (= pi.amount / 100)
+  currency: pi.currency,
+  ...
+});
+```
+
+So `payments/{paymentId}.amount` is the raw `pi.amount` from the
+Stripe Charge / PaymentIntent, which is **always integer cents** in
+the smallest currency unit (Stripe API contract). The webhook also
+writes a sibling `amountInDollars` field with the converted value
+for clients that prefer dollars.
+
+The exact 100x: `amount: 500` (cents = $5.00) → `Money.fromMajor(500,
+'USD')` → `Math.round(500 * 100)` = 50000 minor units → `format()` =
+`"$500.00"`. Both fare and tip went through the same mapper, both
+got the same 100x explosion.
+
+The DTO comment claiming "PLAIN NUMBER IN DOLLARS" was a
+documentation lie — the rewrite team wrote the comment under the
+assumption that the legacy schema put dollars on disk, but the
+Stripe webhook (which is the only writer to this collection)
+actually writes cents.
+
+### Fix
+
+Single-shape extension at the DTO + mapper layer:
+
+- **`src/data/dto/TripPaymentDoc.ts`**: `amount` field comment
+  rewritten to say "INTEGER CENTS — Stripe-native unit." Schema
+  gains `.int()` to enforce the contract — Stripe never writes
+  non-integer amounts; a non-integer here would be a wire-format
+  break worth surfacing as a parse failure rather than silently
+  truncating. The `amountInDollars` sibling on the wire stays
+  unmapped — cents-as-integer is the source of truth (avoids
+  float-imprecise round-trips).
+
+- **`src/data/mappers/tripPaymentMapper.ts`**: `Money.fromMajor(doc
+.amount, 'USD')` → `Money.create(doc.amount, 'USD')`. `Money.create`
+  is the integer-minor-units constructor; passing cents directly
+  produces the right `Money` value. Top-of-file JSDoc rewritten to
+  document the Stripe-native cents contract + warn against the
+  reverted `fromMajor` path.
+
+### Why this is safe
+
+- All other consumers of `TripPayment.amount` work at the domain
+  layer — `Money` arithmetic operates on minor units internally
+  (`useRideReceiptViewModel`'s `fareTotal` math: `farePayment.amount
+.add(tipPayment.amount).subtract(refundPayment.amount)` is correct
+  regardless of how the wire was interpreted, because the bug was
+  contained at the parse boundary).
+
+- `seedPayments` API on `InMemoryRideRepository` takes domain
+  `TripPayment` values directly (callers construct `Money` via
+  `Money.fromMajor(5, 'USD')` for fixtures) — no wire-format
+  assumption. Existing tests using domain fixtures don't change.
+
+- The tip-flow submit path (`useTipFlowViewModel` → `ProcessTip`
+  use case → `tipDriver` Cloud Function) sends a plain dollar
+  amount up the wire — the deployed callable expects dollars and
+  multiplies by 100 internally. That direction was always correct.
+  Only the read-back path (mapper) was reading cents as dollars.
+
+### Tests
+
+Three new tests in
+`src/data/mappers/__tests__/tripPaymentMapper.test.ts`:
+
+- `rejects a non-integer amount (Stripe always writes integer cents)` —
+  pins the new `.int()` Zod constraint.
+- `regression: amount=500 (cents) renders as '$5.00' (cents-not-
+dollars contract)` — the headline regression. Pre-fix this would
+  render as `'$500.00'`.
+- `regression: tip amount=500 (cents) renders as '$5.00'` — same
+  invariant for the tip type.
+
+Existing fixture amounts (e.g. `amount: 12.34`) updated to integer
+cents (e.g. `amount: 1234`) so they conform to the new schema.
+
+### Files added / touched (smoke fix #2)
+
+**Touched:**
+
+- `src/data/dto/TripPaymentDoc.ts` — `amount` field gets `.int()`;
+  JSDoc rewritten to document the Stripe-native cents contract.
+- `src/data/mappers/tripPaymentMapper.ts` — `fromMajor` →
+  `create`; top-of-file JSDoc updated.
+- `src/data/mappers/__tests__/tripPaymentMapper.test.ts` — fixture
+  values converted to integer cents; +3 regression tests
+  (1 non-integer rejection + 2 cents-not-dollars regressions).
+
+### Acceptance (smoke fix #2)
+
+`npm run typecheck` + `node node_modules/eslint/bin/eslint.js .` +
+`npm run format:check` + `npm test` (chunked) all green.
+
+**180 test suites / 1532 tests** passing.
+
+Delta vs. smoke-fix #1 close baseline (180 suites / 1529 tests):
+**+0 suites / +3 tests**.
+
+No native rebuild required. No new dependencies. No plugin patches.
+
+After the fix lands, fare and tip amounts on the receipt render
+correctly: a $5 fare renders as `$5.00`, a $5 tip renders as
+`$5.00`, totaling `$10.00` (not `$1000.00`).
+
+---
+
 ## Phase 9 — Turn 4 closing summary
 
-| Turn      | Scope                                                                 | Tests delta            | Status |
-| --------- | --------------------------------------------------------------------- | ---------------------- | ------ |
-| 1         | iOS Apple Maps Fabric escape — PROVIDER_GOOGLE flip                   | +1 suite / +6 tests    | ✅     |
-| 2         | Push notifications — Expo registration + tap routing                  | +8 suites / +117 tests | ✅     |
-| 3         | Crashlytics integration end-to-end across 3 sub-turns                 | +8 suites / +108 tests | ✅     |
-| 6         | Observability cleanup grab-bag (rawMeta + ErrorBoundary)              | +1 suite / +16 tests   | ✅     |
-| 4         | DriverNavigation polish + SDK telemetry + foreground-push removal     | +0 suites / +4 tests   | ✅     |
-| 5         | Passenger-snapshot Stripe gap close (committed under user authorship) | +0 suites / +6 tests   | ✅     |
-| smoke fix | Receipt schema accepts 'payment_intent' / 'closed' wire statuses      | +0 suites / +4 tests   | ✅     |
+| Turn         | Scope                                                                 | Tests delta            | Status |
+| ------------ | --------------------------------------------------------------------- | ---------------------- | ------ |
+| 1            | iOS Apple Maps Fabric escape — PROVIDER_GOOGLE flip                   | +1 suite / +6 tests    | ✅     |
+| 2            | Push notifications — Expo registration + tap routing                  | +8 suites / +117 tests | ✅     |
+| 3            | Crashlytics integration end-to-end across 3 sub-turns                 | +8 suites / +108 tests | ✅     |
+| 6            | Observability cleanup grab-bag (rawMeta + ErrorBoundary)              | +1 suite / +16 tests   | ✅     |
+| 4            | DriverNavigation polish + SDK telemetry + foreground-push removal     | +0 suites / +4 tests   | ✅     |
+| 5            | Passenger-snapshot Stripe gap close (committed under user authorship) | +0 suites / +6 tests   | ✅     |
+| smoke fix    | Receipt schema accepts 'payment_intent' / 'closed' wire statuses      | +0 suites / +4 tests   | ✅     |
+| smoke fix #2 | TripPayment.amount unit-mismatch (cents vs dollars)                   | +0 suites / +3 tests   | ✅     |
 
 Cumulative Phase 9 delta (Phase 8 close 160/1268 → Phase 9 smoke-fix
-close 180/1529): **+20 suites / +261 tests**.
+#2 close 180/1532): **+20 suites / +264 tests**.
 
 Phase 9 has now closed: the iOS Map regression, the push-notifications
 gap, the Crashlytics integration, the observability cleanup

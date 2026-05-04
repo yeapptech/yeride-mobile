@@ -16,8 +16,14 @@ import {
  * Function pipeline (Firestore rules deny client writes). The client uses
  * them to render the receipt screen.
  *
- * Money on the wire is plain dollar numbers (matches the rest of the
- * legacy schema); the mapper converts to `Money` USD minor units.
+ * Money on the wire is INTEGER CENTS — Stripe-native unit. The webhook
+ * server (yeride-stripe-server/stripe/routes.js:132) writes the raw
+ * `pi.amount` from the Stripe Charge/PaymentIntent, which is always an
+ * integer in the smallest currency unit. The mapper passes that
+ * directly to `Money.create(cents, 'USD')`. (Pre-Phase-9-turn-4-smoke-
+ * fix-2 the mapper used `Money.fromMajor` which interpreted `amount`
+ * as dollars — a 100x bug that surfaced as $5 charges rendering as
+ * $500 on the receipt.)
  */
 
 export function parseTripPaymentDoc(
@@ -40,7 +46,10 @@ export function toDomain(
   docId: string,
   doc: TripPaymentDoc,
 ): Result<TripPayment, ValidationError> {
-  const amountR = Money.fromMajor(doc.amount, 'USD');
+  // `doc.amount` is integer cents (Stripe-native); `Money.create` takes
+  // minor units directly. Do NOT use `Money.fromMajor` here — that
+  // interprets the input as dollars and produces a 100x overcount.
+  const amountR = Money.create(doc.amount, 'USD');
   if (!amountR.ok) return amountR;
   const at = new Date(doc.createdAt);
   if (Number.isNaN(at.getTime())) {
