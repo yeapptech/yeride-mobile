@@ -167,6 +167,8 @@ export function useGpsLifecycle(args: UseGpsLifecycleArgs): void {
       // Disable path: stop the SDK fire-and-forget. Don't wipe init —
       // a re-enable should pick up where we left off.
       void bgGeolocation.stop().then((r) => {
+        // Stays warn — best-effort cleanup on the disable transition;
+        // the next session re-init will recover state cleanly.
         if (!r.ok) logger.warn('stop returned error', r.error);
       });
       return;
@@ -242,12 +244,26 @@ export function useGpsLifecycle(args: UseGpsLifecycleArgs): void {
           tripTracking: null,
         });
         if (!locR.ok) {
-          logger.warn('UserLocation.create failed', locR.error);
+          // Phase 9 Turn 8 — error level so the rawMeta channel fans the
+          // ValidationError out to Crashlytics `recordError`. This site
+          // fires only on a logic bug: the SDK adapter normalizes
+          // `coords.speed` (`>= 0` or null) and `Coordinates.create`
+          // rejects bad lat/lng before the event reaches this hook, so a
+          // failure here means a contract upstream broke. Worth a
+          // non-fatal in Firebase Console.
+          logger.error('UserLocation.create failed', locR.error);
           return;
         }
         updateLocationMutationRef.current.mutate(locR.value, {
           onError: (e) => {
-            logger.warn('updateLocation mutation failed', e);
+            // Phase 9 Turn 8 — error level. After the
+            // FirestoreLocationRepository's 3-retry backoff exhausts,
+            // the wrapped NetworkError is re-thrown by the mutation's
+            // mutationFn (location.queries.ts:31) and lands here. The
+            // user's location pipeline is dead until the next delivery
+            // — that's degraded operation worth a non-fatal so we can
+            // see exhaustion rates field-side.
+            logger.error('updateLocation mutation failed', e);
           },
         });
       },
@@ -280,6 +296,9 @@ export function useGpsLifecycle(args: UseGpsLifecycleArgs): void {
         // doesn't survive past the trip.
         setIsInsidePickupGeofence(false);
         void bgGeolocation.removePickupGeofence().then((r) => {
+          // Stays warn — best-effort deregister on trip flip; the next
+          // `addPickupGeofence` on a new ride overwrites by identifier
+          // anyway (`'pickup'` is single-shared, legacy parity).
           if (!r.ok) logger.warn('removePickupGeofence error', r.error);
         });
       }
@@ -314,6 +333,9 @@ export function useGpsLifecycle(args: UseGpsLifecycleArgs): void {
       // clean.
       void (async () => {
         const stopR = await bgGeolocation.stop();
+        // Both teardown sites stay warn — synchronous-cleanup contract
+        // is fire-and-forget, and a teardown failure during sign-out
+        // doesn't affect the next session (re-init recovers).
         if (!stopR.ok) logger.warn('teardown stop error', stopR.error);
         const rmR = await bgGeolocation.removeAllGeofences();
         if (!rmR.ok)

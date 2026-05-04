@@ -10,8 +10,10 @@ import { RideId } from '@domain/entities/RideId';
 import { UserId } from '@domain/entities/UserId';
 import { AuthorizationError, NetworkError } from '@domain/errors';
 import { useGpsStore } from '@presentation/stores';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import {
   FakeBackgroundGeolocationClient,
+  FakeCrashReportingService,
   InMemoryLocationRepository,
   TestContainerProvider,
 } from '@shared/testing';
@@ -470,5 +472,133 @@ describe('useGpsLifecycle', () => {
     });
     expect(bg.spies.startCalls).toBe(0);
     expect(useGpsStore.getState().permissionStatus).toBe('undetermined');
+  });
+
+  /**
+   * Phase 9 Turn 8 — telemetry regression tests for the two
+   * `LOG.warn → LOG.error` flips in `useGpsLifecycle`. Each test
+   * attaches a `CrashlyticsLogTransport` to the singleton `LOG`,
+   * drives the hook through the failure path, and asserts that
+   * `recordError` fires with the original `Error` reference (proving
+   * the rawMeta channel preserves identity through
+   * `sanitizeForLogging`) AND with the correct VM scope name so
+   * Firebase Console groups reports under
+   * `YeRide:GpsLifecycle`.
+   *
+   * Cleanup: each test wraps the body in `try/finally` so the
+   * transport is detached even if an assertion throws — leaking the
+   * transport would let stale fakes intercept later tests'
+   * `LOG.error` calls.
+   */
+  describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 8)', () => {
+    /** Drains the microtask queue so async `void`-fired SDK calls land. */
+    const flushMicrotasks = () => Promise.resolve();
+
+    it('UserLocation.create failure → recordError fires with the ValidationError reference', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const bg = new FakeBackgroundGeolocationClient();
+        bg.seedAuthorization('always');
+        const wrapper = makeWrapper({ bg });
+
+        renderHook((args: UseGpsLifecycleArgs) => useGpsLifecycle(args), {
+          wrapper,
+          initialProps: { enabled: true, userId: USER_ID },
+        });
+        await waitFor(() => {
+          expect(bg.isEnabled()).toBe(true);
+        });
+
+        // Drive L245: emit a location event with a negative speed. The
+        // SDK adapter normalizes `coords.speed` (clamps to null when <0)
+        // before delivering, but the fake passes events through verbatim
+        // so we can exercise the `UserLocation.create` rejection path
+        // without monkey-patching the entity.
+        act(() => {
+          bg.emitLocation(locationEvent({ speed: -1 }));
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Reference identity — the rawMeta channel preserves the
+        // original ValidationError through `sanitizeForLogging`
+        // (Phase 9 Turn 6).
+        const validationRecord = recorded.find(
+          (r) =>
+            r.error instanceof Error &&
+            'code' in r.error &&
+            (r.error as { code: unknown }).code ===
+              'user_location_invalid_speed',
+        );
+        expect(validationRecord).toBeDefined();
+        expect(validationRecord?.name).toBe('YeRide:GpsLifecycle');
+        // Breadcrumb still fans out at the formatted-string level —
+        // every level reaches `crashReporting.log` regardless of
+        // `recordError` fan-out.
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:GpsLifecycle] UserLocation.create failed',
+          ]),
+        );
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('updateLocation mutation failure → recordError fires with the NetworkError reference', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const bg = new FakeBackgroundGeolocationClient();
+        bg.seedAuthorization('always');
+        const seededError = new NetworkError({
+          code: 'location_update_failed',
+          message: 'simulated post-3-retry exhaustion',
+        });
+        const locations = new InMemoryLocationRepository();
+        locations.mockUpdateError(seededError);
+        const wrapper = makeWrapper({ bg, locations });
+
+        renderHook((args: UseGpsLifecycleArgs) => useGpsLifecycle(args), {
+          wrapper,
+          initialProps: { enabled: true, userId: USER_ID },
+        });
+        await waitFor(() => {
+          expect(bg.isEnabled()).toBe(true);
+        });
+
+        // Drive L250: emit a valid location event; the in-memory
+        // repository's `mockUpdateError` makes `updateLocation` reject
+        // with the seeded `NetworkError`. The mutation's `mutationFn`
+        // re-throws (`location.queries.ts:31`), `onError` fires, L250
+        // logs at error.
+        act(() => {
+          bg.emitLocation(locationEvent());
+        });
+        await waitFor(() => {
+          expect(locations.spies.updateLocation).toBe(1);
+        });
+        await flushMicrotasks();
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Reference identity — `e` in the mutation `onError` is the
+        // re-thrown `NetworkError`. The rawMeta channel preserves it
+        // through `sanitizeForLogging` so the assertion is equality on
+        // the Error object, not a substring on a stringified copy.
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe('YeRide:GpsLifecycle');
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            '[YeRide:GpsLifecycle] updateLocation mutation failed',
+          ]),
+        );
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
   });
 });
