@@ -371,6 +371,7 @@ describe('InMemoryRideRepository.subscribeEvents/Payments', () => {
         amount: usd(10),
         status: 'succeeded',
         createdAt: new Date('2026-04-27T00:00:00Z'),
+        paymentMethodId: null,
       },
       {
         id: 'new',
@@ -378,6 +379,7 @@ describe('InMemoryRideRepository.subscribeEvents/Payments', () => {
         amount: usd(2),
         status: 'succeeded',
         createdAt: new Date('2026-04-27T00:05:00Z'),
+        paymentMethodId: null,
       },
     ]);
     let received: readonly { id: string }[] = [];

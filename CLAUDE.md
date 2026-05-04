@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 3, 2026 (Phase 9 Turn 4 smoke fix #2 closed — `TripPayment.amount` is integer cents, not dollars; manual smoke validated end-to-end tip flow on `yeapp-stage`)
+**Last updated:** May 4, 2026 (Phase 9 Turn 7 closed — receipt UX polish: card brand + last-4 wallet-cache join + email-button stub removal; 181 suites / 1566 tests)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,56 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 7 closed.** Two visible-on-screen receipt stubs that
+the Turn 4 smoke surfaced are wired up. (1) Card brand + last-4 on
+the RideReceipt payment row — the receipt VM joins
+`farePayment.paymentMethodId` against `useListPaymentMethodsQuery`'s
+wallet cache. The Stripe webhook server already writes
+`pi.payment_method` to the payment doc as `paymentMethodId` (see
+`yeride-stripe-server/stripe/routes.js:138`); the rewrite just wasn't
+reading it. `TripPayment` gains a nullable `paymentMethodId:
+PaymentMethodId | null` field; `TripPaymentDocSchema` extends to
+accept the optional wire field; `tripPaymentMapper.toDomain` parses
+it via `PaymentMethodId.create` with `LOG.warn` + null fallback
+(legacy-doc resilience pattern from `userMapper`). The receipt VM
+surfaces `paymentBrand: CardBrand | null` + `paymentLast4: string |
+null` on cache hit, both null on cache miss; the screen renders a
+per-brand glyph + "Brand •••• last4" line on hit, "Charged to your
+card on file" on miss. (2) The disabled "Email receipt" button is
+gone — replaced with a small "A receipt is emailed automatically
+when your charge clears" note. Stripe sends emailed receipts
+automatically via the `receiptEmail` parameter on `/direct-charge`
+(`yeride-functions/lib/payments.js:454`); the legacy yeride app
+never had an in-app email-receipt trigger, so the disabled button
+was a stub for a feature that didn't exist anywhere. The new shared
+`CardBrandBadge` component at
+`src/presentation/components/payment/CardBrandBadge.tsx` renders
+per-brand PNG glyphs (visa / mastercard / amex / discover / diners
+
+- generic `card.png` fallback for jcb / unionpay / unknown). Brand
+  PNGs ported from legacy yeride — zero new deps, zero native
+  rebuild, zero risk of Fabric componentProvider regression mirroring
+  Phase 9 Turn 1's react-native-maps patch (the alternative
+  `react-native-svg` path was considered but the visual outcome at
+  receipt-row size is identical). `WalletCardRow` was refactored to
+  import the shared `CardBrandBadge` + `formatBrand` helper instead
+  of its inline `BrandBadge` + duplicate `formatBrand`. The
+  `emailReceipt` no-op stub on `useRideReceiptViewModel` is removed
+  from the return surface. `nativewind-env.d.ts` extended with
+  `*.png` / `*.jpg` / `*.jpeg` / `*.gif` ambient module declarations
+  (numeric Metro asset id) so static PNG imports typecheck. Five test
+  fixture files updated for the new required `paymentMethodId` field
+  on `TripPayment` (`paymentMethodId: null` added to existing fare /
+  tip / refund fixtures). Acceptance: **181 suites / 1566 tests**
+  (+1 suite / +34 tests over Turn 4 smoke fix #2 baseline at
+  180/1532). New CardBrandBadge.test.tsx suite (11 tests) is the +1
+  suite delta; the +34 test delta is composed of 11 CardBrandBadge +
+  5 mapper paymentMethodId-parse + 5 receipt VM cache-join + 4
+  receipt screen Phase 9 Turn 7 payment row + ~9 baseline drift
+  across data/domain/driver chunks. **No native rebuild required**
+  for Turn 7 — pure JS/TS work; no new dependencies; no plugin
+  patches; no DI container changes.
 
 **Phase 9 Turn 4 smoke fix #2 closed.** `TripPayment.amount`
 unit-mismatch fix. The user-driven smoke surfaced a 100x display
@@ -754,6 +804,7 @@ pending (Turn 5).
 | Phase 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                         | ✅     |
 | Phase 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed) | ✅     |
 | Phase 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                               | ✅     |
+| Phase 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component              | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -785,52 +836,53 @@ prebuild` required before the next iOS / Android build** so the Stripe
 SDK's plugin mods (entitlements plist + Google Pay AndroidManifest
 meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 
-| Phase                 | Scope                                                                                                                                                           | Status                         |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| 0                     | Tooling + scaffolding                                                                                                                                           | ✅ Complete                    |
-| 1                     | Auth + user identity                                                                                                                                            | ✅ End-to-end on real Firebase |
-| 2                     | Domain + data layer (service area, routes, ride, location, FareCalculator)                                                                                      | ✅ End of Phase 2: 422 tests   |
-| 3 turn 1              | Phase 3 foundations: domain additions, store scaffolding                                                                                                        | ✅                             |
-| 3 turn 2              | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier                                                                                   | ✅                             |
-| 3 turn 3              | RiderHome + role-based routing, end-to-end ride creation                                                                                                        | ✅                             |
-| 3 turn 4a             | RideMonitor scaffolding + early-status views (awaiting/dispatched)                                                                                              | ✅                             |
-| 3 turn 4b             | Late-status views (started/completed/payment_failed) + chat stub + geofence tick                                                                                | ✅                             |
-| 3 turn 5              | RideReceipt + Phase 3 cleanup                                                                                                                                   | ✅                             |
-| 4 turn 1              | Phase 4 foundations: DriverNavigator + tabs + driver-status store                                                                                               | ✅                             |
-| 4 turn 2              | DriverHome — map + ListAvailableRides cards + GPS toggle                                                                                                        | ✅                             |
-| 4 turn 3              | DriverDispatch — incoming-ride accept/decline                                                                                                                   | ✅                             |
-| 4 turn 4a             | DriverMonitor scaffold + en-route / at-pickup status views                                                                                                      | ✅                             |
-| 4 turn 4b             | DriverMonitor late-status views + Start-ride / RequestPayment mutations                                                                                         | ✅                             |
-| 4 turn 5              | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                                                                                                 | ✅                             |
-| 5 turn 1              | Vehicle domain + DTO + mappers + in-memory fakes                                                                                                                | ✅                             |
-| 5 turn 2              | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring                                                                                           | ✅                             |
-| 5 turn 3              | VehicleList + VehicleRegistration screens                                                                                                                       | ✅                             |
-| 5 turn 4              | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                                                                                                        | ✅                             |
-| 6 turn 1              | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake                                                                                       | ✅                             |
-| 6 turn 2              | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring                                                                                     | ✅                             |
-| 6 turn 3              | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)                                                                                    | ✅                             |
-| 6 turn 4              | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)                                                                                       | ✅                             |
-| 6 turn 5              | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)                                                                                  | ✅                             |
-| 7 turn 1              | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch                                                                                           | ✅                             |
-| 7 turn 2              | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation                                                                                        | ✅                             |
-| 7 turn 3              | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                                                                                            | ✅                             |
-| 8 turn 1              | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port                                                                                             | ✅                             |
-| 8 turn 2              | `useDriverNavigationViewModel` + screen + DriverMonitor integration                                                                                             | ✅                             |
-| 8 turn 3              | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close                                                                                   | ✅                             |
-| 9 turn 1              | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                                                                                              | ✅                             |
-| 9 turn 2a             | `PushToken` VO + `pushToken` on User entity + `PushNotificationService` interface                                                                               | ✅                             |
-| 9 turn 2b             | `expo-notifications` install + `ExpoNotificationsAdapter` + `RegisterPushToken` + soft-ask                                                                      | ✅                             |
-| 9 turn 2c             | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close                                                                           | ✅                             |
-| 9 turn 3a             | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                                                                                            | ✅                             |
-| 9 turn 3b             | `useCrashReportingLifecycle` + AppContent integration + global JS error handler                                                                                 | ✅                             |
-| 9 turn 3c             | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                                                                                     | ✅                             |
-| 9 turn 4              | DriverNavigation polish + SDK telemetry + foreground-push removal                                                                                               | ✅                             |
-| 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                                                    | ✅                             |
-| 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed)                            | ✅                             |
-| 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                                                          | ✅                             |
-| 9 turn 6+             | Future Phase 9 polish (card-brand + last-4 + Stripe glyphs / email-receipt / location-push exhaustion / GPS lifecycle telemetry / RNFirebase / receipt UX gaps) | Pending                        |
-| 9 turn 6              | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                                                                                        | ✅                             |
-| 10                    | Cutover from legacy yeride                                                                                                                                      | Pending                        |
+| Phase                 | Scope                                                                                                                                 | Status                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 0                     | Tooling + scaffolding                                                                                                                 | ✅ Complete                    |
+| 1                     | Auth + user identity                                                                                                                  | ✅ End-to-end on real Firebase |
+| 2                     | Domain + data layer (service area, routes, ride, location, FareCalculator)                                                            | ✅ End of Phase 2: 422 tests   |
+| 3 turn 1              | Phase 3 foundations: domain additions, store scaffolding                                                                              | ✅                             |
+| 3 turn 2              | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier                                                         | ✅                             |
+| 3 turn 3              | RiderHome + role-based routing, end-to-end ride creation                                                                              | ✅                             |
+| 3 turn 4a             | RideMonitor scaffolding + early-status views (awaiting/dispatched)                                                                    | ✅                             |
+| 3 turn 4b             | Late-status views (started/completed/payment_failed) + chat stub + geofence tick                                                      | ✅                             |
+| 3 turn 5              | RideReceipt + Phase 3 cleanup                                                                                                         | ✅                             |
+| 4 turn 1              | Phase 4 foundations: DriverNavigator + tabs + driver-status store                                                                     | ✅                             |
+| 4 turn 2              | DriverHome — map + ListAvailableRides cards + GPS toggle                                                                              | ✅                             |
+| 4 turn 3              | DriverDispatch — incoming-ride accept/decline                                                                                         | ✅                             |
+| 4 turn 4a             | DriverMonitor scaffold + en-route / at-pickup status views                                                                            | ✅                             |
+| 4 turn 4b             | DriverMonitor late-status views + Start-ride / RequestPayment mutations                                                               | ✅                             |
+| 4 turn 5              | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                                                                       | ✅                             |
+| 5 turn 1              | Vehicle domain + DTO + mappers + in-memory fakes                                                                                      | ✅                             |
+| 5 turn 2              | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring                                                                 | ✅                             |
+| 5 turn 3              | VehicleList + VehicleRegistration screens                                                                                             | ✅                             |
+| 5 turn 4              | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                                                                              | ✅                             |
+| 6 turn 1              | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake                                                             | ✅                             |
+| 6 turn 2              | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring                                                           | ✅                             |
+| 6 turn 3              | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)                                                          | ✅                             |
+| 6 turn 4              | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)                                                             | ✅                             |
+| 6 turn 5              | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)                                                        | ✅                             |
+| 7 turn 1              | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch                                                                 | ✅                             |
+| 7 turn 2              | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation                                                              | ✅                             |
+| 7 turn 3              | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                                                                  | ✅                             |
+| 8 turn 1              | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port                                                                   | ✅                             |
+| 8 turn 2              | `useDriverNavigationViewModel` + screen + DriverMonitor integration                                                                   | ✅                             |
+| 8 turn 3              | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close                                                         | ✅                             |
+| 9 turn 1              | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                                                                    | ✅                             |
+| 9 turn 2a             | `PushToken` VO + `pushToken` on User entity + `PushNotificationService` interface                                                     | ✅                             |
+| 9 turn 2b             | `expo-notifications` install + `ExpoNotificationsAdapter` + `RegisterPushToken` + soft-ask                                            | ✅                             |
+| 9 turn 2c             | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close                                                 | ✅                             |
+| 9 turn 3a             | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                                                                  | ✅                             |
+| 9 turn 3b             | `useCrashReportingLifecycle` + AppContent integration + global JS error handler                                                       | ✅                             |
+| 9 turn 3c             | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                                                           | ✅                             |
+| 9 turn 4              | DriverNavigation polish + SDK telemetry + foreground-push removal                                                                     | ✅                             |
+| 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                          | ✅                             |
+| 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed)  | ✅                             |
+| 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                                | ✅                             |
+| 9 turn 6              | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                                                              | ✅                             |
+| 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component               | ✅                             |
+| 9 turn 8+             | Future Phase 9 polish (per-brand SVG glyphs / location-push exhaustion / GPS lifecycle telemetry / RNFirebase / receipt PDF download) | Pending                        |
+| 10                    | Cutover from legacy yeride                                                                                                            | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
 / 1171 tests passing** (+9 tests over Turn 2's 152/1162; suite count
@@ -1953,5 +2005,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_5.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_7.md`),
 then ask.

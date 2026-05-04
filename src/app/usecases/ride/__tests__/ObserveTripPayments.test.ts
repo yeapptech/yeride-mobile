@@ -83,6 +83,7 @@ const FARE: TripPayment = {
   amount: usd(18),
   status: 'succeeded',
   createdAt: new Date('2026-04-28T11:00:00Z'),
+  paymentMethodId: null,
 };
 const TIP: TripPayment = {
   id: 'pay-2',
@@ -90,6 +91,7 @@ const TIP: TripPayment = {
   amount: usd(2),
   status: 'succeeded',
   createdAt: new Date('2026-04-28T11:01:00Z'),
+  paymentMethodId: null,
 };
 
 describe('ObserveTripPayments', () => {

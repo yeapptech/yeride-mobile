@@ -2,6 +2,10 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import type { CardBrand, PaymentMethod } from '@domain/entities/PaymentMethod';
 import type { PaymentMethodId } from '@domain/entities/PaymentMethodId';
+import {
+  CardBrandBadge,
+  formatBrand,
+} from '@presentation/components/payment/CardBrandBadge';
 
 /**
  * One row in the rider Wallet list.
@@ -9,9 +13,9 @@ import type { PaymentMethodId } from '@domain/entities/PaymentMethodId';
  * Layout (left to right):
  *   [brand badge]  [BRAND •••• last4 · MM/YY?]      [✓ default? ]  [trash]
  *
- * The brand badge is a styled `<Text/>` rather than an icon — Phase 9
- * polish brings per-brand glyph assets in. Until then the brand label
- * itself is the visual marker.
+ * The brand badge renders a per-brand PNG glyph (Phase 9 Turn 7
+ * extracted the inline `BrandBadge` text-only component into the
+ * shared `CardBrandBadge` so the receipt screen could reuse it).
  *
  * Tap on the row body fires `onSetDefault` (toggling default on this
  * card). The trash button fires `onDelete`. The default-card row still
@@ -92,55 +96,14 @@ export function WalletCardRow(props: WalletCardRowProps) {
 }
 
 function BrandBadge({ brand }: { readonly brand: CardBrand }) {
+  // Wraps the shared `CardBrandBadge` in the same h-9 w-12 muted-bg
+  // pill the wallet rows have always carried, so the row layout stays
+  // pixel-stable across the Phase 9 Turn 7 refactor.
   return (
     <View className="h-9 w-12 items-center justify-center rounded-md bg-muted">
-      <Text className="text-[10px] font-bold uppercase text-muted-foreground">
-        {formatBrandShort(brand)}
-      </Text>
+      <CardBrandBadge brand={brand} size="sm" />
     </View>
   );
-}
-
-function formatBrand(brand: CardBrand): string {
-  switch (brand) {
-    case 'visa':
-      return 'Visa';
-    case 'mastercard':
-      return 'Mastercard';
-    case 'amex':
-      return 'Amex';
-    case 'discover':
-      return 'Discover';
-    case 'diners':
-      return 'Diners';
-    case 'jcb':
-      return 'JCB';
-    case 'unionpay':
-      return 'UnionPay';
-    case 'unknown':
-      return 'Card';
-  }
-}
-
-function formatBrandShort(brand: CardBrand): string {
-  switch (brand) {
-    case 'visa':
-      return 'VISA';
-    case 'mastercard':
-      return 'MC';
-    case 'amex':
-      return 'AMEX';
-    case 'discover':
-      return 'DISC';
-    case 'diners':
-      return 'DC';
-    case 'jcb':
-      return 'JCB';
-    case 'unionpay':
-      return 'UP';
-    case 'unknown':
-      return 'CARD';
-  }
 }
 
 /**

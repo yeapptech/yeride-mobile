@@ -125,3 +125,96 @@ describe('toDomain', () => {
     }
   });
 });
+
+// Phase 9 Turn 7 — paymentMethodId join key for the receipt screen.
+// The webhook server writes `pi.payment_method` as `paymentMethodId` on
+// fare + tip charges. Refund rows + legacy pre-Turn-7 fare rows omit
+// the field. The mapper accepts missing as null, parses canonical
+// `pm_…` ids to the branded VO, and falls back to null with LOG.warn
+// on malformed values.
+describe('toDomain — paymentMethodId join key', () => {
+  it('parses a canonical pm_… id to a branded PaymentMethodId', () => {
+    const docR = parseTripPaymentDoc({
+      type: 'fare',
+      status: 'succeeded',
+      amount: 1234,
+      createdAt: '2026-04-27T12:30:00Z',
+      paymentMethodId: 'pm_1ABcdEFghIJkLmNoP',
+    });
+    if (!docR.ok) throw docR.error;
+    const r = toDomain('pay_1', docR.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(String(r.value.paymentMethodId)).toBe('pm_1ABcdEFghIJkLmNoP');
+    }
+  });
+
+  it('returns null when the wire payload omits paymentMethodId (refund / legacy)', () => {
+    const docR = parseTripPaymentDoc({
+      type: 'refund',
+      status: 'refunded',
+      amount: 500,
+      createdAt: '2026-04-27T12:30:00Z',
+    });
+    if (!docR.ok) throw docR.error;
+    const r = toDomain('refund_1', docR.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.paymentMethodId).toBeNull();
+    }
+  });
+
+  it('returns null when the wire payload sets paymentMethodId to null', () => {
+    // The DTO's `nullish()` accepts both undefined and null. A null on
+    // the wire (some webhook code paths emit `customerId: null`) hydrates
+    // the same as a missing field.
+    const docR = parseTripPaymentDoc({
+      type: 'fare',
+      status: 'succeeded',
+      amount: 500,
+      createdAt: '2026-04-27T12:30:00Z',
+      paymentMethodId: null,
+    });
+    if (!docR.ok) throw docR.error;
+    const r = toDomain('pay_null', docR.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.paymentMethodId).toBeNull();
+    }
+  });
+
+  it('falls back to null when paymentMethodId is malformed (legacy resilience)', () => {
+    // A `pm_…` id without the canonical prefix is a wire-format break,
+    // but we don't want to fail the entire payment row over it — the
+    // amount + status are still valid and the receipt should render
+    // (with a brand-agnostic fallback).
+    const docR = parseTripPaymentDoc({
+      type: 'fare',
+      status: 'succeeded',
+      amount: 1234,
+      createdAt: '2026-04-27T12:30:00Z',
+      paymentMethodId: 'pi_NotAPaymentMethod',
+    });
+    if (!docR.ok) throw docR.error;
+    const r = toDomain('pay_bad', docR.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.paymentMethodId).toBeNull();
+    }
+  });
+
+  it('rejects an empty-string paymentMethodId at the schema layer', () => {
+    // Zod's `.min(1)` rejects empty strings before they reach the
+    // mapper. Surface as a parse failure so we know the wire shape is
+    // off rather than silently coercing to null.
+    const r = parseTripPaymentDoc({
+      type: 'fare',
+      status: 'succeeded',
+      amount: 1234,
+      createdAt: '2026-04-27T12:30:00Z',
+      paymentMethodId: '',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('trip_payment_doc_invalid_shape');
+  });
+});

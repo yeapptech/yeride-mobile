@@ -15,6 +15,10 @@ import {
   type MapMarkerProps,
   type MapRoute,
 } from '@presentation/components/map';
+import {
+  CardBrandBadge,
+  formatBrand,
+} from '@presentation/components/payment/CardBrandBadge';
 import type {
   RiderStackNavigation,
   RiderStackScreenProps,
@@ -34,9 +38,12 @@ import { useTipFlowViewModel } from '../view-models/useTipFlowViewModel';
  *   - fare breakdown (fare + tip − refund = total) sourced from the
  *     `payments` subcollection. The view-model collapses multi-row
  *     math into a single `fareTotal` value.
- *   - "Charged to your default card" placeholder. Card brand + last-4
- *     land in Phase 6 alongside the Stripe wallet.
- *   - "Email receipt" button (disabled stub for Phase 9 polish).
+ *   - Payment row — Phase 9 Turn 7 wired this. Renders a per-brand
+ *     glyph + "Brand •••• last4" when the wallet-cache join hits;
+ *     falls back to "Charged to your card on file" otherwise.
+ *   - Informational note: receipts are emailed automatically when the
+ *     charge clears (Stripe-managed via `receiptEmail` on the
+ *     `/direct-charge` request — there is no in-app trigger).
  *   - Done CTA → popToTop, returning the rider to home.
  *
  * The screen is reachable from:
@@ -166,28 +173,26 @@ function RideReceiptContent({
           <Text className="text-xs uppercase text-muted-foreground">
             Payment
           </Text>
-          <Text className="mt-0.5 text-sm text-foreground">
-            Charged to your default card.
-          </Text>
-          <Text className="mt-0.5 text-xs text-muted-foreground">
-            Card brand + last-4 land alongside Stripe brand glyphs in Phase 9.
-          </Text>
-        </View>
-
-        <View className="px-4 py-3 opacity-50">
-          <Pressable
-            disabled
-            accessibilityRole="button"
-            accessibilityState={{ disabled: true }}
-            className="items-center rounded-xl bg-muted px-4 py-3"
-            testID="receipt-email"
-          >
-            <Text className="text-sm font-medium text-foreground">
-              Email receipt
+          {vm.paymentBrand !== null && vm.paymentLast4 !== null ? (
+            <View
+              className="mt-1 flex-row items-center"
+              testID="receipt-payment-method"
+            >
+              <CardBrandBadge brand={vm.paymentBrand} size="md" />
+              <Text className="ml-3 text-sm text-foreground">
+                {formatBrand(vm.paymentBrand)} •••• {vm.paymentLast4}
+              </Text>
+            </View>
+          ) : (
+            <Text
+              className="mt-0.5 text-sm text-foreground"
+              testID="receipt-payment-fallback"
+            >
+              Charged to your card on file.
             </Text>
-          </Pressable>
-          <Text className="mt-1 text-center text-xs text-muted-foreground">
-            Emailed receipts land in Phase 9 polish.
+          )}
+          <Text className="mt-2 text-xs text-muted-foreground">
+            A receipt is emailed automatically when your charge clears.
           </Text>
         </View>
       </ScrollView>

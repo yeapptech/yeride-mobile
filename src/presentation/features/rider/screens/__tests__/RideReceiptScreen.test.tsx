@@ -135,6 +135,7 @@ const FARE: TripPayment = {
   amount: usd(18),
   status: 'succeeded',
   createdAt: new Date('2026-04-28T10:30:30Z'),
+  paymentMethodId: null,
 };
 const TIP: TripPayment = {
   id: 'pay-tip',
@@ -142,6 +143,7 @@ const TIP: TripPayment = {
   amount: usd(3),
   status: 'succeeded',
   createdAt: new Date('2026-04-28T10:32:00Z'),
+  paymentMethodId: null,
 };
 
 const baseScreenProps = {
@@ -172,9 +174,10 @@ describe('RideReceiptScreen — Phase 6 turn 5 wiring', () => {
       farePayment: FARE,
       tipPayment: null,
       refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
       isLoading: false,
       error: null,
-      emailReceipt: () => undefined,
     });
     mockUseTipFlowViewModel.mockReturnValue({
       state: {
@@ -205,9 +208,10 @@ describe('RideReceiptScreen — Phase 6 turn 5 wiring', () => {
       farePayment: FARE,
       tipPayment: TIP,
       refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
       isLoading: false,
       error: null,
-      emailReceipt: () => undefined,
     });
     mockUseTipFlowViewModel.mockReturnValue({
       state: { kind: 'hidden' },
@@ -229,9 +233,10 @@ describe('RideReceiptScreen — Phase 6 turn 5 wiring', () => {
       farePayment: FARE,
       tipPayment: null,
       refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
       isLoading: false,
       error: null,
-      emailReceipt: () => undefined,
     });
     mockUseTipFlowViewModel.mockReturnValue({ state: { kind: 'hidden' } });
 
@@ -244,5 +249,102 @@ describe('RideReceiptScreen — Phase 6 turn 5 wiring', () => {
         tipPayment: null,
       }),
     );
+  });
+});
+
+/* ─── Phase 9 Turn 7 — payment row + email-button removal ──────── */
+
+describe('RideReceiptScreen — Phase 9 Turn 7 payment row', () => {
+  beforeEach(() => {
+    mockUseRideReceiptViewModel.mockReset();
+    mockUseTipFlowViewModel.mockReset();
+    mockUseTipFlowViewModel.mockReturnValue({ state: { kind: 'hidden' } });
+  });
+
+  it('renders the brand badge + "Brand •••• last4" line when the join hits', () => {
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: makeCompletedRide(),
+      payments: [FARE],
+      fareTotal: usd(18),
+      farePayment: FARE,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: 'visa',
+      paymentLast4: '4242',
+      isLoading: false,
+      error: null,
+    });
+
+    const { getByTestId, getByText, queryByTestId } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(getByTestId('receipt-payment-method')).toBeTruthy();
+    expect(getByTestId('card-brand-badge-visa')).toBeTruthy();
+    expect(getByText(/Visa •••• 4242/)).toBeTruthy();
+    expect(queryByTestId('receipt-payment-fallback')).toBeNull();
+  });
+
+  it('renders the fallback line when brand is null (cache miss)', () => {
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: makeCompletedRide(),
+      payments: [FARE],
+      fareTotal: usd(18),
+      farePayment: FARE,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
+      isLoading: false,
+      error: null,
+    });
+
+    const { getByTestId, queryByTestId, getByText } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(getByTestId('receipt-payment-fallback')).toBeTruthy();
+    expect(queryByTestId('receipt-payment-method')).toBeNull();
+    expect(getByText('Charged to your card on file.')).toBeTruthy();
+  });
+
+  it('always shows the auto-email note (Stripe sends receipts via receiptEmail)', () => {
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: makeCompletedRide(),
+      payments: [FARE],
+      fareTotal: usd(18),
+      farePayment: FARE,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: 'visa',
+      paymentLast4: '4242',
+      isLoading: false,
+      error: null,
+    });
+
+    const { getByText } = render(<RideReceiptScreen {...baseScreenProps} />);
+    expect(
+      getByText('A receipt is emailed automatically when your charge clears.'),
+    ).toBeTruthy();
+  });
+
+  it('does not render the disabled "Email receipt" button (removed)', () => {
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: makeCompletedRide(),
+      payments: [FARE],
+      fareTotal: usd(18),
+      farePayment: FARE,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
+      isLoading: false,
+      error: null,
+    });
+
+    const { queryByTestId, queryByText } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(queryByTestId('receipt-email')).toBeNull();
+    expect(queryByText('Email receipt')).toBeNull();
+    expect(queryByText('Emailed receipts land in Phase 9 polish.')).toBeNull();
   });
 });

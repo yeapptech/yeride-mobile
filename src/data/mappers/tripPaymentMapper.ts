@@ -1,12 +1,16 @@
 import { Money } from '@domain/entities/Money';
+import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import type { TripPayment } from '@domain/entities/TripPayment';
 import { ValidationError } from '@domain/errors';
 import { Result } from '@domain/shared/Result';
+import { LOG } from '@shared/logger';
 
 import {
   TripPaymentDocSchema,
   type TripPaymentDoc,
 } from '../dto/TripPaymentDoc';
+
+const logger = LOG.extend('tripPaymentMapper');
 
 /**
  * Read-only mapper: Firestore `trips/{tripId}/payments/{paymentId}` doc →
@@ -24,6 +28,15 @@ import {
  * fix-2 the mapper used `Money.fromMajor` which interpreted `amount`
  * as dollars — a 100x bug that surfaced as $5 charges rendering as
  * $500 on the receipt.)
+ *
+ * `paymentMethodId` is parsed defensively. The webhook server writes
+ * `pi.payment_method` (Stripe `pm_…` id) on fare / tip charges (see
+ * yeride-stripe-server/stripe/routes.js:138); refund rows + legacy
+ * pre-Phase-9-Turn-7 fare rows omit it. Missing / `null` on the wire
+ * → domain `paymentMethodId: null`. Present-but-malformed (validation
+ * fails on the `pm_…` prefix) → `LOG.warn` + `null` so the receipt
+ * still renders rather than the entire payment row failing — same
+ * legacy-doc resilience pattern as `userMapper`'s Stripe id handling.
  */
 
 export function parseTripPaymentDoc(
@@ -61,11 +74,30 @@ export function toDomain(
       }),
     );
   }
+
+  // Defensive parse of paymentMethodId. Missing / null on the wire →
+  // null. Present-but-malformed → LOG.warn + null so the receipt still
+  // renders. The receipt VM joins this against the wallet cache; null
+  // surfaces a brand-agnostic "Charged to your card on file" fallback.
+  let paymentMethodId: PaymentMethodId | null = null;
+  if (doc.paymentMethodId != null) {
+    const pmR = PaymentMethodId.create(doc.paymentMethodId);
+    if (pmR.ok) {
+      paymentMethodId = pmR.value;
+    } else {
+      logger.warn(
+        '[toDomain] payment doc has malformed paymentMethodId; falling back to null',
+        { docId, error: pmR.error },
+      );
+    }
+  }
+
   return Result.ok({
     id: docId,
     type: doc.type,
     amount: amountR.value,
     status: doc.status,
     createdAt: at,
+    paymentMethodId,
   });
 }

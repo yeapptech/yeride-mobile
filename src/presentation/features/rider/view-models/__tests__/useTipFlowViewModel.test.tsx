@@ -168,6 +168,7 @@ const TIP: TripPayment = {
   amount: usd(3),
   status: 'succeeded',
   createdAt: new Date('2026-04-28T10:32:00Z'),
+  paymentMethodId: null,
 };
 
 /* ─── Tests ───────────────────────────────────────────────────────── */

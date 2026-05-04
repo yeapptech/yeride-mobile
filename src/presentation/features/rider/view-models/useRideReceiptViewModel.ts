@@ -2,11 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Money } from '@domain/entities/Money';
 import { Money as MoneyClass } from '@domain/entities/Money';
+import type { CardBrand } from '@domain/entities/PaymentMethod';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { TripPayment } from '@domain/entities/TripPayment';
 import { useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
+import {
+  useCurrentUserQuery,
+  useListPaymentMethodsQuery,
+} from '@presentation/queries';
 
 /**
  * View-model for `RideReceiptScreen`.
@@ -41,9 +46,25 @@ import { useFirestoreSubscription } from '@presentation/hooks';
  * then on `ride === null` means the doc was actually deleted (rare —
  * admin tooling only) and the screen renders a not-found message.
  *
- * Phase 9 will add `cardLast4`, `cardBrand`, and `processingFee` to
- * `TripPayment`. For now the screen renders a "Charged to your default
- * card" placeholder.
+ * Card-brand + last-4 join (Phase 9 Turn 7):
+ *   The `farePayment.paymentMethodId` (Stripe `pm_…` id, written by the
+ *   webhook server on every fare/tip charge — see
+ *   yeride-stripe-server/stripe/routes.js:138) is matched against the
+ *   rider's `useListPaymentMethodsQuery` cache. When the join hits, the
+ *   VM surfaces `paymentBrand` + `paymentLast4` and the screen renders
+ *   the per-brand glyph. When the join misses (refund-only rows;
+ *   pre-Phase-9-Turn-7 legacy fare rows that lacked `paymentMethodId`;
+ *   the rider detached the card after the trip; the wallet cache is
+ *   still loading), both fields are `null` and the screen falls back
+ *   to a brand-agnostic "Charged to your card on file" line.
+ *
+ * Email-receipt button removed in Phase 9 Turn 7. Stripe sends emailed
+ * receipts automatically via the `receiptEmail` parameter on
+ * `/direct-charge` (yeride-functions/lib/payments.js:454). The legacy
+ * yeride app never had an in-app email-receipt trigger — the disabled
+ * button on the rewrite was a stub for a hypothetical resend feature
+ * that wasn't actually wired anywhere. Replaced with a small
+ * informational note on the screen.
  */
 
 export interface UseRideReceiptViewModel {
@@ -53,9 +74,23 @@ export interface UseRideReceiptViewModel {
   readonly farePayment: TripPayment | null;
   readonly tipPayment: TripPayment | null;
   readonly refundPayment: TripPayment | null;
+  /**
+   * Card brand resolved from the wallet cache by joining
+   * `farePayment.paymentMethodId` against `useListPaymentMethodsQuery`.
+   * `null` when the join misses (no fare row yet / no
+   * `paymentMethodId` on the wire / card detached / wallet cache
+   * loading / no Stripe customer record). The screen surfaces a
+   * brand-agnostic fallback in that branch.
+   */
+  readonly paymentBrand: CardBrand | null;
+  /**
+   * Last-4 digits of the card the fare was charged to. Same null
+   * semantics as `paymentBrand` — both fields fall together (the
+   * wallet cache always carries last4 alongside brand).
+   */
+  readonly paymentLast4: string | null;
   readonly isLoading: boolean;
   readonly error: string | null;
-  readonly emailReceipt: () => void;
 }
 
 export function useRideReceiptViewModel(args: {
@@ -115,6 +150,29 @@ export function useRideReceiptViewModel(args: {
     [payments],
   );
 
+  // ── Card brand + last-4 join (Phase 9 Turn 7) ────────────────────
+  // Pull the rider's stripeCustomerId off the user query, then fire
+  // useListPaymentMethodsQuery (gated on customerId). Match the fare
+  // row's paymentMethodId against the cached methods array. Cache miss
+  // → null both. The user query and the methods query share TanStack's
+  // global cache; the Wallet tab's render warms this cache, but the
+  // receipt screen also works on a cold cache (just with a brief
+  // brand-agnostic fallback while the methods load).
+  const userQuery = useCurrentUserQuery();
+  const customerId =
+    userQuery.data?.role === 'rider' ? userQuery.data.stripeCustomerId : null;
+  const methodsQuery = useListPaymentMethodsQuery({ customerId });
+  const matchedMethod = useMemo(() => {
+    if (farePayment === null) return null;
+    if (farePayment.paymentMethodId === null) return null;
+    const methods = methodsQuery.data ?? [];
+    if (methods.length === 0) return null;
+    const target = String(farePayment.paymentMethodId);
+    return methods.find((m) => String(m.id) === target) ?? null;
+  }, [farePayment, methodsQuery.data]);
+  const paymentBrand: CardBrand | null = matchedMethod?.brand ?? null;
+  const paymentLast4: string | null = matchedMethod?.last4 ?? null;
+
   // Authoritative total: fare + tip − refund. We only sum same-currency
   // amounts; if someone ever introduces multi-currency tipping, the
   // Money.add() inside the use case will refuse to mix and surface a
@@ -140,13 +198,6 @@ export function useRideReceiptViewModel(args: {
     return total;
   }, [farePayment, tipPayment, refundPayment]);
 
-  const emailReceipt = useCallback(() => {
-    // Phase 9 polish — the legacy app sends an emailed receipt via a
-    // Cloud Function trigger on the trip's `events` doc. For Phase 3
-    // turn 3.5 the button is visible-but-disabled stub; the screen
-    // wires this no-op so the type signature stays stable.
-  }, []);
-
   return {
     ride,
     payments,
@@ -154,11 +205,12 @@ export function useRideReceiptViewModel(args: {
     farePayment,
     tipPayment,
     refundPayment,
+    paymentBrand,
+    paymentLast4,
     // Loading until the first ride-doc emission lands. Subsequent
     // `ride === null` means the doc was deleted; the screen renders
     // "couldn't find that receipt" in that branch.
     isLoading: !hasRideEmitted,
     error: null,
-    emailReceipt,
   };
 }
