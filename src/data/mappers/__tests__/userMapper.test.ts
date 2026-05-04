@@ -12,6 +12,8 @@ import {
   makeRider,
 } from '@domain/entities/User';
 import { UserId } from '@domain/entities/UserId';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
+import { FakeCrashReportingService } from '@shared/testing';
 
 import { parseUserDoc, toDoc, toDomain } from '../userMapper';
 
@@ -595,5 +597,142 @@ describe('pushToken round-trip (Phase 9 turn 2)', () => {
     const r = toDomain(uid(), parsed.value);
     if (!r.ok) throw r.error;
     expect(String(r.value.pushToken)).toBe('ExponentPushToken[xyz]');
+  });
+});
+
+/**
+ * Phase 9 turn 11 — telemetry: 4 LOG.warn → LOG.error flips on the
+ * malformed-id fallback paths in `userMapper.toDomain`. Each must
+ * reach `CrashlyticsLogTransport.recordError` via the rawMeta channel
+ * (Phase 9 turn 6 contract). Pattern mirrors `Logger.test.ts:244-267`
+ * and the Turn 4 / Turn 8 / Turn 9 telemetry test precedent:
+ *   - attach a `CrashlyticsLogTransport` to the singleton `LOG`
+ *   - drive the failure path
+ *   - assert on `fakeCrash.getRecordedErrors()` (constructed-Error
+ *     message-substring assertion — the prefix is the Crashlytics
+ *     grouping key)
+ *   - detach in `try/finally` so subsequent tests in the same Jest
+ *     worker don't see leaked transports.
+ *
+ * Each test asserts the recorded `name === 'YeRide:userMapper'` so
+ * Firebase Console groups non-fatals correctly under the mapper's
+ * scope.
+ */
+describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 11)', () => {
+  const SCOPE = 'YeRide:userMapper';
+
+  it('malformed stripeCustomerId → recordError fires with constructed Error carrying the stable prefix', () => {
+    const fakeCrash = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fakeCrash);
+    LOG.addTransport(transport);
+    try {
+      const parsed = parseUserDoc({
+        email: 'ada@yeapp.tech',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        role: 'rider',
+        createdDateTime: FIXED_NOW.toISOString(),
+        // Wrong prefix — branded factory rejects.
+        stripeCustomerId: 'garbage',
+      });
+      if (!parsed.ok) throw parsed.error;
+      const r = toDomain(uid(), parsed.value);
+      expect(r.ok).toBe(true);
+
+      const recorded = fakeCrash.getRecordedErrors();
+      const found = recorded.find((rec) =>
+        rec.error.message.startsWith('user_doc_malformed_stripe_customer_id'),
+      );
+      expect(found).toBeDefined();
+      expect(found?.name).toBe(SCOPE);
+    } finally {
+      LOG.removeTransport(transport);
+    }
+  });
+
+  it('malformed stripeAccountId → recordError fires with constructed Error carrying the stable prefix', () => {
+    const fakeCrash = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fakeCrash);
+    LOG.addTransport(transport);
+    try {
+      const parsed = parseUserDoc({
+        email: 'driver@yeapp.tech',
+        firstName: 'Grace',
+        lastName: 'Hopper',
+        role: 'driver',
+        createdDateTime: FIXED_NOW.toISOString(),
+        // Wrong prefix on the flat field.
+        stripeAccountId: 'not-an-acct-id',
+      });
+      if (!parsed.ok) throw parsed.error;
+      const r = toDomain(uid(), parsed.value);
+      expect(r.ok).toBe(true);
+
+      const recorded = fakeCrash.getRecordedErrors();
+      const found = recorded.find((rec) =>
+        rec.error.message.startsWith('user_doc_malformed_stripe_account_id'),
+      );
+      expect(found).toBeDefined();
+      expect(found?.name).toBe(SCOPE);
+    } finally {
+      LOG.removeTransport(transport);
+    }
+  });
+
+  it('malformed defaultPaymentMethodId → recordError fires with constructed Error carrying the stable prefix', () => {
+    const fakeCrash = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fakeCrash);
+    LOG.addTransport(transport);
+    try {
+      const parsed = parseUserDoc({
+        email: 'ada@yeapp.tech',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        role: 'rider',
+        createdDateTime: FIXED_NOW.toISOString(),
+        defaultPaymentMethodId: 'garbage', // wrong prefix
+      });
+      if (!parsed.ok) throw parsed.error;
+      const r = toDomain(uid(), parsed.value);
+      expect(r.ok).toBe(true);
+
+      const recorded = fakeCrash.getRecordedErrors();
+      const found = recorded.find((rec) =>
+        rec.error.message.startsWith('user_doc_malformed_payment_method_id'),
+      );
+      expect(found).toBeDefined();
+      expect(found?.name).toBe(SCOPE);
+    } finally {
+      LOG.removeTransport(transport);
+    }
+  });
+
+  it('malformed pushToken → recordError fires with constructed Error carrying the stable prefix', () => {
+    const fakeCrash = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fakeCrash);
+    LOG.addTransport(transport);
+    try {
+      const parsed = parseUserDoc({
+        email: 'ada@yeapp.tech',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        role: 'rider',
+        createdDateTime: FIXED_NOW.toISOString(),
+        // Spaces fail both Expo and raw FCM regexes.
+        pushToken: 'broken token with spaces',
+      });
+      if (!parsed.ok) throw parsed.error;
+      const r = toDomain(uid(), parsed.value);
+      expect(r.ok).toBe(true);
+
+      const recorded = fakeCrash.getRecordedErrors();
+      const found = recorded.find((rec) =>
+        rec.error.message.startsWith('user_doc_malformed_push_token'),
+      );
+      expect(found).toBeDefined();
+      expect(found?.name).toBe(SCOPE);
+    } finally {
+      LOG.removeTransport(transport);
+    }
   });
 });

@@ -131,6 +131,13 @@ export class FirestoreRideRepository implements RideRepository {
         callback(r.ok ? r.value : null);
       },
       (e) => {
+        // stays warn — Firestore SDK stream error (network outage,
+        // permission flip mid-stream). Wrapped in the synthetic
+        // `callback(null)` so the caller observes a graceful
+        // disconnection. The user-facing failure surfaces via the use
+        // case returning empty / not-found; flipping here would
+        // double-report alongside that. Audit decision per Phase 9
+        // turn 11 (skip Firestore SDK-catch wrappers).
         logger.warn('observeById error', { id: String(id), code: errCode(e) });
         callback(null);
       },
@@ -415,10 +422,20 @@ export class FirestoreRideRepository implements RideRepository {
         raw !== null && typeof raw === 'object'
           ? Object.keys(raw as Record<string, unknown>).sort()
           : [];
-      logger.warn('ride doc failed schema validation', {
+      // Phase 9 turn 11 — flipped from warn to error. Per-doc schema
+      // validation failure on the rides stream. Constructed Error
+      // with stable `ride_doc_invalid_schema` prefix for Crashlytics
+      // grouping; the `parsed.error` (a `ValidationError` wrapping
+      // the zod ZodError as `cause`) goes in the `error` meta field
+      // so `extractError` resolves it via the rawMeta channel. The
+      // `issues` and `topLevelKeys` debug context lands in the
+      // breadcrumb (sanitizer leaves these alone). Audit decision
+      // per Phase 9 turn 11 pre-checklist Q2.
+      logger.error('ride doc failed schema validation', {
         id,
         issues,
         topLevelKeys,
+        error: new Error('ride_doc_invalid_schema'),
       });
       return Result.err(
         new NotFoundError({
@@ -432,9 +449,14 @@ export class FirestoreRideRepository implements RideRepository {
     }
     const domain = rideMapper.toDomain(id, parsed.value);
     if (!domain.ok) {
-      logger.warn('ride doc failed entity construction', {
+      // Phase 9 turn 11 — flipped from warn to error. Per-doc entity
+      // construction failure (DTO passed zod but failed value-object
+      // semantic validation). Stable `ride_doc_invalid_entity` prefix;
+      // domain.error.code (e.g. `'coordinates_lat_out_of_range'`)
+      // suffixes for grouping granularity.
+      logger.error('ride doc failed entity construction', {
         id,
-        code: domain.error.code,
+        error: new Error(`ride_doc_invalid_entity: ${domain.error.code}`),
       });
       return Result.err(
         new NotFoundError({

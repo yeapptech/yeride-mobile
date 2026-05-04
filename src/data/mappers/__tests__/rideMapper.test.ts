@@ -18,6 +18,8 @@ import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
 import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import { UserId } from '@domain/entities/UserId';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
+import { FakeCrashReportingService } from '@shared/testing';
 
 import { parseRideDoc, toDoc, toDomain } from '../rideMapper';
 
@@ -1031,5 +1033,113 @@ describe('toDomain — legacy Cloud Function payment-pipeline status shapes', ()
     const parsed = unwrap(parseRideDoc(doc));
     const round = unwrap(toDomain('rideForPipelineStatus3', parsed));
     expect(round.status).toBe('completed');
+  });
+});
+
+/**
+ * Phase 9 turn 11 — telemetry: 2 LOG.warn → LOG.error flips on the
+ * malformed-id fallback paths in `passengerToDomain`. Mirror of the
+ * userMapper telemetry pattern; same test scaffolding.
+ */
+describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 11)', () => {
+  const SCOPE = 'YeRide:RideMapper';
+
+  function minimalRideDoc(
+    passengerOverrides: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      passenger: {
+        id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+        ...passengerOverrides,
+      },
+      driver: {},
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      status: 'awaiting_driver',
+      createdDateTime: T_CREATED.toISOString(),
+      pickup: {
+        address: {
+          description: 'Sunrise',
+          formatted_address: 'Sunrise, FL, USA',
+          name: 'Sunrise',
+          place_id: 'ChIJpickup',
+          types: ['neighborhood'],
+          vicinity: 'Sunrise',
+          geometry: { location: { lat: 26.1488, lng: -80.2737 } },
+        },
+      },
+      dropoff: {
+        address: {
+          description: 'Plantation',
+          formatted_address: 'Plantation, FL, USA',
+          name: 'Plantation',
+          place_id: 'ChIJdropoff',
+          types: ['route'],
+          vicinity: 'Plantation',
+          geometry: { location: { lat: 26.1224, lng: -80.2638 } },
+        },
+      },
+    };
+  }
+
+  it('malformed passenger.stripeCustomerId → recordError fires with constructed Error carrying the stable prefix', () => {
+    const fakeCrash = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fakeCrash);
+    LOG.addTransport(transport);
+    try {
+      const doc = minimalRideDoc({ stripeCustomerId: 'not-a-real-id' });
+      const parsed = unwrap(parseRideDoc(doc));
+      const r = toDomain('test-id', parsed);
+      expect(r.ok).toBe(true);
+
+      const recorded = fakeCrash.getRecordedErrors();
+      const found = recorded.find((rec) =>
+        rec.error.message.startsWith(
+          'trip_doc_malformed_passenger_stripe_customer_id',
+        ),
+      );
+      expect(found).toBeDefined();
+      expect(found?.name).toBe(SCOPE);
+    } finally {
+      LOG.removeTransport(transport);
+    }
+  });
+
+  it('malformed passenger.defaultPaymentMethod.id → recordError fires with constructed Error carrying the stable prefix', () => {
+    const fakeCrash = new FakeCrashReportingService();
+    const transport = new CrashlyticsLogTransport(fakeCrash);
+    LOG.addTransport(transport);
+    try {
+      const doc = minimalRideDoc({
+        // Underscore in body — PaymentMethodId.create rejects.
+        defaultPaymentMethod: { id: 'pm_legacy_xxx', type: 'card' },
+      });
+      const parsed = unwrap(parseRideDoc(doc));
+      const r = toDomain('test-id', parsed);
+      expect(r.ok).toBe(true);
+
+      const recorded = fakeCrash.getRecordedErrors();
+      const found = recorded.find((rec) =>
+        rec.error.message.startsWith(
+          'trip_doc_malformed_passenger_payment_method_id',
+        ),
+      );
+      expect(found).toBeDefined();
+      expect(found?.name).toBe(SCOPE);
+    } finally {
+      LOG.removeTransport(transport);
+    }
   });
 });

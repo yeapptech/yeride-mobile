@@ -196,10 +196,24 @@ function passengerToDomain(
     if (cusR.ok) {
       stripeCustomerId = cusR.value;
     } else {
-      logger.warn('passengerToDomain: malformed stripeCustomerId on trip doc', {
-        passengerId: p.id,
-        code: cusR.error.code,
-      });
+      // Phase 9 turn 11 — flipped from warn to error. Trip-doc passenger
+      // snapshot is written by the rider client; a malformed Stripe
+      // customer id means the rider's own user-doc has bad shape
+      // (PassengerSnapshot mirrors the user). Stable
+      // `trip_doc_malformed_passenger_stripe_customer_id` prefix; the
+      // `{passengerId, error}` meta shape lets `extractError` resolve
+      // the Error via the rawMeta channel while keeping passengerId
+      // in the breadcrumb. Audit decision per Phase 9 turn 11
+      // pre-checklist Q2.
+      logger.error(
+        'passengerToDomain: malformed stripeCustomerId on trip doc',
+        {
+          passengerId: p.id,
+          error: new Error(
+            `trip_doc_malformed_passenger_stripe_customer_id: ${cusR.error.code}`,
+          ),
+        },
+      );
     }
   }
   let defaultPaymentMethod: PassengerPaymentMethod | null = null;
@@ -211,9 +225,17 @@ function passengerToDomain(
         type: p.defaultPaymentMethod.type,
       };
     } else {
-      logger.warn(
+      // Phase 9 turn 11 — flipped from warn to error. Same shape as
+      // the stripeCustomerId site above. Stable
+      // `trip_doc_malformed_passenger_payment_method_id` prefix.
+      logger.error(
         'passengerToDomain: malformed defaultPaymentMethod.id on trip doc',
-        { passengerId: p.id, code: pmR.error.code },
+        {
+          passengerId: p.id,
+          error: new Error(
+            `trip_doc_malformed_passenger_payment_method_id: ${pmR.error.code}`,
+          ),
+        },
       );
     }
   }

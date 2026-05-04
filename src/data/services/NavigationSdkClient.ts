@@ -509,6 +509,14 @@ export class NavigationSdkClient {
       try {
         cb(domainEvent);
       } catch (e) {
+        // stays warn — same shape as Turn 9's BackgroundGeolocation
+        // subscriber-threw flips (L502/L547), but the cross-cutting
+        // Firestore mapper audit (Phase 9 turn 11) explicitly scoped
+        // this out. Flipping is a logical follow-up turn — would
+        // surface domain-side subscriber bugs in the navigation
+        // arrival fan-out via Crashlytics. Defer until field telemetry
+        // shows whether arrival callbacks see real-world subscriber
+        // throws.
         logger.warn('handleArrival: subscriber threw', e);
       }
     }

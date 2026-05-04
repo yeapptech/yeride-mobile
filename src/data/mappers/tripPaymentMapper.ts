@@ -76,16 +76,26 @@ export function toDomain(
   }
 
   // Defensive parse of paymentMethodId. Missing / null on the wire →
-  // null. Present-but-malformed → LOG.warn + null so the receipt still
-  // renders. The receipt VM joins this against the wallet cache; null
-  // surfaces a brand-agnostic "Charged to your card on file" fallback.
+  // null. Present-but-malformed → LOG.error + null so the receipt
+  // still renders. The receipt VM joins this against the wallet cache;
+  // null surfaces a brand-agnostic "Charged to your card on file"
+  // fallback.
+  //
+  // Phase 9 turn 11 — flipped from warn to error. The existing
+  // `{docId, error: pmR.error}` meta shape already routes through the
+  // rawMeta channel: `extractError` walks meta looking for an `error`
+  // field that is an `Error` instance, and `pmR.error` is a real
+  // `ValidationError` (extends `DomainError` extends `Error`). No
+  // constructed wrapper needed — the validation `code` on the
+  // ValidationError is the Crashlytics grouping signal. Audit decision
+  // per Phase 9 turn 11 pre-checklist Q2.
   let paymentMethodId: PaymentMethodId | null = null;
   if (doc.paymentMethodId != null) {
     const pmR = PaymentMethodId.create(doc.paymentMethodId);
     if (pmR.ok) {
       paymentMethodId = pmR.value;
     } else {
-      logger.warn(
+      logger.error(
         '[toDomain] payment doc has malformed paymentMethodId; falling back to null',
         { docId, error: pmR.error },
       );

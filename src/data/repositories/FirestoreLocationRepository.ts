@@ -62,6 +62,13 @@ export class FirestoreLocationRepository implements LocationRepository {
           break;
         }
         const delay = RETRY_DELAYS_MS[attempt] ?? 4_000;
+        // stays warn — best-effort retry. The final exhaustion at L73
+        // already logs at error AND the wrapped NetworkError is then
+        // re-thrown by `useUpdateLocationMutation`'s mutationFn and
+        // lands at `useGpsLifecycle`'s `onError` (Phase 9 turn 8 L266
+        // flip). Per-attempt visibility is dev-time only; flipping
+        // would double-report (one non-fatal per attempt + one per
+        // final). Audit decision per Phase 9 turn 11 pre-checklist Q4.
         logger.warn('updateLocation failed, retrying', {
           attempt: String(attempt + 1),
           code,
@@ -95,10 +102,18 @@ export class FirestoreLocationRepository implements LocationRepository {
         }
         const parsed = userLocationMapper.parseUserLocationDoc(raw);
         if (!parsed.ok) {
-          logger.warn('subscribeToLocation: doc failed schema validation', {
-            userId: String(args.userId),
-            code: parsed.error.code,
-          });
+          // Phase 9 turn 11 — flipped from warn to error. Per-doc
+          // schema-validation failure on the locations stream. Plain-
+          // object meta would skip the rawMeta channel's recordError
+          // fan-out, so we construct an Error with a stable
+          // `location_doc_invalid_schema` prefix that gives Crashlytics
+          // a useful grouping key (the `code` suffix differentiates
+          // distinct validation failures). Audit decision per Phase 9
+          // turn 11 pre-checklist Q2 (flip per-doc validation).
+          logger.error(
+            'subscribeToLocation: doc failed schema validation',
+            new Error(`location_doc_invalid_schema: ${parsed.error.code}`),
+          );
           args.callback(null);
           return;
         }
@@ -107,19 +122,27 @@ export class FirestoreLocationRepository implements LocationRepository {
           parsed.value,
         );
         if (!domain.ok) {
-          logger.warn('subscribeToLocation: doc failed entity construction', {
-            userId: String(args.userId),
-            code: domain.error.code,
-          });
+          // Phase 9 turn 11 — flipped from warn to error. Same shape
+          // as the schema-validation site above; domain.error.code
+          // suffixes the stable `location_doc_invalid_entity` prefix.
+          logger.error(
+            'subscribeToLocation: doc failed entity construction',
+            new Error(`location_doc_invalid_entity: ${domain.error.code}`),
+          );
           args.callback(null);
           return;
         }
         args.callback(domain.value);
       },
       (e) => {
-        logger.warn('subscribeToLocation stream error', {
-          code: errCode(e),
-        });
+        // Phase 9 turn 11 — flipped from warn to error. Firestore
+        // stream-error callback. The SDK passes a real Error with a
+        // `code` field (e.g. `'permission-denied'`, `'unavailable'`).
+        // Pass `e` through directly — `extractError`'s `instanceof
+        // Error` check resolves it via the rawMeta channel without a
+        // constructed wrapper. Audit decision per Phase 9 turn 11
+        // pre-checklist Q2 (flip per-doc validation / stream errors).
+        logger.error('subscribeToLocation stream error', e);
         args.callback(null);
       },
     );
@@ -138,7 +161,15 @@ export class FirestoreLocationRepository implements LocationRepository {
       const domain = userLocationMapper.toDomain(String(userId), parsed.value);
       return Result.ok(domain.ok ? domain.value : null);
     } catch (e) {
-      logger.warn('getLastKnown failed', { code: errCode(e) });
+      // Phase 9 turn 11 — flipped from warn to error. Pre-empts the
+      // stream subscription with a one-shot read; failure here means
+      // the user sees a brief loading state instead of a stale-cache
+      // hit (degraded UX path). The SDK throw is a real Error with a
+      // `code` field, so passing `e` directly lets `extractError`
+      // resolve it via the rawMeta channel without a constructed
+      // wrapper. Audit decision per Phase 9 turn 11 pre-checklist Q3
+      // (flip getLastKnown).
+      logger.error('getLastKnown failed', e);
       return Result.err(
         new NetworkError({
           code: 'location_read_failed',

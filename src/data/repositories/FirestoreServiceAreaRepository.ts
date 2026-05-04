@@ -47,16 +47,30 @@ export class FirestoreServiceAreaRepository implements ServiceAreaRepository {
     snap.forEach((d) => {
       const parsed = serviceAreaMapper.parseServiceAreaDoc(d.data());
       if (!parsed.ok) {
-        logger.warn('listAll: skipping doc that failed schema validation', {
+        // Phase 9 turn 11 — flipped from warn to error. Per-doc schema
+        // validation on the service-areas catalog. Read-once (one
+        // session = one read) so volume is low. Stable
+        // `service_area_doc_invalid_schema` prefix; `parsed.error`
+        // (a ValidationError wrapping the zod ZodError) flows through
+        // the `error` meta field via the rawMeta channel. Audit
+        // decision per Phase 9 turn 11 pre-checklist Q2.
+        logger.error('listAll: skipping doc that failed schema validation', {
           id: d.id,
+          error: new Error('service_area_doc_invalid_schema'),
         });
         return;
       }
       const domain = serviceAreaMapper.toDomain(d.id, parsed.value);
       if (!domain.ok) {
-        logger.warn('listAll: skipping doc that failed entity construction', {
+        // Phase 9 turn 11 — flipped from warn to error. Per-doc entity
+        // construction failure. Stable
+        // `service_area_doc_invalid_entity` prefix; domain.error.code
+        // suffixes for grouping granularity.
+        logger.error('listAll: skipping doc that failed entity construction', {
           id: d.id,
-          code: domain.error.code,
+          error: new Error(
+            `service_area_doc_invalid_entity: ${domain.error.code}`,
+          ),
         });
         return;
       }
@@ -133,17 +147,34 @@ export class FirestoreServiceAreaRepository implements ServiceAreaRepository {
     snap.forEach((d) => {
       const parsed = rideServiceMapper.parseRideServiceDoc(d.data());
       if (!parsed.ok) {
-        logger.warn(
+        // Phase 9 turn 11 — flipped from warn to error. Per-doc schema
+        // validation on the rideServices subcollection. Stable
+        // `ride_service_doc_invalid_schema` prefix; same audit
+        // rationale as the listAll site above.
+        logger.error(
           'listRideServices: skipping doc that failed schema validation',
-          { areaId: String(areaId), id: d.id },
+          {
+            areaId: String(areaId),
+            id: d.id,
+            error: new Error('ride_service_doc_invalid_schema'),
+          },
         );
         return;
       }
       const domain = rideServiceMapper.toDomain(d.id, areaId, parsed.value);
       if (!domain.ok) {
-        logger.warn(
+        // Phase 9 turn 11 — flipped from warn to error. Per-doc entity
+        // construction failure. Stable `ride_service_doc_invalid_entity`
+        // prefix; domain.error.code suffixes.
+        logger.error(
           'listRideServices: skipping doc that failed entity construction',
-          { areaId: String(areaId), id: d.id, code: domain.error.code },
+          {
+            areaId: String(areaId),
+            id: d.id,
+            error: new Error(
+              `ride_service_doc_invalid_entity: ${domain.error.code}`,
+            ),
+          },
         );
         return;
       }

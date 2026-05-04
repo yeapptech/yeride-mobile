@@ -238,9 +238,21 @@ function parseStripeCustomerId(
   if (raw === null || raw === undefined || raw === '') return null;
   const r = StripeCustomerId.create(raw);
   if (!r.ok) {
-    logger.warn('toDomain: malformed stripeCustomerId; treating as null', {
+    // Phase 9 turn 11 — flipped from warn to error. Sustained non-zero
+    // rate flags a server-side write writing a bad shape (Stripe
+    // webhook server, Cloud Function, or migration). Constructed Error
+    // with a stable `user_doc_malformed_stripe_customer_id` prefix
+    // gives Crashlytics a useful grouping key; the validation `code`
+    // suffix differentiates distinct rejection causes. The `uid` is
+    // carried in the `{uid, error}` meta shape — `extractError`
+    // resolves the `error` field via the rawMeta channel and the uid
+    // lands in the breadcrumb (sanitizer leaves random Firebase uids
+    // alone). Audit decision per Phase 9 turn 11 pre-checklist Q2.
+    logger.error('toDomain: malformed stripeCustomerId; treating as null', {
       uid: String(uid),
-      code: r.error.code,
+      error: new Error(
+        `user_doc_malformed_stripe_customer_id: ${r.error.code}`,
+      ),
     });
     return null;
   }
@@ -254,9 +266,12 @@ function parseStripeAccountId(
   if (raw === null || raw === undefined || raw === '') return null;
   const r = StripeAccountId.create(raw);
   if (!r.ok) {
-    logger.warn('toDomain: malformed stripeAccountId; treating as null', {
+    // Phase 9 turn 11 — flipped from warn to error. Same shape as
+    // parseStripeCustomerId. Stable
+    // `user_doc_malformed_stripe_account_id` prefix.
+    logger.error('toDomain: malformed stripeAccountId; treating as null', {
       uid: String(uid),
-      code: r.error.code,
+      error: new Error(`user_doc_malformed_stripe_account_id: ${r.error.code}`),
     });
     return null;
   }
@@ -270,11 +285,16 @@ function parsePaymentMethodId(
   if (raw === null || raw === undefined || raw === '') return null;
   const r = PaymentMethodId.create(raw);
   if (!r.ok) {
-    logger.warn(
+    // Phase 9 turn 11 — flipped from warn to error. Same shape as
+    // parseStripeCustomerId. Stable
+    // `user_doc_malformed_payment_method_id` prefix.
+    logger.error(
       'toDomain: malformed defaultPaymentMethodId; treating as null',
       {
         uid: String(uid),
-        code: r.error.code,
+        error: new Error(
+          `user_doc_malformed_payment_method_id: ${r.error.code}`,
+        ),
       },
     );
     return null;
@@ -296,9 +316,15 @@ function parsePushToken(
   if (raw === null || raw === undefined || raw === '') return null;
   const r = PushToken.create(raw);
   if (!r.ok) {
-    logger.warn('toDomain: malformed pushToken; treating as null', {
+    // Phase 9 turn 11 — flipped from warn to error. Same shape as
+    // parseStripeCustomerId. Stable `user_doc_malformed_push_token`
+    // prefix. The next launch's `RegisterPushToken` (Phase 9 turn 2)
+    // will overwrite the bad value, but field telemetry on rate is
+    // still valuable — a sustained non-zero rate could mean Expo's
+    // token format is drifting.
+    logger.error('toDomain: malformed pushToken; treating as null', {
       uid: String(uid),
-      code: r.error.code,
+      error: new Error(`user_doc_malformed_push_token: ${r.error.code}`),
     });
     return null;
   }
