@@ -134,13 +134,30 @@ export function toDomain(
     ? routePreferenceToDomain(doc.routePreference)
     : null;
 
-  // Legacy Cloud Function writes `'passenger_canceled'` / `'driver_canceled'`
-  // for cancelled trips; rewrite domain only knows canonical `'cancelled'`.
-  // The `by` distinction is preserved in the cancellation subdoc.
-  const normalizedStatus =
-    doc.status === 'passenger_canceled' || doc.status === 'driver_canceled'
-      ? 'cancelled'
-      : doc.status;
+  // Normalize legacy Cloud Function / Stripe webhook wire statuses to
+  // canonical domain values. See `RideDocSchema.status` JSDoc for the
+  // full state-machine map.
+  //
+  //   - 'passenger_canceled' / 'driver_canceled' → 'cancelled'
+  //     (Phase 8 turn 3 sub-turn 5b). The `by` distinction is preserved
+  //     in the cancellation subdoc.
+  //   - 'payment_intent' → 'payment_requested' (Phase 9 turn 4 smoke
+  //     fix). Charge in flight; rider waits for settle.
+  //   - 'closed' → 'completed' (Phase 9 turn 4 smoke fix). Terminal-
+  //     success after the Stripe `charge.succeeded` webhook.
+  const normalizedStatus = (() => {
+    switch (doc.status) {
+      case 'passenger_canceled':
+      case 'driver_canceled':
+        return 'cancelled';
+      case 'payment_intent':
+        return 'payment_requested';
+      case 'closed':
+        return 'completed';
+      default:
+        return doc.status;
+    }
+  })();
 
   return Ride.fromProps({
     id: idR.value,

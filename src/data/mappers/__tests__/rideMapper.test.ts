@@ -962,3 +962,74 @@ describe('toDomain — legacy Cloud Function cancel shape', () => {
     expect(round.cancellation?.odometerMeters).toBe(0);
   });
 });
+
+// Phase 9 turn 4 smoke fix. After the driver taps Request Payment,
+// the deployed pipeline transitions the trip doc through two
+// additional wire statuses the rewrite enum doesn't have natively:
+//
+//   payment_requested → completed → payment_intent → closed
+//                       ^Cloud Fn   ^processPayment   ^Stripe webhook
+//
+//   - 'payment_intent' is written by yeride-functions/lib/payments.js
+//     after `processPayment` initiates the Stripe charge. The receipt
+//     should still render — the charge is in flight and the rider is
+//     waiting for it to settle. Maps to canonical 'payment_requested'.
+//
+//   - 'closed' is written by yeride-stripe-server/stripe/routes.js
+//     after the Stripe `charge.succeeded` webhook fires. The trip is
+//     finished and the fare cleared. Maps to canonical 'completed'.
+//
+// Without these normalizations the receipt screen briefly renders the
+// 'completed' state, then `observeRide` catches the next snapshot,
+// the schema's `status` enum rejects 'closed' (or 'payment_intent'),
+// `toDomainOrCorrupt` returns Result.err, the live subscription emits
+// null, and the receipt VM's post-mount `ride === null` branch
+// renders "We couldn't find that receipt."
+describe('toDomain — legacy Cloud Function payment-pipeline status shapes', () => {
+  function makePipelineStatusDoc(
+    status: string,
+    extras: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const ride = freshRide();
+    const doc = toDoc(ride) as unknown as Record<string, unknown>;
+    return { ...doc, status, ...extras };
+  }
+
+  it("normalizes status 'payment_intent' to canonical 'payment_requested'", () => {
+    const doc = makePipelineStatusDoc('payment_intent');
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('rideForPipelineStatus1', parsed));
+    expect(round.status).toBe('payment_requested');
+  });
+
+  it("normalizes status 'closed' to canonical 'completed'", () => {
+    const doc = makePipelineStatusDoc('closed', {
+      closedAt: T_COMPLETE.toISOString(),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('rideForPipelineStatus2', parsed));
+    expect(round.status).toBe('completed');
+  });
+
+  it('accepts top-level `closedAt` without breaking the parse', () => {
+    // The Stripe webhook writes `closedAt` alongside `status: 'closed'`.
+    // Zod's default object mode would strip an unknown key silently,
+    // but the schema declares it (mirroring the canceledAt pattern) so
+    // `topLevelKeys` stays scannable for diagnostics.
+    const doc = makePipelineStatusDoc('closed', {
+      closedAt: T_COMPLETE.toISOString(),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    expect(parsed.status).toBe('closed');
+    expect(parsed.closedAt).toBe(T_COMPLETE.toISOString());
+  });
+
+  it("still accepts the canonical 'completed' status without normalization", () => {
+    // Regression guard: the new switch arm must not interfere with the
+    // existing direct-write path the rewrite uses.
+    const doc = makePipelineStatusDoc('completed');
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('rideForPipelineStatus3', parsed));
+    expect(round.status).toBe('completed');
+  });
+});

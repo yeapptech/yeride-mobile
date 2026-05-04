@@ -351,12 +351,26 @@ export const RideDocSchema = z.object({
   passenger: PassengerDocSchema,
   driver: DriverDocOrNullishSchema,
   rideService: RideServiceEmbeddedSchema,
-  // Status enum accepts BOTH the canonical rewrite value (`'cancelled'`)
-  // and the two legacy values written by the Cloud Function
-  // (`'passenger_canceled'`, `'driver_canceled'`). The mapper normalizes
-  // both legacy values to canonical `'cancelled'` at the domain
-  // boundary; the `by` field of the resulting `RideCancellation` carries
-  // the rider/driver provenance. See rideMapper.toDomain.
+  // Status enum accepts BOTH the canonical rewrite values and the
+  // legacy values written by the deployed Cloud Functions / Stripe
+  // webhook. The mapper normalizes legacy values at the domain
+  // boundary. See rideMapper.toDomain.
+  //
+  // Cancel pipeline (Phase 8 turn 3 sub-turn 5b):
+  //   - 'passenger_canceled' / 'driver_canceled' → 'cancelled'.
+  //     The `by` field of the resulting `RideCancellation` carries
+  //     the rider/driver provenance.
+  //
+  // Payment pipeline (Phase 9 turn 4 smoke fix):
+  //   - 'payment_intent' → 'payment_requested'. Written by
+  //     yeride-functions/lib/payments.js after `processPayment`
+  //     initiates the Stripe charge. The charge is in flight; the
+  //     receipt should still render as the rider waits for it to
+  //     settle.
+  //   - 'closed' → 'completed'. Written by yeride-stripe-server/
+  //     stripe/routes.js after the Stripe `charge.succeeded` webhook
+  //     fires. Terminal-success state; the fare cleared and the trip
+  //     is finished.
   status: z.enum([
     'awaiting_driver',
     'scheduled',
@@ -369,6 +383,8 @@ export const RideDocSchema = z.object({
     'cancelled',
     'passenger_canceled',
     'driver_canceled',
+    'payment_intent',
+    'closed',
   ]),
   createdDateTime: ISO_DATE,
   pickup: PickupEndpointDocSchema,
@@ -380,6 +396,13 @@ export const RideDocSchema = z.object({
   canceledBy: z.enum(['rider', 'driver']).nullish(),
   cancelReasonText: z.string().nullish(),
   previousStatus: z.string().nullish(),
+  // Phase 9 turn 4 smoke fix — Stripe webhook writes `closedAt`
+  // alongside `status: 'closed'` in the same transaction. Declared
+  // here (mirroring the canceledAt pattern) so it's visible in the
+  // `topLevelKeys` diagnostics output rather than silently stripped.
+  // The mapper currently doesn't read it — `dropoff.completedAt` is
+  // the canonical pickup→dropoff completion timestamp.
+  closedAt: ISO_DATE.nullish(),
   routePreference: RoutePreferenceDocSchema.nullish(),
 });
 

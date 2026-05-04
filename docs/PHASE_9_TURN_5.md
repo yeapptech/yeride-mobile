@@ -103,7 +103,7 @@ customer / no card on file constructs cleanly.
      for the handful of rewrite-created trips on disk in
      `yeapp-stage` that landed before this fix.
 - Output schema `z.object({id: z.string().min(1), type:
-  z.enum(['card', 'cash'])}).nullable()`.
+z.enum(['card', 'cash'])}).nullable()`.
 
 JSDoc on the schema enumerates all three shapes so a future
 cleanup can't accidentally re-tighten the read side and break the
@@ -178,23 +178,23 @@ with no avatar / pushToken / payment method'`, and a new
 tests, one renamed:
 
 - `'extracts {id, type} from passenger.defaultPaymentMethod legacy
-  object form'` (renamed from the prior `extracts id from ...`
+object form'` (renamed from the prior `extracts id from ...`
   test; assertion updated to check both `.id` and `.type`).
 - `'falls back to null on a malformed defaultPaymentMethod.id
-  without crashing the read'` — tests the mapper's defensive
+without crashing the read'` — tests the mapper's defensive
   fallback when `PaymentMethodId.create` rejects (e.g.
   underscore in body — real Stripe PM ids are alphanumeric only
   in the body).
 - `'back-compat: synthesizes {id, type:"card"} from a bare-string
-  defaultPaymentMethod'` — pins the contract for rewrite trips
+defaultPaymentMethod'` — pins the contract for rewrite trips
   written before this turn.
 - `'reads passenger.stripeCustomerId off a legacy doc that
-  carries it'` — proves the new field round-trips on read.
+carries it'` — proves the new field round-trips on read.
 - `'falls back to null on a malformed stripeCustomerId without
-  crashing the read'` — same defensive contract for the customer
+crashing the read'` — same defensive contract for the customer
   id.
 - `'round-trips canonical {id, type} defaultPaymentMethod through
-  toDoc + toDomain'` — regression guard. The canonical write
+toDoc + toDomain'` — regression guard. The canonical write
   shape must survive a full round-trip.
 
 The top-of-file `PASSENGER` fixture also updates its
@@ -298,7 +298,7 @@ which means there's some number of completed trips where the
 rider was charged $0 and the driver received $0 because the
 fare-charge path silently failed. This is a finance / ops
 question, not an engineering one. After Turn 5 lands, all
-*future* trips charge correctly; the past is past.
+_future_ trips charge correctly; the past is past.
 
 ## Native rebuild
 
@@ -338,16 +338,16 @@ trade-off, not laziness:
 
 ## File-by-file summary
 
-| Layer | File | Change kind |
-|---|---|---|
-| Domain | `PassengerSnapshot.ts` | New `stripeCustomerId` field; `defaultPaymentMethod` shape `string \| null` → `{id, type} \| null`; new exported `PassengerPaymentMethod` interface |
-| DTO | `RideDoc.ts` | `PassengerDocSchema` gains `stripeCustomerId`; `PassengerDefaultPaymentMethodSchema` preprocess accepts three on-disk shapes; emits canonical `{id, type}` only |
-| Mapper | `rideMapper.ts` | `passengerToDomain` parses both fields defensively (warn + null on bad id); `passengerToDoc` writes canonical wire shape; new `LOG.extend('RideMapper')` logger |
-| Presentation | `useRouteSelectViewModel.ts` | Plumbs `user.stripeCustomerId` and `{id: defaultPaymentMethodId, type: 'card'}` into snapshot; trims 3 of 4 gap-warning blocks |
-| Domain test | `PassengerSnapshot.test.ts` | Fixture updated; +1 cash-type test |
-| Mapper test | `rideMapper.test.ts` | Fixture updated; +5 new tests covering canonical round-trip, legacy object form, bare-string back-compat, and two malformed-id fallbacks |
-| Domain test | `Ride.test.ts` | Fixture updated |
-| 20 other test files | various | Single-line `stripeCustomerId: null,` addition |
+| Layer               | File                         | Change kind                                                                                                                                                     |
+| ------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain              | `PassengerSnapshot.ts`       | New `stripeCustomerId` field; `defaultPaymentMethod` shape `string \| null` → `{id, type} \| null`; new exported `PassengerPaymentMethod` interface             |
+| DTO                 | `RideDoc.ts`                 | `PassengerDocSchema` gains `stripeCustomerId`; `PassengerDefaultPaymentMethodSchema` preprocess accepts three on-disk shapes; emits canonical `{id, type}` only |
+| Mapper              | `rideMapper.ts`              | `passengerToDomain` parses both fields defensively (warn + null on bad id); `passengerToDoc` writes canonical wire shape; new `LOG.extend('RideMapper')` logger |
+| Presentation        | `useRouteSelectViewModel.ts` | Plumbs `user.stripeCustomerId` and `{id: defaultPaymentMethodId, type: 'card'}` into snapshot; trims 3 of 4 gap-warning blocks                                  |
+| Domain test         | `PassengerSnapshot.test.ts`  | Fixture updated; +1 cash-type test                                                                                                                              |
+| Mapper test         | `rideMapper.test.ts`         | Fixture updated; +5 new tests covering canonical round-trip, legacy object form, bare-string back-compat, and two malformed-id fallbacks                        |
+| Domain test         | `Ride.test.ts`               | Fixture updated                                                                                                                                                 |
+| 20 other test files | various                      | Single-line `stripeCustomerId: null,` addition                                                                                                                  |
 
 ## Sources
 

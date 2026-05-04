@@ -427,23 +427,170 @@ No native config changes. No new dependencies. No prebuild required.
 
 ---
 
+## Smoke fix — receipt schema rejects 'closed' / 'payment_intent' wire statuses
+
+The user-driven manual smoke surfaced a real bug after Turn 4 shipped:
+driver taps Request Payment → rider's RideReceipt screen renders the
+receipt for a few seconds → then blanks out and shows "We couldn't
+find that receipt." Same family as Phase 8 Turn 3 sub-turn 5b — a
+Phase-3 latent bug where the deployed Cloud Function pipeline writes
+on-disk shapes the rewrite's DTO didn't accept.
+
+### Root cause
+
+The deployed payment pipeline transitions the trip doc through TWO
+additional wire statuses that the rewrite enum never declared:
+
+```
+payment_requested → completed → payment_intent → closed
+                    ^Cloud Fn   ^processPayment   ^Stripe webhook
+```
+
+- `'payment_intent'` is written by `yeride-functions/lib/payments.js`
+  after `processPayment` initiates the Stripe charge. The
+  `onTripUpdated` Firestore trigger fires on the
+  `'completed'` flip and runs the payment pipeline; the next snapshot
+  carries this status.
+- `'closed'` is written by `yeride-stripe-server/stripe/routes.js`
+  after the Stripe `charge.succeeded` webhook fires. Terminal-success
+  state. Co-written with a top-level `closedAt` ISO timestamp.
+
+The rewrite's `RideDocSchema.status` enum accepted only the canonical
+domain values plus the two cancel-pipeline aliases from Phase 8 Turn
+3 5b. When the Stripe webhook landed `status: 'closed'`,
+`RideDocSchema.safeParse` rejected with `{code: 'invalid_value',
+path: 'status'}`, `toDomainOrCorrupt` returned `Result.err`, the live
+`observeRide` callback emitted `null`, and the receipt VM's
+post-mount `ride === null` branch rendered the not-found message.
+
+The Metro log line that pinpointed the failure:
+
+```
+[YeRide:FirestoreRide] ride doc failed schema validation
+{"id":"PO2NW5cP80qE9P2UTyGT",
+ "issues":[{"code":"invalid_value","path":"status"}],
+ "topLevelKeys":["closedAt","createdDateTime","driver","dropoff",
+                 "passenger","payment","pickup","rideService",
+                 "routePreference","status"]}
+```
+
+`topLevelKeys` confirms the wire shape: `closedAt` is present
+(co-written with `'closed'`), and a `payment` object also lives at
+the top level (subcollection-distinct from the trip-payments
+subcollection the receipt VM observes).
+
+### Fix
+
+Single-shape extension at the DTO + mapper layer:
+
+- `src/data/dto/RideDoc.ts` — `RideDocSchema.status` enum gains
+  `'payment_intent'` and `'closed'`. New top-level `closedAt:
+ISO_DATE.nullish()` field declared (mirrors the `canceledAt` pattern
+  from Phase 8 Turn 3 5b — Zod's default object mode would strip it,
+  but declaring it makes it visible in the `topLevelKeys` diagnostics
+  output rather than silently dropped). The `payment` top-level
+  object is intentionally NOT declared — the receipt's payment data
+  comes from the `trips/{rideId}/payments` subcollection via
+  `observeTripPayments`, not from this top-level field; Zod strips it
+  silently and that's the right call here. JSDoc on the status enum
+  documents the new normalizations alongside the existing cancel
+  ones.
+
+- `src/data/mappers/rideMapper.ts` — the existing inline
+  normalization that flattened `'passenger_canceled' /
+'driver_canceled' → 'cancelled'` is refactored from a ternary into a
+  switch statement, with two new arms:
+  - `'payment_intent'` → `'payment_requested'` (charge in flight; the
+    rider should still see the receipt while waiting for the charge
+    to settle).
+  - `'closed'` → `'completed'` (terminal success; charge cleared).
+
+### Why these specific normalizations
+
+The legacy app conflates the `'completed'` (driver tapped Request
+Payment) and `'closed'` (charge cleared) states under one rider-
+facing screen — both render the receipt with the same fare math.
+The rewrite preserves that behavior by collapsing both to the domain
+status `'completed'`. Building distinct domain states for "settled"
+vs "in flight" is a Phase 10 cutover-prep candidate (would require
+new UI affordances for "your charge is processing" copy), not a
+smoke-fix. Same call for `'payment_intent'` vs `'payment_requested'`
+— both are "charge in flight; receipt should render" from the
+rider's POV.
+
+### Tests
+
+Four new tests in
+`src/data/mappers/__tests__/rideMapper.test.ts` under a new describe
+block `'toDomain — legacy Cloud Function payment-pipeline status
+shapes'`:
+
+- `normalizes status 'payment_intent' to canonical 'payment_requested'`
+- `normalizes status 'closed' to canonical 'completed'`
+- `accepts top-level closedAt without breaking the parse`
+- `still accepts the canonical 'completed' status without normalization`
+  (regression guard against the new switch arm interfering with the
+  existing direct-write path)
+
+Pattern mirrors the Phase 8 Turn 3 5b cancel-shape regression block.
+
+### Files added / touched (smoke fix)
+
+**Touched:**
+
+- `src/data/dto/RideDoc.ts` — `status` enum extended with two new
+  values; new `closedAt: ISO_DATE.nullish()` field; JSDoc updated to
+  document the payment-pipeline normalizations.
+- `src/data/mappers/rideMapper.ts` — normalization ternary refactored
+  to a switch with two new arms; inline JSDoc updated.
+- `src/data/mappers/__tests__/rideMapper.test.ts` — +4 regression
+  tests in a new describe block.
+- `CLAUDE.md` — Prettier-formatted (drift carried in with Phase 9
+  Turn 5's commit landed under user authorship; no semantic changes).
+- `docs/PHASE_9_TURN_5.md` — Prettier-formatted (same drift).
+
+### Acceptance (smoke fix)
+
+`npm run typecheck` + `node node_modules/eslint/bin/eslint.js .` +
+`npm run format:check` + `npm test` (chunked) all green.
+
+**180 test suites / 1529 tests** passing.
+
+Delta vs. Phase 9 Turn 5 close baseline (180 suites / 1525 tests):
+**+0 suites / +4 tests** — the four new smoke-fix regressions, all
+in the existing `rideMapper.test.ts` file.
+
+No native rebuild required. No new dependencies. No plugin patches.
+
+After the fix lands, the manual smoke can resume from Step 12 of the
+checklist above (driver taps Request Payment → rider sees the
+receipt persistently as the trip transitions through `'completed' →
+'payment_intent' → 'closed'`). Crashlytics non-fatals from the
+schema-rejection path will stop firing in Firebase Console.
+
+---
+
 ## Phase 9 — Turn 4 closing summary
 
-| Turn | Scope                                                             | Tests delta            | Status |
-| ---- | ----------------------------------------------------------------- | ---------------------- | ------ |
-| 1    | iOS Apple Maps Fabric escape — PROVIDER_GOOGLE flip               | +1 suite / +6 tests    | ✅     |
-| 2    | Push notifications — Expo registration + tap routing              | +8 suites / +117 tests | ✅     |
-| 3    | Crashlytics integration end-to-end across 3 sub-turns             | +8 suites / +108 tests | ✅     |
-| 6    | Observability cleanup grab-bag (rawMeta + ErrorBoundary)          | +1 suite / +16 tests   | ✅     |
-| 4    | DriverNavigation polish + SDK telemetry + foreground-push removal | +0 suites / +4 tests   | ✅     |
+| Turn      | Scope                                                                 | Tests delta            | Status |
+| --------- | --------------------------------------------------------------------- | ---------------------- | ------ |
+| 1         | iOS Apple Maps Fabric escape — PROVIDER_GOOGLE flip                   | +1 suite / +6 tests    | ✅     |
+| 2         | Push notifications — Expo registration + tap routing                  | +8 suites / +117 tests | ✅     |
+| 3         | Crashlytics integration end-to-end across 3 sub-turns                 | +8 suites / +108 tests | ✅     |
+| 6         | Observability cleanup grab-bag (rawMeta + ErrorBoundary)              | +1 suite / +16 tests   | ✅     |
+| 4         | DriverNavigation polish + SDK telemetry + foreground-push removal     | +0 suites / +4 tests   | ✅     |
+| 5         | Passenger-snapshot Stripe gap close (committed under user authorship) | +0 suites / +6 tests   | ✅     |
+| smoke fix | Receipt schema accepts 'payment_intent' / 'closed' wire statuses      | +0 suites / +4 tests   | ✅     |
 
-Cumulative Phase 9 delta (Phase 8 close 160/1268 → Phase 9 Turn 4
-close 180/1519): **+20 suites / +251 tests**.
+Cumulative Phase 9 delta (Phase 8 close 160/1268 → Phase 9 smoke-fix
+close 180/1529): **+20 suites / +261 tests**.
 
 Phase 9 has now closed: the iOS Map regression, the push-notifications
 gap, the Crashlytics integration, the observability cleanup
-follow-ups, and the DriverNavigation polish + SDK telemetry. The
-remaining items in the kickoff's "Phase 9+" scope are either
-out-of-band (RNFirebase modular API) or require pre-cutover decisions
-(Stripe/CF adapter telemetry, per-screen ErrorBoundary variants).
-Phase 10 cutover prep is the natural next direction.
+follow-ups, the DriverNavigation polish + SDK telemetry, the
+passenger-snapshot Stripe gap, and the receipt-schema payment-
+pipeline gap surfaced by the smoke. The remaining items in the
+kickoff's "Phase 9+" scope are either out-of-band (RNFirebase
+modular API) or require pre-cutover decisions (Stripe/CF adapter
+telemetry, per-screen ErrorBoundary variants). Phase 10 cutover prep
+is the natural next direction.
