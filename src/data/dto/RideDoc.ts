@@ -35,25 +35,55 @@ const VehicleSnapshotDocSchema = z.object({
 });
 
 /**
- * Legacy yeride writes `passenger.defaultPaymentMethod` as the FULL Stripe
- * PaymentMethod object (`{id, card: {brand, last4, ...}, ...}`); the
- * rewrite writes a bare id string. Preprocess to extract `.id` from the
- * object form so the canonical `string | null | undefined` validator
- * succeeds in either case. See `RideSelect.handlePaymentMethodSelected`
- * in legacy yeride for the source of the object shape.
+ * Three on-disk shapes for `passenger.defaultPaymentMethod` co-exist:
+ *
+ *   1. **Canonical (rewrite writes this post Phase 9 turn 4)** — minimum
+ *      shape `{id, type}` carrying the payment-method id and the
+ *      `'card' | 'cash'` discriminant. The deployed
+ *      `processPaymentForTrip` reads `.id` for the Stripe `/direct-charge`
+ *      call and `.type` for cash-vs-card branching; nothing else on the
+ *      server side reads off this object.
+ *
+ *   2. **Legacy yeride** — the FULL Stripe `PaymentMethod` object
+ *      (`{id, type, card: {brand, last4, exp_month, exp_year, ...}, ...}`).
+ *      The preprocess strips it down to the canonical shape — `.id` and
+ *      `.type` are always present on a real Stripe PaymentMethod. See
+ *      `RideSelect.handlePaymentMethodSelected` in legacy yeride for the
+ *      source of the object shape.
+ *
+ *   3. **Rewrite pre-Phase-9-turn-4** — a bare id string. The rewrite
+ *      shipped with this shape but it never satisfied the deployed
+ *      Cloud Function (validator throws on `passenger.stripeCustomerId
+ *      is missing`, then would have failed downstream on
+ *      `defaultPaymentMethod?.id` being undefined). Treated as `'card'`
+ *      since cash rides aren't supported in the rewrite yet.
+ *
+ * Permissive read across all three; strict write of canonical shape only.
  */
-const PassengerDefaultPaymentMethodSchema = z.preprocess((val) => {
-  if (
-    val !== null &&
-    val !== undefined &&
-    typeof val === 'object' &&
-    !Array.isArray(val)
-  ) {
-    const id = (val as Record<string, unknown>).id;
-    return typeof id === 'string' ? id : null;
-  }
-  return val;
-}, z.string().nullish());
+const PassengerDefaultPaymentMethodSchema = z.preprocess(
+  (val) => {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'object' && !Array.isArray(val)) {
+      const obj = val as Record<string, unknown>;
+      const id = typeof obj.id === 'string' ? obj.id : null;
+      if (id === null || id.length === 0) return null;
+      const type = obj.type === 'cash' ? 'cash' : 'card';
+      return { id, type };
+    }
+    // Legacy rewrite (pre-Phase-9-turn-4) wrote a bare id string. Synthesize
+    // `{id, type:'card'}` since cash rides aren't supported in the rewrite.
+    if (typeof val === 'string' && val.length > 0) {
+      return { id: val, type: 'card' };
+    }
+    return null;
+  },
+  z
+    .object({
+      id: z.string().min(1),
+      type: z.enum(['card', 'cash']),
+    })
+    .nullable(),
+);
 
 const PassengerDocSchema = z.object({
   id: z.string().min(1),
@@ -63,6 +93,14 @@ const PassengerDocSchema = z.object({
   phoneNumber: z.string().min(1),
   pushToken: z.string().nullish(),
   avatarUrl: z.string().nullish(),
+  /**
+   * Rider's Stripe customer id (`cus_...`). Required by the deployed
+   * `processPaymentForTrip` validator for any non-cash trip; null only
+   * before the rider has taken any wallet action (`EnsureStripeCustomer`
+   * writes it on first card-add). Schema accepts null for back-compat
+   * with rewrite trips written before Phase 9 turn 4.
+   */
+  stripeCustomerId: z.string().nullish(),
   defaultPaymentMethod: PassengerDefaultPaymentMethodSchema,
 });
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 3, 2026 (Phase 9 Turn 4 closed — DriverNavigation polish + SDK telemetry: foreground-push removal + 5 warn→error flips for chain-fatal sites)
+**Last updated:** May 3, 2026 (Phase 9 Turn 5 closed — passenger-snapshot Stripe gap close: `stripeCustomerId` + canonical `{id, type}` `defaultPaymentMethod` shape on `PassengerSnapshot` + DTO + mapper + RouteSelect VM)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,72 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 5 closed.** Passenger-snapshot Stripe gap closed —
+the long-deferred Phase 6 polish item that's been recorded in memory
+since `Rider.stripeCustomerId` first landed. Surfaced by a real-user
+tip-flow report ("Connection trouble — your tip didn't go through")
+and traced to the deployed `processPaymentForTrip` Cloud Function
+hard-requiring `passenger.stripeCustomerId` (validator at
+`yeride-functions/lib/payments.js:43-45`) plus reading
+`passenger.defaultPaymentMethod` as an `{id, type}` object (server
+calls `tripData.passenger.defaultPaymentMethod?.id` for
+`/direct-charge`'s `paymentMethodId` argument and
+`tripData.passenger.defaultPaymentMethod?.type` for cash-vs-card
+branching). Trip writes from the rewrite never satisfied either —
+`PassengerSnapshot` had no `stripeCustomerId` field at all and wrote
+`defaultPaymentMethod` as a bare id string. Failure modes spanned:
+(a) `tipDriver` callable returning `code: 'internal'` → mapped to
+`NetworkError` → "Connection trouble" banner (the loud failure that
+surfaced this); (b) `onTripUpdated` Firestore trigger calling
+`processPayment(event)` on both `'payment_requested'` and
+`'completed'` status flips, with the catch block intentionally NOT
+flipping to `payment_failed` ("let webhook be authoritative") —
+silent failure leaving every rewrite-completed trip with a stranded
+`payment.error` field, the receipt UI showing "Total updates as soon
+as your charge clears." indefinitely, and the driver unpaid (the
+silent and most consequential mode); (c) `cancelTrip` callable
+returning `code: 'internal'` for late-rider / mid-trip cancellation
+paths that incur a Stripe charge. The fix touches five files across
+the four layers: `PassengerSnapshot.ts` (entity gains
+`stripeCustomerId: StripeCustomerId | null` and changes
+`defaultPaymentMethod` shape from `string | null` to
+`PassengerPaymentMethod | null` where `PassengerPaymentMethod = {id:
+PaymentMethodId; type: 'card' | 'cash'}`); `RideDoc.ts`
+(`PassengerDocSchema` gains the new field; the
+`PassengerDefaultPaymentMethodSchema` preprocess accepts three
+on-disk shapes — canonical `{id, type}`, legacy yeride's full Stripe
+`PaymentMethod` object, and rewrite-pre-Turn-5 bare-string
+back-compat — and emits canonical only); `rideMapper.ts`
+(`passengerToDomain` parses both fields defensively with
+`LOG.warn` + null fallback on malformed ids, mirroring `userMapper`'s
+contract; `passengerToDoc` writes canonical wire shape); the
+RouteSelect VM (plumbs `user.stripeCustomerId` and `{id:
+defaultPaymentMethodId, type: 'card' as const}` into
+`PassengerSnapshot.create`; trims three of four gap-warning blocks,
+keeping only the soft "rider has no card on file" warning since the
+legacy app surfaces the same UX). Twenty-four test files updated:
+the three fixture-using files
+(`PassengerSnapshot.test.ts` / `rideMapper.test.ts` / `Ride.test.ts`)
+got new `{id: PaymentMethodId.create(...), type: 'card'}` +
+`stripeCustomerId: StripeCustomerId.create(...)` fixtures, the other
+twenty got a single-line `stripeCustomerId: null,` addition (done
+via one `perl -i -0pe` sweep against the
+`avatarUrl: null,\n    defaultPaymentMethod: null,` pattern). Six
+new tests added — three on `PassengerSnapshot.test.ts` (cash-typed
+path) and five on `rideMapper.test.ts` (canonical round-trip,
+legacy object form, bare-string back-compat, two malformed-id
+fallbacks). End-of-Turn-5 acceptance: **180 suites / 1525 tests**
+(+0 suites / +6 tests over Turn 4's 180/1519). Typecheck, lint,
+format, and test all green. **No native rebuild required** for Turn
+5 — pure JS/TS work; no new dependencies; no plugin patches.
+Pre-Turn-5 trip docs (`yeapp-stage` trips currently with stranded
+`payment.error`) won't auto-recover; documented option is to write
+them off as test data and rely on the cutover to fresh `yeapp-prod`
+since the legacy yeride co-existence rule still holds for going-
+forward writes (legacy reads our canonical `{id, type}` shape via
+its existing dual-read path; rewrite reads legacy's full-object
+shape via the DTO preprocess).
 
 **Phase 9 Turn 4 closed.** DriverNavigation polish + SDK telemetry,
 spending the rawMeta channel that Turn 6 landed. Two ships, both
@@ -603,6 +669,7 @@ pending (Turn 5).
 | Phase 9 turn 3c | Dev-only force-crash entry point + Firebase Console smoke           | ✅     |
 | Phase 9 turn 6  | rawMeta channel + `<ErrorBoundary/>` + boundaries-rule migration    | ✅     |
 | Phase 9 turn 4  | DriverNavigation polish + SDK telemetry + foreground-push removal   | ✅     |
+| Phase 9 turn 5  | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -674,7 +741,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 3b | `useCrashReportingLifecycle` + AppContent integration + global JS error handler            | ✅                             |
 | 9 turn 3c | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                | ✅                             |
 | 9 turn 4  | DriverNavigation polish + SDK telemetry + foreground-push removal                          | ✅                             |
-| 9 turn 5+ | Future Phase 9 polish (location-push exhaustion / GPS lifecycle telemetry / RNFirebase)    | Pending                        |
+| 9 turn 5  | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape | ✅                             |
+| 9 turn 6+ | Future Phase 9 polish (location-push exhaustion / GPS lifecycle telemetry / RNFirebase)    | Pending                        |
 | 9 turn 6  | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                   | ✅                             |
 | 10        | Cutover from legacy yeride                                                                 | Pending                        |
 
@@ -1799,5 +1867,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_2.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_5.md`),
 then ask.

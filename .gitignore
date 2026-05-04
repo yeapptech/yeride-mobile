@@ -62,6 +62,7 @@ firebase/config/**/google-services.json
 
 # Test
 coverage/
+.fuse_hidden*
 
 # Misc
 *.log

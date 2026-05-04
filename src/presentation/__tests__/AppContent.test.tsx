@@ -66,6 +66,7 @@ function makeDispatchedRide(passengerUid: UserId, driverUid: UserId): Ride {
       phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
       pushToken: null,
       avatarUrl: null,
+      stripeCustomerId: null,
       defaultPaymentMethod: null,
     }),
   );

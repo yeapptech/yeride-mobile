@@ -5,6 +5,7 @@ import { Email } from '../Email';
 import { Endpoint } from '../Endpoint';
 import { Money } from '../Money';
 import { PassengerSnapshot } from '../PassengerSnapshot';
+import { PaymentMethodId } from '../PaymentMethodId';
 import { PersonName } from '../PersonName';
 import { PhoneNumber } from '../PhoneNumber';
 import { Ride } from '../Ride';
@@ -12,6 +13,7 @@ import { RideId } from '../RideId';
 import { RideServiceId } from '../RideServiceId';
 import { RideServiceSnapshot } from '../RideServiceSnapshot';
 import { Route } from '../Route';
+import { StripeCustomerId } from '../StripeCustomerId';
 import { UserId } from '../UserId';
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
@@ -57,7 +59,11 @@ const PASSENGER = unwrap(
     phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
     pushToken: null,
     avatarUrl: null,
-    defaultPaymentMethod: 'pm_123',
+    stripeCustomerId: unwrap(StripeCustomerId.create('cus_riderabc')),
+    defaultPaymentMethod: {
+      id: unwrap(PaymentMethodId.create('pm_123')),
+      type: 'card',
+    },
   }),
 );
 

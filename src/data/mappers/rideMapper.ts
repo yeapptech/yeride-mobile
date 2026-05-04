@@ -8,7 +8,11 @@ import {
 import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
-import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import {
+  PassengerSnapshot,
+  type PassengerPaymentMethod,
+} from '@domain/entities/PassengerSnapshot';
+import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
 import {
@@ -22,9 +26,13 @@ import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
+import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import { UserId } from '@domain/entities/UserId';
 import { ValidationError } from '@domain/errors';
 import { Result } from '@domain/shared/Result';
+import { LOG } from '@shared/logger';
+
+const logger = LOG.extend('RideMapper');
 
 import {
   RideDocSchema,
@@ -161,6 +169,37 @@ function passengerToDomain(
   if (!emailR.ok) return emailR;
   const phoneR = PhoneNumber.create(normalizeLegacyPhone(p.phoneNumber));
   if (!phoneR.ok) return phoneR;
+  // stripeCustomerId / defaultPaymentMethod parse defensively — a
+  // malformed id on disk falls back to null with a warn rather than
+  // crashing the whole trip-doc read. Mirrors `userMapper`'s behavior on
+  // the user doc's Stripe ids.
+  let stripeCustomerId: StripeCustomerId | null = null;
+  if (typeof p.stripeCustomerId === 'string' && p.stripeCustomerId.length > 0) {
+    const cusR = StripeCustomerId.create(p.stripeCustomerId);
+    if (cusR.ok) {
+      stripeCustomerId = cusR.value;
+    } else {
+      logger.warn('passengerToDomain: malformed stripeCustomerId on trip doc', {
+        passengerId: p.id,
+        code: cusR.error.code,
+      });
+    }
+  }
+  let defaultPaymentMethod: PassengerPaymentMethod | null = null;
+  if (p.defaultPaymentMethod) {
+    const pmR = PaymentMethodId.create(p.defaultPaymentMethod.id);
+    if (pmR.ok) {
+      defaultPaymentMethod = {
+        id: pmR.value,
+        type: p.defaultPaymentMethod.type,
+      };
+    } else {
+      logger.warn(
+        'passengerToDomain: malformed defaultPaymentMethod.id on trip doc',
+        { passengerId: p.id, code: pmR.error.code },
+      );
+    }
+  }
   return PassengerSnapshot.create({
     id: idR.value,
     name: nameR.value,
@@ -168,7 +207,8 @@ function passengerToDomain(
     phoneNumber: phoneR.value,
     pushToken: p.pushToken ?? null,
     avatarUrl: p.avatarUrl ?? null,
-    defaultPaymentMethod: p.defaultPaymentMethod ?? null,
+    stripeCustomerId,
+    defaultPaymentMethod,
   });
 }
 
@@ -579,7 +619,13 @@ function passengerToDoc(p: PassengerSnapshot): RideDoc['passenger'] {
     phoneNumber: p.phoneNumber.value,
     pushToken: p.pushToken,
     avatarUrl: p.avatarUrl,
-    defaultPaymentMethod: p.defaultPaymentMethod,
+    stripeCustomerId: p.stripeCustomerId ? String(p.stripeCustomerId) : null,
+    defaultPaymentMethod: p.defaultPaymentMethod
+      ? {
+          id: String(p.defaultPaymentMethod.id),
+          type: p.defaultPaymentMethod.type,
+        }
+      : null,
   };
 }
 

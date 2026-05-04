@@ -8,6 +8,7 @@ import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
 import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
 import { Ride } from '@domain/entities/Ride';
@@ -15,6 +16,7 @@ import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
+import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
 import { UserId } from '@domain/entities/UserId';
 
 import { parseRideDoc, toDoc, toDomain } from '../rideMapper';
@@ -44,7 +46,11 @@ const PASSENGER = unwrap(
     phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
     pushToken: 'ExponentPushToken[abc]',
     avatarUrl: null,
-    defaultPaymentMethod: 'pm_123',
+    stripeCustomerId: unwrap(StripeCustomerId.create('cus_riderabc')),
+    defaultPaymentMethod: {
+      id: unwrap(PaymentMethodId.create('pm_123')),
+      type: 'card',
+    },
   }),
 );
 
@@ -513,7 +519,7 @@ describe('toDomain — legacy yeride awaiting_driver trip shape', () => {
     expect(round.pickup.placeName).toBe('Sunrise Lakes');
   });
 
-  it('extracts `id` from passenger.defaultPaymentMethod object form', () => {
+  it('extracts `{id, type}` from passenger.defaultPaymentMethod legacy object form', () => {
     const doc = legacyAwaitingDriverDoc({
       passenger: {
         id: String(PASSENGER.id),
@@ -521,9 +527,12 @@ describe('toDomain — legacy yeride awaiting_driver trip shape', () => {
         lastName: 'Lovelace',
         email: 'ada@yeapp.tech',
         phoneNumber: '+14155551111',
-        // Legacy writes the FULL Stripe PaymentMethod object.
+        // Legacy writes the FULL Stripe PaymentMethod object. Real Stripe
+        // PM ids are `pm_` + 24 alphanumeric chars (no underscores in
+        // body) — `PaymentMethodId.create` rejects ids with underscores
+        // in the body.
         defaultPaymentMethod: {
-          id: 'pm_legacy_xxx',
+          id: 'pm_legacyXYZ123',
           card: { brand: 'visa', last4: '4242' },
           type: 'card',
         },
@@ -531,7 +540,98 @@ describe('toDomain — legacy yeride awaiting_driver trip shape', () => {
     });
     const parsed = unwrap(parseRideDoc(doc));
     const round = unwrap(toDomain('test-id', parsed));
-    expect(round.passenger.defaultPaymentMethod).toBe('pm_legacy_xxx');
+    expect(String(round.passenger.defaultPaymentMethod?.id)).toBe(
+      'pm_legacyXYZ123',
+    );
+    expect(round.passenger.defaultPaymentMethod?.type).toBe('card');
+  });
+
+  it('falls back to null on a malformed defaultPaymentMethod.id without crashing the read', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+        // Underscore in body — PaymentMethodId.create rejects.
+        defaultPaymentMethod: { id: 'pm_legacy_xxx', type: 'card' },
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.defaultPaymentMethod).toBeNull();
+  });
+
+  it('back-compat: synthesizes {id, type:"card"} from a bare-string defaultPaymentMethod', () => {
+    // Rewrite pre-Phase-9-turn-4 wrote a bare id string. Reading those
+    // legacy docs must still produce a usable PassengerSnapshot.
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+        defaultPaymentMethod: 'pm_barestring',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(String(round.passenger.defaultPaymentMethod?.id)).toBe(
+      'pm_barestring',
+    );
+    expect(round.passenger.defaultPaymentMethod?.type).toBe('card');
+  });
+
+  it('reads passenger.stripeCustomerId off a legacy doc that carries it', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+        stripeCustomerId: 'cus_legacyrider',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(String(round.passenger.stripeCustomerId)).toBe('cus_legacyrider');
+  });
+
+  it('falls back to null on a malformed stripeCustomerId without crashing the read', () => {
+    const doc = legacyAwaitingDriverDoc({
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+        // Missing the `cus_` prefix — StripeCustomerId.create rejects.
+        stripeCustomerId: 'not-a-real-id',
+      },
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.passenger.stripeCustomerId).toBeNull();
+  });
+
+  it('round-trips canonical {id, type} defaultPaymentMethod through toDoc + toDomain', () => {
+    // Phase 9 turn 4 regression guard. The canonical write shape must
+    // survive a full round-trip without information loss.
+    const ride = freshRide();
+    const doc = toDoc(ride);
+    expect(doc.passenger.stripeCustomerId).toBe('cus_riderabc');
+    expect(doc.passenger.defaultPaymentMethod).toEqual({
+      id: 'pm_123',
+      type: 'card',
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(String(round.passenger.stripeCustomerId)).toBe('cus_riderabc');
+    expect(String(round.passenger.defaultPaymentMethod?.id)).toBe('pm_123');
+    expect(round.passenger.defaultPaymentMethod?.type).toBe('card');
   });
 
   it('returns ValidationError when no source yields pickup coords', () => {

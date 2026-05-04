@@ -38,6 +38,7 @@ function makeCompletedRide(): Ride {
       phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
       pushToken: null,
       avatarUrl: null,
+      stripeCustomerId: null,
       defaultPaymentMethod: null,
     }),
   );
