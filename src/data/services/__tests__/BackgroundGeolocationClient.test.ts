@@ -5,6 +5,8 @@ import BackgroundGeolocation from 'react-native-background-geolocation';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { RideId } from '@domain/entities/RideId';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
+import { FakeCrashReportingService } from '@shared/testing';
 
 import {
   BackgroundGeolocationClient,
@@ -32,6 +34,12 @@ interface BgMock {
   onLocation: jest.Mock;
   onGeofence: jest.Mock;
   __emitLocation: (loc: unknown) => void;
+  /**
+   * Phase 9 turn 9: drive the SDK's `onLocation` error callback so the
+   * adapter's flipped `LOG.error` at L348 fires through the rawMeta
+   * channel to `recordError`.
+   */
+  __emitLocationError: (code: number) => void;
   __emitGeofence: (geo: unknown) => void;
   __reset: () => void;
   AUTHORIZATION_STATUS_ALWAYS: number;
@@ -389,6 +397,208 @@ describe('BackgroundGeolocationClient', () => {
       );
       const c = await client.requestAuthorizationIfNeeded();
       expect(c.ok && c.value).toBe('denied');
+    });
+  });
+
+  /**
+   * Phase 9 turn 9 — telemetry: 4 chain-fatal / contract-violation
+   * `LOG.error` sites in the SDK adapter must reach
+   * `CrashlyticsLogTransport.recordError` via the rawMeta channel
+   * (Phase 9 turn 6 contract). Pattern mirrors `Logger.test.ts:244-267`
+   * and Turn 4's nav VM telemetry tests:
+   *   - attach a `CrashlyticsLogTransport` to the singleton `LOG`
+   *   - drive the failure path
+   *   - assert on `fakeCrash.getRecordedErrors()`
+   *   - detach in `try/finally` so subsequent tests in the same Jest
+   *     worker don't see leaked transports
+   *
+   * Four sites covered:
+   *   - L348 onLocation: error           — constructed Error, message-substring assertion
+   *   - L506 invalid coords from SDK     — ValidationError reference (real Error)
+   *   - L536 location subscriber threw   — re-thrown subscriber Error (real Error)
+   *   - L585 geofence subscriber threw   — same shape as L536
+   *
+   * All tests assert `recorded.name === 'YeRide:BgGeolocation'` so
+   * Firebase Console groups non-fatals correctly under the adapter's
+   * scope.
+   */
+  describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 9)', () => {
+    const SCOPE = 'YeRide:BgGeolocation';
+
+    it('onLocation SDK error code → recordError fires with a constructed Error carrying the code', () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new BackgroundGeolocationClient();
+        const cb = jest.fn();
+        const dispose = client.subscribeToLocation(cb);
+
+        // Drive the SDK's onError callback (the second arg passed to
+        // `BackgroundGeolocation.onLocation`). Code 1 in legacy
+        // background-geolocation is "permission denied"; the adapter
+        // constructs an Error embedding the code.
+        sdk.__emitLocationError(1);
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Constructed Error — assert on message substring so a future
+        // cosmetic edit to the message won't silently regroup the
+        // Firebase issue under a different identifier. The assertion
+        // is loose enough to survive grammar edits but tight enough
+        // to catch removal of the error code.
+        const codeRecord = recorded.find((r) =>
+          r.error.message.includes('code=1'),
+        );
+        expect(codeRecord).toBeDefined();
+        expect(codeRecord?.error.message).toContain(
+          'bg_geolocation_onlocation_error',
+        );
+        expect(codeRecord?.name).toBe(SCOPE);
+        // Breadcrumb still fans out at the formatted-string level.
+        expect(fakeCrash.getBreadcrumbs()).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('[YeRide:BgGeolocation] onLocation: error'),
+          ]),
+        );
+        dispose();
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('routine onLocation status (code 0 / 499) does NOT fire recordError', () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new BackgroundGeolocationClient();
+        const cb = jest.fn();
+        const dispose = client.subscribeToLocation(cb);
+
+        // Code 0 = OK, code 499 = client cancelled. Both stay at info
+        // and do NOT recordError. Routine status changes — clutter on
+        // the dashboard if recorded.
+        sdk.__emitLocationError(0);
+        sdk.__emitLocationError(499);
+
+        expect(fakeCrash.getRecordedErrors()).toHaveLength(0);
+        // Breadcrumbs DO record at info level (helpful for triage if
+        // a later error fires).
+        expect(fakeCrash.getBreadcrumbs().length).toBeGreaterThan(0);
+        dispose();
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('invalid coords from SDK → recordError fires with the ValidationError carrying the validation code', () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new BackgroundGeolocationClient();
+        const cb = jest.fn();
+        const dispose = client.subscribeToLocation(cb);
+
+        // Drive `Coordinates.create` rejection — latitude > 90 is
+        // out-of-range, SDK contract violation territory. The adapter
+        // passes `coordsR.error` (a `ValidationError`) directly to
+        // `LOG.error`; the rawMeta channel preserves the reference.
+        sdk.__emitLocation(
+          sampleSdkLocation({ latitude: 999, longitude: -74.006 }),
+        );
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // ValidationError carries `code: 'coordinates_lat_out_of_range'`.
+        // Asserting on `code` (rather than reference identity) since
+        // `Coordinates.create` instantiates a fresh ValidationError per
+        // call — the test doesn't own the reference. Same caveat as
+        // Turn 8's ValidationError test: a future refactor of
+        // `Coordinates.create` to a const-error pattern would silently
+        // break the "fresh ValidationError per call" assumption, but
+        // the `code` field would still match.
+        const validationRecord = recorded.find(
+          (r) =>
+            // ValidationError extends DomainError which has a `code` field.
+            (r.error as Error & { code?: string }).code ===
+            'coordinates_lat_out_of_range',
+        );
+        expect(validationRecord).toBeDefined();
+        expect(validationRecord?.name).toBe(SCOPE);
+        // Subscribers received NOTHING — the invalid event was filtered
+        // out before the fan-out.
+        expect(cb).not.toHaveBeenCalled();
+        dispose();
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('location subscriber throws → recordError fires with the thrown Error (fan-out continues)', () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new BackgroundGeolocationClient();
+        const seededError = new Error('subscriber-bug');
+        const throwingCb = jest.fn(() => {
+          throw seededError;
+        });
+        const peerCb = jest.fn();
+
+        const disposeA = client.subscribeToLocation(throwingCb);
+        const disposeB = client.subscribeToLocation(peerCb);
+
+        sdk.__emitLocation(sampleSdkLocation());
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Reference identity — `e` in the catch is the seededError
+        // instance; the rawMeta channel preserves it through
+        // `sanitizeForLogging`.
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe(SCOPE);
+        // Fan-out resilience: peer subscriber DID receive the event.
+        expect(peerCb).toHaveBeenCalledTimes(1);
+        // Throwing subscriber was called once before throwing.
+        expect(throwingCb).toHaveBeenCalledTimes(1);
+
+        disposeA();
+        disposeB();
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('geofence subscriber throws → recordError fires with the thrown Error (fan-out continues)', () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new BackgroundGeolocationClient();
+        const seededError = new Error('geofence-subscriber-bug');
+        const throwingCb = jest.fn(() => {
+          throw seededError;
+        });
+        const peerCb = jest.fn();
+
+        const disposeA = client.subscribeToGeofence(throwingCb);
+        const disposeB = client.subscribeToGeofence(peerCb);
+
+        sdk.__emitGeofence(sampleSdkGeofence({ action: 'ENTER' }));
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe(SCOPE);
+        expect(peerCb).toHaveBeenCalledTimes(1);
+        expect(throwingCb).toHaveBeenCalledTimes(1);
+
+        disposeA();
+        disposeB();
+      } finally {
+        LOG.removeTransport(transport);
+      }
     });
   });
 });

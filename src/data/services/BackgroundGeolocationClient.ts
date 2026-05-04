@@ -345,7 +345,21 @@ export class BackgroundGeolocationClient {
               code: String(errorCode),
             });
           } else {
-            logger.warn('onLocation: error', { code: String(errorCode) });
+            // Phase 9 turn 9: SDK error codes (1=permission denied,
+            // 2=network unavailable, 408=timeout, etc.) are platform-
+            // level failures of the location pipeline. Construct an
+            // Error carrying the numeric code in the message so
+            // Crashlytics groups non-fatals per code (Turn 4's
+            // NavRouteStatus pattern). The original meta `{code}` is
+            // a plain object — without the constructed wrapper the
+            // rawMeta channel's `extractError` returns null and the
+            // recordError fan-out skips this site.
+            logger.error(
+              'onLocation: error',
+              new Error(
+                `bg_geolocation_onlocation_error: code=${String(errorCode)}`,
+              ),
+            );
           }
         },
       );
@@ -462,6 +476,10 @@ export class BackgroundGeolocationClient {
       }
       await BackgroundGeolocation.removeAllListeners();
     } catch (e) {
+      // stays warn — best-effort cleanup. The next session's adapter
+      // instance is fresh, so listener leakage doesn't carry forward;
+      // a Crashlytics non-fatal here would be noise without a
+      // corresponding user-visible failure.
       logger.warn('removeAllListeners failed (non-fatal)', e);
     }
   }
@@ -477,9 +495,15 @@ export class BackgroundGeolocationClient {
 
     const coordsR = Coordinates.create(coords.latitude, coords.longitude);
     if (!coordsR.ok) {
-      logger.warn('handleLocation: invalid coords from SDK', {
-        code: coordsR.error.code,
-      });
+      // Phase 9 turn 9: SDK contract violation — the platform's GPS
+      // subsystem fed us NaN or out-of-range lat/lng. Extremely rare
+      // in field but if it fires, it's a platform-level bug worth
+      // surfacing in Crashlytics. The `ValidationError` from
+      // `Coordinates.create` is already a real Error (extends
+      // DomainError extends Error) — pass it directly so the rawMeta
+      // channel fans it out with the validation code on the
+      // reference. No constructed-Error wrapper needed.
+      logger.error('handleLocation: invalid coords from SDK', coordsR.error);
       return;
     }
 
@@ -499,7 +523,17 @@ export class BackgroundGeolocationClient {
       try {
         cb(event);
       } catch (e) {
-        logger.warn('handleLocation: subscriber threw', e);
+        // Phase 9 turn 9: a synchronously-throwing subscriber is a
+        // domain-side bug — the registered callback (a hook or
+        // view-model effect) threw inside the SDK fan-out. The
+        // throwing subscriber doesn't necessarily know its callback
+        // was firing into the SDK, so the exception goes nowhere
+        // useful without telemetry. `e` IS a real Error here, so
+        // flip-only — the rawMeta channel passes the reference
+        // directly to `recordError`. The fan-out loop continues
+        // (resilience: one bad subscriber doesn't take down the
+        // others).
+        logger.error('handleLocation: subscriber threw', e);
       }
     }
   }
@@ -544,7 +578,11 @@ export class BackgroundGeolocationClient {
       try {
         cb(event);
       } catch (e) {
-        logger.warn('handleGeofence: subscriber threw', e);
+        // Phase 9 turn 9: same shape as `handleLocation: subscriber
+        // threw` — domain-side bug, real Error, flip-only. Fan-out
+        // loop continues so other subscribers still receive the
+        // event.
+        logger.error('handleGeofence: subscriber threw', e);
       }
     }
   }

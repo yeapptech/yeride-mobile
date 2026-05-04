@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 4, 2026 (Phase 9 Turn 8 closed — GPS lifecycle telemetry: 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures through Crashlytics recordError; 181 suites / 1568 tests)
+**Last updated:** May 4, 2026 (Phase 9 Turn 9 closed — SDK-adapter telemetry: 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient routing onLocation SDK error codes + invalid coords + subscriber-throws through Crashlytics recordError; 181 suites / 1573 tests)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,76 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 9 closed.** SDK-adapter telemetry flips — the four
+candidate sites in `BackgroundGeolocationClient.ts` that Turn 8's
+audit catalogued and deferred. All four pre-checklist questions
+landed on the Recommended option, so the full surface ships in one
+turn. (1) **L348 `onLocation: error`** — flipped to `LOG.error` with
+a constructed `Error` carrying the SDK's numeric error code in the
+message: `new Error(\`bg_geolocation_onlocation_error:
+code=${errorCode}\`)`. The original meta `{code: String(errorCode)}`was a plain object — without the constructed wrapper the rawMeta
+channel's`extractError(rawMeta ?? meta)`returned null and the`recordError`fan-out skipped this site. Constructed-Error pattern
+mirrors Turn 4's`navigation_route_status:`site; Crashlytics groups
+non-fatals by`name + message`first chars so each distinct numeric
+code (1=permission denied, 2=network unavailable, 408=timeout, 499=
+client cancelled, ...) groups under its own Firebase Console issue
+for triage granularity. The routine-status path (codes 0 / 499) at
+L344 stays at`info`— those are platform-level OK / cancel signals,
+not failures. (2) **L480`handleLocation: invalid coords`** — flipped
+to `LOG.error`passing`coordsR.error`(a`ValidationError`) directly.
+The original meta `{code: coordsR.error.code}`was a plain object that`extractError`would skip, but`coordsR.error`itself IS a real`Error` (`ValidationError extends DomainError extends Error`), so
+the cleanest fix is changing the meta argument from
+`{code: ...}`to the error reference itself — zero constructed-Error
+gymnastics. Pre-Turn-9 alternative pattern (mirror Turn 4 verbatim
+with`new Error(\`bg_invalid_coords: ${code}\`)`) was considered and
+rejected as less consistent. (3) **L502 `handleLocation: subscriber
+threw`** + (4) **L547 `handleGeofence: subscriber threw`** — fan-out
+loop defensive catches in `handleLocation`/`handleGeofence`. `e`was already a real`Error`here (a synchronously-throwing subscriber
+callback), so flip-only — change`logger.warn`to`logger.error`and
+the rawMeta channel preserves the reference identity through to`recordError`. The fan-out loop's resilience invariant (one bad
+subscriber doesn't take down the others) is preserved; the new
+telemetry just makes the bug visible. **Cleanup-best-effort site at
+L465 (`removeAllListeners failed (non-fatal)`) stays at warn** —
+tagged with `// stays warn — best-effort cleanup`comment per Turn
+8's pattern. **Adapter ↔ hook duplicate noise** — pre-checklist Q4
+chose to leave both layers at error. The 4 chain-fatal adapter`LOG.error`sites (L206/L228/L247/L280) are matched by 4 hook-side`LOG.error`sites in`useGpsLifecycle.ts` (L187/L222/L201/L318); on
+an SDK init failure both fire. Different scope names
+(`'YeRide:BgGeolocation'`vs`'YeRide:GpsLifecycle'`) group as
+separate Firebase Console issues — the adapter scope carries the raw
+SDK throw, the hook scope carries the wrapped `NetworkError`with`cause`chain. Useful triage signal; slight dashboard noise is the
+documented tradeoff and can be revisited after field telemetry.
+**Mock-side helper.** The pre-Turn-9 SDK mock at`jest.setup.ts`captured the location callback (first arg to`BackgroundGeolocation.onLocation`) but ignored the optional second
+arg (the numeric-error callback). Turn 9 extends `mockBgListeners`with a`locationError`bucket, updates the`onLocation`factory to
+capture the optional`onError`arg, and exposes`**emitLocationError(code: number)`alongside`**emitLocation`/`**emitGeofence`. Subscription `.remove()`tears both callbacks out
+of their respective buckets so a single`.remove()`doesn't leak
+the error callback. **Five new regression tests** in`BackgroundGeolocationClient.test.ts`under a new describe block`'telemetry — recordError fan-out via rawMeta channel (Phase 9 turn
+9)'`: (a) headline `onLocation SDK error code`test — drives`**emitLocationError(1)`, asserts message-substring `code=1`+`bg_geolocation_onlocation_error`(loose enough for cosmetic edits
+but tight enough to catch removal of the code from the message), and
+asserts`name === 'YeRide:BgGeolocation'`. (b) routine-status sanity
+check — codes 0 and 499 stay at info, breadcrumbs DO record but
+`getRecordedErrors()`is empty. (c) invalid-coords test — emits`latitude: 999`and asserts the recorded ValidationError's`code`field is`'coordinates_lat_out_of_range'`(NOT`'coordinates_invalid_latitude'`— the actual code from the entity;
+caught by running the test). (d) location subscriber-threw — registers
+a throwing subscriber alongside a peer; emits an event; asserts
+reference identity on the recorded Error AND that the peer DID receive
+the event (fan-out resilience). (e) geofence subscriber-threw — same
+shape. Each test wraps the body in`try {...} finally {
+LOG.removeTransport(transport) }`per Turn 4 / Turn 8 hygiene
+pattern. **Audit re-verified** — post-Turn-9 distribution is 13/13
+LOG sites at error (was 9), 1 at warn (the cleanup-best-effort site,
+explicitly tagged), 8 at info.`useGpsLifecycle`and`FirestoreLocationRepository`stay as Turn 8 left them; the latter's
+4 plain-object`LOG.warn`sites for DTO-parse / stream / getLastKnown
+failures are flagged for the Phase 10 cross-cutting Firestore mapper
+telemetry audit. Acceptance: **181 suites / 1573 tests** (+0 suites /
++5 tests over Turn 8's 181/1568, within the kickoff's "+4 to +8
+tests" estimate band — at the floor, since 4 of the 5 new tests are
+the headline flips and the 5th is the routine-status sanity check
+that pins the bifurcation in the SDK error callback). **No native
+rebuild required** — pure JS/TS work; no new dependencies; no plugin
+patches; no DI container changes; no cross-repo work. Manual smoke
+checklist documented in`docs/PHASE_9_TURN_9.md`§ "Smoke checklist
+(user-driven)" — the cleanest L348 driver is OS-Settings-revoke the
+location permission while online; L502/L547 paths require a`**DEV**`-gated debug shortcut to drive against a real device.
 
 **Phase 9 Turn 8 closed.** GPS lifecycle telemetry — the next
 surface to spend Turn 6's rawMeta-channel contract. Two
@@ -858,28 +928,29 @@ unstable object reference). Express dashboard reach via
 sandbox virtiofs blocks `unlink()`. Tip flow on RideReceipt remains
 pending (Turn 5).
 
-| Phase                       | Scope                                                                                                                                | Status |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| Phase 6 turn 4              | Driver Earnings + Stripe Connect onboarding                                                                                          | ✅     |
-| Phase 6 turn 5              | Tip flow on RideReceipt + Phase 6 cleanup                                                                                            | ✅     |
-| Phase 7 turn 1              | `BackgroundGeolocationClient` adapter + fake + DI                                                                                    | ✅     |
-| Phase 7 turn 2              | `useGpsLifecycle` + AppContent integration                                                                                           | ✅     |
-| Phase 7 turn 3              | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                                                                 | ✅     |
-| Phase 8 turn 1              | `NavigationSdkClient` adapter + fake + DI wiring                                                                                     | ✅     |
-| Phase 8 turn 2              | `useDriverNavigationViewModel` + screen + DriverMonitor integration                                                                  | ✅     |
-| Phase 8 turn 3              | First device-build smoke (iOS + Android) + Phase 8 close                                                                             | ✅     |
-| Phase 9 turn 1              | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                                                                   | ✅     |
-| Phase 9 turn 2              | Push notifications — Expo registration + tap routing                                                                                 | ✅     |
-| Phase 9 turn 3a             | Crashlytics SDK seam — adapter + fake + DI + multi-transport logger                                                                  | ✅     |
-| Phase 9 turn 3b             | Crashlytics lifecycle hook + global error handler + transport mount                                                                  | ✅     |
-| Phase 9 turn 3c             | Dev-only force-crash entry point + Firebase Console smoke                                                                            | ✅     |
-| Phase 9 turn 6              | rawMeta channel + `<ErrorBoundary/>` + boundaries-rule migration                                                                     | ✅     |
-| Phase 9 turn 4              | DriverNavigation polish + SDK telemetry + foreground-push removal                                                                    | ✅     |
-| Phase 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                         | ✅     |
-| Phase 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed) | ✅     |
-| Phase 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                               | ✅     |
-| Phase 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component              | ✅     |
-| Phase 9 turn 8              | GPS lifecycle telemetry — 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures to recordError | ✅     |
+| Phase                       | Scope                                                                                                                                              | Status |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Phase 6 turn 4              | Driver Earnings + Stripe Connect onboarding                                                                                                        | ✅     |
+| Phase 6 turn 5              | Tip flow on RideReceipt + Phase 6 cleanup                                                                                                          | ✅     |
+| Phase 7 turn 1              | `BackgroundGeolocationClient` adapter + fake + DI                                                                                                  | ✅     |
+| Phase 7 turn 2              | `useGpsLifecycle` + AppContent integration                                                                                                         | ✅     |
+| Phase 7 turn 3              | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                                                                               | ✅     |
+| Phase 8 turn 1              | `NavigationSdkClient` adapter + fake + DI wiring                                                                                                   | ✅     |
+| Phase 8 turn 2              | `useDriverNavigationViewModel` + screen + DriverMonitor integration                                                                                | ✅     |
+| Phase 8 turn 3              | First device-build smoke (iOS + Android) + Phase 8 close                                                                                           | ✅     |
+| Phase 9 turn 1              | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                                                                                 | ✅     |
+| Phase 9 turn 2              | Push notifications — Expo registration + tap routing                                                                                               | ✅     |
+| Phase 9 turn 3a             | Crashlytics SDK seam — adapter + fake + DI + multi-transport logger                                                                                | ✅     |
+| Phase 9 turn 3b             | Crashlytics lifecycle hook + global error handler + transport mount                                                                                | ✅     |
+| Phase 9 turn 3c             | Dev-only force-crash entry point + Firebase Console smoke                                                                                          | ✅     |
+| Phase 9 turn 6              | rawMeta channel + `<ErrorBoundary/>` + boundaries-rule migration                                                                                   | ✅     |
+| Phase 9 turn 4              | DriverNavigation polish + SDK telemetry + foreground-push removal                                                                                  | ✅     |
+| Phase 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                                       | ✅     |
+| Phase 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed)               | ✅     |
+| Phase 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                                             | ✅     |
+| Phase 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component                            | ✅     |
+| Phase 9 turn 8              | GPS lifecycle telemetry — 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures to recordError               | ✅     |
+| Phase 9 turn 9              | SDK-adapter telemetry — 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient (onLocation error code + invalid coords + 2× subscriber-threw) | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -911,54 +982,55 @@ prebuild` required before the next iOS / Android build** so the Stripe
 SDK's plugin mods (entitlements plist + Google Pay AndroidManifest
 meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 
-| Phase                 | Scope                                                                                                                                  | Status                         |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| 0                     | Tooling + scaffolding                                                                                                                  | ✅ Complete                    |
-| 1                     | Auth + user identity                                                                                                                   | ✅ End-to-end on real Firebase |
-| 2                     | Domain + data layer (service area, routes, ride, location, FareCalculator)                                                             | ✅ End of Phase 2: 422 tests   |
-| 3 turn 1              | Phase 3 foundations: domain additions, store scaffolding                                                                               | ✅                             |
-| 3 turn 2              | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier                                                          | ✅                             |
-| 3 turn 3              | RiderHome + role-based routing, end-to-end ride creation                                                                               | ✅                             |
-| 3 turn 4a             | RideMonitor scaffolding + early-status views (awaiting/dispatched)                                                                     | ✅                             |
-| 3 turn 4b             | Late-status views (started/completed/payment_failed) + chat stub + geofence tick                                                       | ✅                             |
-| 3 turn 5              | RideReceipt + Phase 3 cleanup                                                                                                          | ✅                             |
-| 4 turn 1              | Phase 4 foundations: DriverNavigator + tabs + driver-status store                                                                      | ✅                             |
-| 4 turn 2              | DriverHome — map + ListAvailableRides cards + GPS toggle                                                                               | ✅                             |
-| 4 turn 3              | DriverDispatch — incoming-ride accept/decline                                                                                          | ✅                             |
-| 4 turn 4a             | DriverMonitor scaffold + en-route / at-pickup status views                                                                             | ✅                             |
-| 4 turn 4b             | DriverMonitor late-status views + Start-ride / RequestPayment mutations                                                                | ✅                             |
-| 4 turn 5              | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                                                                        | ✅                             |
-| 5 turn 1              | Vehicle domain + DTO + mappers + in-memory fakes                                                                                       | ✅                             |
-| 5 turn 2              | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring                                                                  | ✅                             |
-| 5 turn 3              | VehicleList + VehicleRegistration screens                                                                                              | ✅                             |
-| 5 turn 4              | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                                                                               | ✅                             |
-| 6 turn 1              | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake                                                              | ✅                             |
-| 6 turn 2              | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring                                                            | ✅                             |
-| 6 turn 3              | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)                                                           | ✅                             |
-| 6 turn 4              | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)                                                              | ✅                             |
-| 6 turn 5              | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)                                                         | ✅                             |
-| 7 turn 1              | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch                                                                  | ✅                             |
-| 7 turn 2              | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation                                                               | ✅                             |
-| 7 turn 3              | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                                                                   | ✅                             |
-| 8 turn 1              | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port                                                                    | ✅                             |
-| 8 turn 2              | `useDriverNavigationViewModel` + screen + DriverMonitor integration                                                                    | ✅                             |
-| 8 turn 3              | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close                                                          | ✅                             |
-| 9 turn 1              | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                                                                     | ✅                             |
-| 9 turn 2a             | `PushToken` VO + `pushToken` on User entity + `PushNotificationService` interface                                                      | ✅                             |
-| 9 turn 2b             | `expo-notifications` install + `ExpoNotificationsAdapter` + `RegisterPushToken` + soft-ask                                             | ✅                             |
-| 9 turn 2c             | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close                                                  | ✅                             |
-| 9 turn 3a             | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                                                                   | ✅                             |
-| 9 turn 3b             | `useCrashReportingLifecycle` + AppContent integration + global JS error handler                                                        | ✅                             |
-| 9 turn 3c             | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                                                            | ✅                             |
-| 9 turn 4              | DriverNavigation polish + SDK telemetry + foreground-push removal                                                                      | ✅                             |
-| 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                           | ✅                             |
-| 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed)   | ✅                             |
-| 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                                 | ✅                             |
-| 9 turn 6              | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                                                               | ✅                             |
-| 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component                | ✅                             |
-| 9 turn 8              | GPS lifecycle telemetry — 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures to recordError   | ✅                             |
-| 9 turn 9+             | Future Phase 9 polish (per-brand SVG glyphs / SDK-adapter telemetry / cross-cutting Firestore mapper audit / RNFirebase / receipt PDF) | Pending                        |
-| 10                    | Cutover from legacy yeride                                                                                                             | Pending                        |
+| Phase                 | Scope                                                                                                                                              | Status                         |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 0                     | Tooling + scaffolding                                                                                                                              | ✅ Complete                    |
+| 1                     | Auth + user identity                                                                                                                               | ✅ End-to-end on real Firebase |
+| 2                     | Domain + data layer (service area, routes, ride, location, FareCalculator)                                                                         | ✅ End of Phase 2: 422 tests   |
+| 3 turn 1              | Phase 3 foundations: domain additions, store scaffolding                                                                                           | ✅                             |
+| 3 turn 2              | RouteSearch + RouteSelect screens — rider can pick origin/dest + service tier                                                                      | ✅                             |
+| 3 turn 3              | RiderHome + role-based routing, end-to-end ride creation                                                                                           | ✅                             |
+| 3 turn 4a             | RideMonitor scaffolding + early-status views (awaiting/dispatched)                                                                                 | ✅                             |
+| 3 turn 4b             | Late-status views (started/completed/payment_failed) + chat stub + geofence tick                                                                   | ✅                             |
+| 3 turn 5              | RideReceipt + Phase 3 cleanup                                                                                                                      | ✅                             |
+| 4 turn 1              | Phase 4 foundations: DriverNavigator + tabs + driver-status store                                                                                  | ✅                             |
+| 4 turn 2              | DriverHome — map + ListAvailableRides cards + GPS toggle                                                                                           | ✅                             |
+| 4 turn 3              | DriverDispatch — incoming-ride accept/decline                                                                                                      | ✅                             |
+| 4 turn 4a             | DriverMonitor scaffold + en-route / at-pickup status views                                                                                         | ✅                             |
+| 4 turn 4b             | DriverMonitor late-status views + Start-ride / RequestPayment mutations                                                                            | ✅                             |
+| 4 turn 5              | Phase 4 cleanup + CLAUDE.md driver-side fold-in                                                                                                    | ✅                             |
+| 5 turn 1              | Vehicle domain + DTO + mappers + in-memory fakes                                                                                                   | ✅                             |
+| 5 turn 2              | Real adapters (Firestore + Storage + NHTSA) + 9 use cases + DI wiring                                                                              | ✅                             |
+| 5 turn 3              | VehicleList + VehicleRegistration screens                                                                                                          | ✅                             |
+| 5 turn 4              | VehiclePhotos + VehicleDetails + retire `'vehicle-stub'`                                                                                           | ✅                             |
+| 6 turn 1              | Stripe domain + DTO patch (legacy nested `stripe` shape) + in-memory fake                                                                          | ✅                             |
+| 6 turn 2              | `StripeServerHttpAdapter` + `tipDriver` callable + 13 use cases + DI wiring                                                                        | ✅                             |
+| 6 turn 3              | Rider Wallet + AddPaymentMethod screens (Stripe SDK, CardForm, setup-intent)                                                                       | ✅                             |
+| 6 turn 4              | Driver Earnings + Connect onboarding (`WebBrowser` flow, balance/payouts)                                                                          | ✅                             |
+| 6 turn 5              | Tip flow on RideReceipt + Phase 6 cleanup (`useProcessTipMutation`, live ride)                                                                     | ✅                             |
+| 7 turn 1              | `BackgroundGeolocationClient` + fake + DI wiring + Maven plugin patch                                                                              | ✅                             |
+| 7 turn 2              | `useGpsLifecycle` + AppContent lifecycle + onLocation→UpdateUserLocation                                                                           | ✅                             |
+| 7 turn 3              | RideMonitor + DriverMonitor swap-ins + Phase 7 close                                                                                               | ✅                             |
+| 8 turn 1              | `NavigationSdkClient` adapter + fake + DI wiring + Expo plugin port                                                                                | ✅                             |
+| 8 turn 2              | `useDriverNavigationViewModel` + screen + DriverMonitor integration                                                                                | ✅                             |
+| 8 turn 3              | First device-build smoke (iOS + Android) + 3 Phase-3 incidental fixes + close                                                                      | ✅                             |
+| 9 turn 1              | iOS Apple Maps Fabric escape — `<Map/>` flipped to PROVIDER_GOOGLE                                                                                 | ✅                             |
+| 9 turn 2a             | `PushToken` VO + `pushToken` on User entity + `PushNotificationService` interface                                                                  | ✅                             |
+| 9 turn 2b             | `expo-notifications` install + `ExpoNotificationsAdapter` + `RegisterPushToken` + soft-ask                                                         | ✅                             |
+| 9 turn 2c             | `HandleNotificationResponse` + tap routing via `navigationRef` + Phase 9 turn 2 close                                                              | ✅                             |
+| 9 turn 3a             | Crashlytics SDK seam: domain + adapter + fake + DI + logger refactor                                                                               | ✅                             |
+| 9 turn 3b             | `useCrashReportingLifecycle` + AppContent integration + global JS error handler                                                                    | ✅                             |
+| 9 turn 3c             | Force-crash dev entry point + Firebase Console smoke + Phase 9 turn 3 close                                                                        | ✅                             |
+| 9 turn 4              | DriverNavigation polish + SDK telemetry + foreground-push removal                                                                                  | ✅                             |
+| 9 turn 5              | Passenger-snapshot Stripe gap close — `stripeCustomerId` + canonical `{id, type}` defaultPaymentMethod shape                                       | ✅                             |
+| 9 turn 4 smoke fix    | Receipt schema accepts `'payment_intent'` / `'closed'` wire statuses + tipDriver post-completion window patch (cross-repo, deployed)               | ✅                             |
+| 9 turn 4 smoke fix #2 | `TripPayment.amount` is integer cents, not dollars — manual smoke validated end-to-end                                                             | ✅                             |
+| 9 turn 6              | rawMeta channel + `<ErrorBoundary/>` + boundaries/dependencies migration                                                                           | ✅                             |
+| 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component                            | ✅                             |
+| 9 turn 8              | GPS lifecycle telemetry — 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures to recordError               | ✅                             |
+| 9 turn 9              | SDK-adapter telemetry — 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient (onLocation error code + invalid coords + 2× subscriber-threw) | ✅                             |
+| 9 turn 10+            | Future Phase 9 polish (per-brand SVG glyphs / cross-cutting Firestore mapper audit / permission-denied UX / RNFirebase / receipt PDF)              | Pending                        |
+| 10                    | Cutover from legacy yeride                                                                                                                         | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
 / 1171 tests passing** (+9 tests over Turn 2's 152/1162; suite count

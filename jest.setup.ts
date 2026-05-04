@@ -66,6 +66,16 @@ jest.mock('@stripe/stripe-react-native', () =>
 
 interface MockBgListeners {
   location: Array<(loc: unknown) => void>;
+  /**
+   * Phase 9 turn 9: the SDK adapter passes a SECOND callback to
+   * `onLocation()` to receive numeric error codes (e.g. `1` for
+   * permission-denied, `408` for timeout). Adapter L348's flipped
+   * `LOG.error` constructs an Error from `errorCode` so the rawMeta
+   * channel can fan it out to Crashlytics. To drive that path in
+   * tests we capture the error callback here alongside the
+   * location callback and expose `__emitLocationError(code)` to fire it.
+   */
+  locationError: Array<(code: number) => void>;
   geofence: Array<(geo: unknown) => void>;
   geofencesChange: Array<(event: unknown) => void>;
   motionChange: Array<(event: unknown) => void>;
@@ -75,6 +85,7 @@ interface MockBgListeners {
 
 const mockBgListeners: MockBgListeners = {
   location: [],
+  locationError: [],
   geofence: [],
   geofencesChange: [],
   motionChange: [],
@@ -142,8 +153,25 @@ const mockBg = {
 
   // Listener registrars
   onLocation: jest.fn(
-    (cb: (loc: unknown) => void, _onError?: (code: number) => void) =>
-      mockMakeSubscription('location', cb),
+    (cb: (loc: unknown) => void, onError?: (code: number) => void) => {
+      // Phase 9 turn 9: capture the optional error callback into its
+      // own bucket so `__emitLocationError(code)` can drive the SDK
+      // error path. The returned `{ remove }` Subscription tears
+      // BOTH callbacks out of their respective buckets so a `.remove()`
+      // on the location stream doesn't leak the error callback.
+      const locationSub = mockMakeSubscription('location', cb);
+      if (onError) {
+        mockBgListeners.locationError.push(onError);
+        return {
+          remove: (): void => {
+            locationSub.remove();
+            const idx = mockBgListeners.locationError.indexOf(onError);
+            if (idx >= 0) mockBgListeners.locationError.splice(idx, 1);
+          },
+        };
+      }
+      return locationSub;
+    },
   ),
   onGeofence: jest.fn((cb: (geo: unknown) => void) =>
     mockMakeSubscription('geofence', cb),
@@ -166,11 +194,21 @@ const mockBg = {
   __emitLocation: (loc: unknown): void => {
     for (const cb of [...mockBgListeners.location]) cb(loc);
   },
+  /**
+   * Phase 9 turn 9: drive the SDK's `onLocation` error callback. The
+   * adapter's L348 site logs at error with a constructed Error
+   * carrying the numeric code, so `recordError` fan-out groups by
+   * code in Firebase Console.
+   */
+  __emitLocationError: (code: number): void => {
+    for (const cb of [...mockBgListeners.locationError]) cb(code);
+  },
   __emitGeofence: (geo: unknown): void => {
     for (const cb of [...mockBgListeners.geofence]) cb(geo);
   },
   __reset: (): void => {
     mockBgListeners.location.length = 0;
+    mockBgListeners.locationError.length = 0;
     mockBgListeners.geofence.length = 0;
     mockBgListeners.geofencesChange.length = 0;
     mockBgListeners.motionChange.length = 0;
