@@ -2,6 +2,7 @@ import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Map, type MapMarkerProps } from '@presentation/components/map';
+import { PermissionDeniedBanner } from '@presentation/components/permission';
 
 import { DriverRideCardStack } from '../components/DriverRideCardStack';
 import { useDriverHomeViewModel } from '../view-models/useDriverHomeViewModel';
@@ -46,7 +47,13 @@ export default function DriverHomeScreen() {
     : null;
 
   const isOnline = vm.mode !== 'offline';
-  const canToggle = vm.status === 'ready';
+  // Phase 9 turn 10. The online toggle requires (a) the foreground
+  // location read to have resolved (status === 'ready') AND (b) the
+  // background-geolocation SDK permission to NOT be explicitly denied
+  // — if it is, the banner above the panel surfaces an "Open settings"
+  // CTA and the toggle stays disabled (the VM additionally guards
+  // `goOnline` defensively).
+  const canToggle = vm.status === 'ready' && !vm.bgPermissionDenied;
 
   return (
     <View className="flex-1 bg-background">
@@ -121,6 +128,20 @@ export default function DriverHomeScreen() {
             <Text className="mb-3 text-base text-foreground">
               Hi, {vm.user.name.first} 👋
             </Text>
+          )}
+
+          {/* Phase 9 turn 10. Background-geolocation permission denied —
+              banner with "Open settings" CTA + the online toggle below
+              stays disabled. Mounted inside the bottom panel so it's
+              visually grouped with the toggle it gates. */}
+          {vm.bgPermissionDenied && (
+            <View className="mb-3" testID="driver-home-bg-permission-banner">
+              <PermissionDeniedBanner
+                title="Location access is off"
+                message="YeRide needs background location access to receive ride requests and to track your trip. Tap below to enable it in Settings."
+                onOpenSettings={vm.onOpenSettings}
+              />
+            </View>
           )}
 
           {/* No active vehicle: empty-state prompt instead of online toggle. */}

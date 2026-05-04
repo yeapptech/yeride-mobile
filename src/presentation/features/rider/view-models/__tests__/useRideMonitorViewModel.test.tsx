@@ -598,4 +598,91 @@ describe('useRideMonitorViewModel', () => {
       );
     });
   });
+
+  describe('bgPermissionDenied (Phase 9 turn 10)', () => {
+    it('false when permission is granted regardless of status', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+      // Pre-flip the store to a granted state so the read is clean.
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('always');
+      });
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+      expect(result.current.bgPermissionDenied).toBe(false);
+    });
+
+    it('true when permission is denied AND status is dispatched', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('denied');
+      });
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+      expect(result.current.bgPermissionDenied).toBe(true);
+    });
+
+    it("false when permission is 'undetermined' (pre-OS-dialog window)", async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+      // Default INITIAL is 'undetermined' after reset; assert explicitly
+      // for clarity.
+      expect(useGpsStore.getState().permissionStatus).toBe('undetermined');
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+      expect(result.current.bgPermissionDenied).toBe(false);
+    });
+
+    it('false when permission is denied but status is awaiting_driver', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      await ridesRepo.create(makeAwaitingRide());
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('denied');
+      });
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('awaiting_driver');
+      });
+      // Pre-trip status — banner shouldn't surface (legacy parity:
+      // degraded ETA on a not-yet-dispatched ride isn't actionable).
+      expect(result.current.bgPermissionDenied).toBe(false);
+    });
+
+    it('exposes onOpenSettings as a stable callback', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      ridesRepo.seed(makeDispatchedRide());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer({ ridesRepo }) },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+      expect(typeof result.current.onOpenSettings).toBe('function');
+    });
+  });
 });

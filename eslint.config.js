@@ -184,6 +184,12 @@ module.exports = [
   // `Nav*` domain-shaped types so the rest of the presentation layer
   // never has to know the SDK exists. Same architectural exception as
   // useGpsLifecycle / useGpsStore.
+  // Phase 9 turn 10: usePermissionRefresh.ts is the AppState-driven
+  // re-poll of the OS permission grant. Same SDK seam as
+  // useGpsLifecycle — type-imports `BackgroundGeolocationClient` /
+  // `BgPermissionStatus` from the data layer for the call signature
+  // and the `'always' | 'when_in_use' | 'denied' | 'undetermined'`
+  // branded union.
   {
     files: [
       '**/__tests__/**/*.{ts,tsx}',
@@ -191,6 +197,7 @@ module.exports = [
       'src/shared/testing/**/*.{ts,tsx}',
       'src/presentation/di/container.ts',
       'src/presentation/hooks/useGpsLifecycle.ts',
+      'src/presentation/hooks/usePermissionRefresh.ts',
       'src/presentation/stores/useGpsStore.ts',
       'src/presentation/features/driver/hooks/useNavigationSdkConnector.ts',
       'src/presentation/features/driver/view-models/useDriverNavigationViewModel.ts',

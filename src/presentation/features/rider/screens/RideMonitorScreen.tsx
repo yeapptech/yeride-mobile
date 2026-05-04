@@ -11,6 +11,7 @@ import {
   type MapMarkerProps,
   type MapRoute,
 } from '@presentation/components/map';
+import { PermissionDeniedBanner } from '@presentation/components/permission';
 import { CancelReasonSheet } from '@presentation/components/trip/CancelReasonSheet';
 import type {
   RiderStackNavigation,
@@ -138,6 +139,27 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
         pickupRoute={pickupRouteForMap}
         alternativeRoutes={[]}
       />
+
+      {/* Phase 9 turn 10. Background-geolocation permission denied during
+          an active trip — surface a banner above the bottom-sheet so the
+          rider has a path to recover. The VM gates `bgPermissionDenied`
+          on the trip status (`'dispatched'` or `'started'`), so this
+          banner doesn't appear pre-trip / post-trip when GPS isn't
+          actively in use. */}
+      {vm.bgPermissionDenied && (
+        <SafeAreaView edges={['top']} className="absolute left-0 right-0 top-0">
+          <View
+            className="mx-4 mt-2"
+            testID="ride-monitor-bg-permission-banner"
+          >
+            <PermissionDeniedBanner
+              title="We can't see where you are"
+              message="YeRide needs location access to track your trip and warn you if you leave the pickup area. Tap below to enable it in Settings."
+              onOpenSettings={vm.onOpenSettings}
+            />
+          </View>
+        </SafeAreaView>
+      )}
 
       <BottomSheet
         ref={sheetRef}

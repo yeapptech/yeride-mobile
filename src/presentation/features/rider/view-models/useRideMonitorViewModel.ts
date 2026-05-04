@@ -9,13 +9,14 @@ import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { useUseCases } from '@presentation/di';
-import { useFirestoreSubscription } from '@presentation/hooks';
+import { useFirestoreSubscription, useOpenSettings } from '@presentation/hooks';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useCancelRideAsRiderMutation } from '@presentation/queries';
 import {
   useChatUiStore,
   useGeofenceUiStore,
   useGpsLastGeofenceEvent,
+  useGpsPermissionStatus,
 } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
@@ -74,6 +75,20 @@ export interface UseRideMonitorViewModel {
   readonly hasUnreadMessages: boolean;
   readonly isCancelling: boolean;
   readonly cancelError: string | null;
+  /**
+   * Phase 9 turn 10. True when the BACKGROUND-geolocation SDK
+   * permission has been explicitly denied AND the trip is in a
+   * status window where GPS actively matters (`'dispatched'` or
+   * `'started'` — geofence-exit warning + ETA both depend on it).
+   * The screen renders a `<PermissionDeniedBanner/>` as a sibling
+   * above the bottom-sheet when this is true. The `'undetermined'`
+   * state is intentionally NOT covered — `useGpsLifecycle` will
+   * fire the OS dialog soon, and `Linking.openSettings()` is the
+   * wrong CTA before the user has been asked. Pre-trip /
+   * post-trip statuses don't surface the banner: degraded ETA on
+   * an awaiting/cancelled/completed trip is not actionable.
+   */
+  readonly bgPermissionDenied: boolean;
   /** Cancel the current ride with the given reason. */
   cancel: (args: {
     reason: CancellationReason;
@@ -81,6 +96,11 @@ export interface UseRideMonitorViewModel {
   }) => Promise<boolean>;
   /** Open chat — Phase 3.5 stub: shows a toast for now. */
   onPressChat: () => void;
+  /**
+   * Phase 9 turn 10. Open the OS app-settings page. Wraps
+   * `Linking.openSettings()`.
+   */
+  onOpenSettings: () => void;
 }
 
 export function useRideMonitorViewModel(args: {
@@ -258,6 +278,15 @@ export function useRideMonitorViewModel(args: {
     // The retry mutation itself is Phase 6.
   }, [status, navigation, rideId]);
 
+  // Phase 9 turn 10. Surface BG-geolocation permission denial only
+  // during the trip statuses where GPS actively matters. The screen
+  // mounts a `<PermissionDeniedBanner/>` keyed on this flag.
+  const bgPermissionStatus = useGpsPermissionStatus();
+  const bgPermissionDenied =
+    bgPermissionStatus === 'denied' &&
+    (status === 'dispatched' || status === 'started');
+  const onOpenSettings = useOpenSettings();
+
   return {
     ride,
     status,
@@ -266,7 +295,9 @@ export function useRideMonitorViewModel(args: {
     hasUnreadMessages,
     isCancelling: cancelMutation.isPending,
     cancelError,
+    bgPermissionDenied,
     cancel,
     onPressChat,
+    onOpenSettings,
   };
 }

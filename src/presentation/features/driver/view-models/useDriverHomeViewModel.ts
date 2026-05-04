@@ -8,7 +8,7 @@ import type { ServiceArea } from '@domain/entities/ServiceArea';
 import type { User } from '@domain/entities/User';
 import { UserLocation } from '@domain/entities/UserLocation';
 import type { Vehicle } from '@domain/entities/Vehicle';
-import { useCurrentLocation } from '@presentation/hooks';
+import { useCurrentLocation, useOpenSettings } from '@presentation/hooks';
 import type {
   LocationPermission,
   UseCurrentLocation,
@@ -27,6 +27,7 @@ import {
   useActiveVehicleId,
   useDriverMode,
   useDriverStatusStore,
+  useGpsPermissionStatus,
   useServiceAreaStore,
 } from '@presentation/stores';
 import { LOG } from '@shared/logger';
@@ -88,9 +89,22 @@ export interface UseDriverHomeViewModel {
   readonly inProgressRide: Ride | null;
   readonly permissionStatus: LocationPermission;
   /**
-   * Toggle online ↔ offline. No-op when `noActiveVehicle === true` —
-   * the screen guards the affordance, but the VM is the authoritative
-   * gate (defense in depth).
+   * Phase 9 turn 10. True when the BACKGROUND-geolocation SDK
+   * permission has been explicitly denied (`useGpsStore.permissionStatus
+   * === 'denied'`). Distinct from `permissionStatus` above (which is
+   * `useCurrentLocation`'s foreground permission). The screen surfaces
+   * a `<PermissionDeniedBanner/>` and disables the online toggle when
+   * this is true, so a driver doesn't go online without GPS. The
+   * `'undetermined'` state is intentionally NOT covered here —
+   * `useGpsLifecycle` will fire the OS dialog soon, and
+   * `Linking.openSettings()` is the wrong CTA before the user has
+   * been asked.
+   */
+  readonly bgPermissionDenied: boolean;
+  /**
+   * Toggle online ↔ offline. No-op when `noActiveVehicle === true` OR
+   * `bgPermissionDenied === true` — the screen guards the affordance,
+   * but the VM is the authoritative gate (defense in depth).
    */
   onToggleOnline: () => void;
   /** Tap a ride card → push DriverDispatch with that rideId. */
@@ -101,6 +115,11 @@ export interface UseDriverHomeViewModel {
   onRegisterVehicle: () => void;
   /** Re-request location permission and re-read. */
   refreshLocation: () => Promise<void>;
+  /**
+   * Phase 9 turn 10. Open the OS app-settings page so the driver can
+   * grant location permission. Wraps `Linking.openSettings()`.
+   */
+  onOpenSettings: () => void;
 }
 
 export function useDriverHomeViewModel(): UseDriverHomeViewModel {
@@ -125,6 +144,8 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
   const activeVehicleId = useActiveVehicleId();
   const goOnline = useDriverStatusStore((s) => s.goOnline);
   const goOffline = useDriverStatusStore((s) => s.goOffline);
+  const bgPermissionStatus = useGpsPermissionStatus();
+  const onOpenSettings = useOpenSettings();
 
   const user = userQuery.data ?? null;
   const activeServiceArea = activeAreaQuery.data ?? null;
@@ -204,6 +225,8 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
   // fallback is gone. When no active vehicle is registered, the screen
   // hides the online toggle entirely; the VM additionally guards the
   // callback so a stale press handler can't sneak through.
+  const bgPermissionDenied = bgPermissionStatus === 'denied';
+
   const onToggleOnline = useCallback(() => {
     if (mode === 'offline') {
       if (!user || user.role !== 'driver' || user.activeVehicleId === null) {
@@ -211,11 +234,18 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
         // case, but never trust the UI to be the only gate.
         return;
       }
+      if (bgPermissionDenied) {
+        // Phase 9 turn 10. Driver can't go online without GPS — the
+        // screen disables the toggle, but the VM is the authoritative
+        // gate. Going online would just sit there with no SDK firing
+        // location pushes / geofence events.
+        return;
+      }
       goOnline(user.activeVehicleId);
     } else {
       goOffline();
     }
-  }, [mode, user, goOnline, goOffline]);
+  }, [mode, user, bgPermissionDenied, goOnline, goOffline]);
 
   const onRegisterVehicle = useCallback(() => {
     navigation.navigate('Vehicles');
@@ -277,10 +307,12 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     availableRides,
     inProgressRide,
     permissionStatus: currentLocation.permissionStatus,
+    bgPermissionDenied,
     onToggleOnline,
     onSelectRide,
     onResumeInProgress,
     onRegisterVehicle,
     refreshLocation: currentLocation.refresh,
+    onOpenSettings,
   };
 }

@@ -26,6 +26,7 @@ import { Vehicle } from '@domain/entities/Vehicle';
 import { Vin } from '@domain/entities/Vin';
 import {
   useDriverStatusStore,
+  useGpsStore,
   useServiceAreaStore,
 } from '@presentation/stores';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
@@ -289,6 +290,7 @@ describe('useDriverHomeViewModel', () => {
     focusCallbacks.length = 0;
     useServiceAreaStore.getState().reset();
     useDriverStatusStore.getState().reset();
+    useGpsStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
 
@@ -504,6 +506,105 @@ describe('useDriverHomeViewModel', () => {
       expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
         rideId: 'rideInProgress12345ab',
       });
+    });
+  });
+
+  describe('bgPermissionDenied gating (Phase 9 turn 10)', () => {
+    it('false by default (store starts at undetermined)', async () => {
+      const setup = await setupSeededState();
+      const { result } = renderHook(() => useDriverHomeViewModel(), {
+        wrapper: withTestContainer(setup),
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+      expect(result.current.bgPermissionDenied).toBe(false);
+    });
+
+    it('flips true when BG permission is denied', async () => {
+      const setup = await setupSeededState();
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('denied');
+      });
+
+      const { result } = renderHook(() => useDriverHomeViewModel(), {
+        wrapper: withTestContainer(setup),
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+      expect(result.current.bgPermissionDenied).toBe(true);
+    });
+
+    it('false when BG permission is when_in_use (granted)', async () => {
+      const setup = await setupSeededState();
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('when_in_use');
+      });
+
+      const { result } = renderHook(() => useDriverHomeViewModel(), {
+        wrapper: withTestContainer(setup),
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+      expect(result.current.bgPermissionDenied).toBe(false);
+    });
+
+    it('onToggleOnline is a no-op when bgPermissionDenied is true', async () => {
+      const setup = await setupSeededState();
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('denied');
+      });
+
+      const { result } = renderHook(() => useDriverHomeViewModel(), {
+        wrapper: withTestContainer(setup),
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+      expect(result.current.mode).toBe('offline');
+
+      act(() => {
+        result.current.onToggleOnline();
+      });
+
+      // Defense in depth: even though the screen disables the toggle,
+      // the VM rejects the call.
+      expect(result.current.mode).toBe('offline');
+    });
+
+    it('onToggleOnline still works when permission is granted', async () => {
+      const setup = await setupSeededState();
+      act(() => {
+        useGpsStore.getState().setPermissionStatus('always');
+      });
+
+      const { result } = renderHook(() => useDriverHomeViewModel(), {
+        wrapper: withTestContainer(setup),
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+
+      act(() => {
+        result.current.onToggleOnline();
+      });
+
+      await waitFor(() => {
+        expect(result.current.mode).toBe('online_idle');
+      });
+    });
+
+    it('exposes onOpenSettings as a stable callback', async () => {
+      const setup = await setupSeededState();
+      const { result } = renderHook(() => useDriverHomeViewModel(), {
+        wrapper: withTestContainer(setup),
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+      expect(typeof result.current.onOpenSettings).toBe('function');
     });
   });
 });

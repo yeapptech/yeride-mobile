@@ -9,6 +9,7 @@ import {
   useGlobalErrorHandler,
   useGpsLifecycle,
   useNotificationResponseHandler,
+  usePermissionRefresh,
   usePushTokenRegistration,
 } from '@presentation/hooks';
 import { useCurrentUserQuery } from '@presentation/queries';
@@ -134,6 +135,17 @@ export function AppContent({ children }: { children: ReactNode }) {
     userId: user?.id ?? null,
     activeRideForGeofence,
   });
+
+  // Phase 9 turn 10 — recover from a Settings-driven permission grant.
+  // Listens on `AppState 'change' → 'active'`, re-polls the SDK, writes
+  // the latest status to `useGpsStore`, and on a `denied → granted` edge
+  // (a) fires a success toast and (b) calls `bgGeolocation.start()`
+  // when `enabled === true` (useGpsLifecycle's effect deps don't
+  // include `permissionStatus`, so a store-only flip won't restart the
+  // SDK on its own — adding the dep would create a feedback loop since
+  // the effect itself writes the field). Mounted as a sibling so the
+  // existing useGpsLifecycle tests stay untouched.
+  usePermissionRefresh({ enabled });
 
   // Wipe transient GPS state when the user signs out so the next sign-
   // in starts fresh. The `useGpsLifecycle` hook stops the SDK on

@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 4, 2026 (Phase 9 Turn 9 closed — SDK-adapter telemetry: 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient routing onLocation SDK error codes + invalid coords + subscriber-throws through Crashlytics recordError; 181 suites / 1573 tests)
+**Last updated:** May 4, 2026 (Phase 9 Turn 10 closed — Permission-denied UX: `<PermissionDeniedBanner/>` + `useOpenSettings` + AppState-driven `usePermissionRefresh` with grant-edge toast and SDK auto-start; DriverHome toggle gated on BG permission, RideMonitor banner during dispatched/started; 184 suites / 1599 tests)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,111 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 10 closed.** Permission-denied UX — the deferred Phase
+9 polish item that Turn 8's kickoff named explicitly. Pre-Turn-10,
+`useGpsLifecycle.ts:L207` logged at info ("permission not granted")
+and silently no-op'd the SDK; the user had no path to recover short
+of killing the app, toggling the OS permission, and re-launching.
+Even after granting via Settings and returning, the lifecycle hook's
+effect deps (`[bgGeolocation, enabled, setPermissionStatus]`) didn't
+include `permissionStatus`, so the SDK never restarted. All four
+pre-checklist questions landed on the Recommended option, so the
+full surface ships in one turn. Three new presentation files: (1)
+**`<PermissionDeniedBanner/>`** at
+`src/presentation/components/permission/PermissionDeniedBanner.tsx`
+— pure prop-driven (`{title, message, onOpenSettings, onDismiss?,
+testID?}`), NativeWind tokens (`bg-warning/10` background +
+`text-warning` foreground matching the existing `'permission_denied'`
+/ `'out_of_coverage'` banners on DriverHome / RiderHome), opt-in
+dismiss button kept in the surface for a future "dismissable on
+RiderHome" variant (kickoff Q3 option (c)). (2) **`useOpenSettings()`**
+at `src/presentation/hooks/useOpenSettings.ts` — wraps
+`Linking.openSettings()` for single-mock-point testability
+(`jest.spyOn(Linking, 'openSettings')` in tests instead of every
+call site). Returns a stable `() => void`; rejection is swallowed
+to LOG.warn (the only plausible failure modes — Linking unavailable,
+OS denied the deep-link — aren't actionable mid-tap). Works on both
+iOS and Android out of the box; no permission strings, no plugin
+changes, no native rebuild. (3) **`usePermissionRefresh({enabled})`**
+at `src/presentation/hooks/usePermissionRefresh.ts` — mounted
+exactly once in AppContent (sibling to `useGpsLifecycle`). On every
+`AppState 'change' → 'active'`: calls
+`bgGeolocation.requestAuthorizationIfNeeded()` (after the first
+prompt the OS dialog never re-appears; this returns the cached
+granted level synchronously), pushes the result into
+`useGpsStore.permissionStatus`, and on the
+`'denied' | 'undetermined' → 'always' | 'when_in_use'` edge fires a
+one-shot `Toast.show({type: 'success', text1: 'Location access
+enabled — thanks!'})` AND when `enabled === true` calls
+`bgGeolocation.start()` directly. **The direct `start()` is
+necessary** because adding `permissionStatus` to `useGpsLifecycle`'s
+effect deps would create a feedback loop — the effect itself sets
+`permissionStatus`, so listing it would cause infinite re-runs;
+calling `start()` here is the cleanest decoupling and keeps existing
+`useGpsLifecycle.test.tsx` untouched (kickoff constraint). The
+previous status is tracked in a ref, not state, so the edge-detection
+doesn't trigger re-renders; initialised to `null` so the first poll
+doesn't fire the toast (a fresh launch with a granted permission
+shouldn't toast). `AppState` subscription cleanup is synchronous via
+`sub.remove()` (RN ignores async cleanup functions); same pattern as
+`useDriverEarningsViewModel`'s AppState listener (Phase 6 Turn 4).
+**Screen integrations.** `useDriverHomeViewModel` surfaces
+`bgPermissionDenied: boolean` (via `useGpsPermissionStatus()`
+selector → `=== 'denied'`) plus `onOpenSettings`. `onToggleOnline`
+gates defensively (returns early when denied — defense in depth on
+top of the screen guard). `DriverHomeScreen` mounts the banner
+inside the bottom action panel above the no-active-vehicle /
+active-vehicle / toggle stack; the toggle's `canToggle` flag
+becomes `vm.status === 'ready' && !vm.bgPermissionDenied`.
+`useRideMonitorViewModel` surfaces `bgPermissionDenied: boolean`
+gated on trip status (`'dispatched'` or `'started'` only — pre-trip
+and post-trip windows don't surface the banner since degraded ETA
+on a not-yet-dispatched / already-completed trip isn't actionable)
+plus `onOpenSettings`. `RideMonitorScreen` mounts the banner as a
+sibling above the bottom-sheet, anchored to the top safe area —
+visible across all status views during the gated window without
+the status-router needing to know about permission state.
+**Notable design call.** Banner condition is
+`permissionStatus === 'denied'` only, NOT the broader
+`!== 'always' && !== 'when_in_use'` from the kickoff prompt —
+that broader condition would catch `'undetermined'` and flash a
+banner during the brief window before the OS dialog appears.
+`'denied'` is the only state where `Linking.openSettings()` is the
+right CTA (re-prompting via `requestPermission()` returns the
+cached denied state synchronously without re-triggering the dialog;
+for `'undetermined'`, `useGpsLifecycle` fires the OS dialog on next
+`enabled === true`, so deep-linking to Settings before the user has
+been asked would be confusing). **ESLint boundaries-rule override**
+extended to include `usePermissionRefresh.ts` alongside
+`useGpsLifecycle.ts` / `useGpsStore.ts` / `useNavigationSdkConnector.ts`
+/ `useDriverNavigationViewModel.ts` — same architectural exception
+(presentation-layer SDK seam type-importing
+`BackgroundGeolocationClient` / `BgPermissionStatus` from the data
+layer). **Five new test suites land** (3 new files at
+`PermissionDeniedBanner.test.tsx` / `useOpenSettings.test.ts` /
+`usePermissionRefresh.test.tsx`, plus extensions to
+`useDriverHomeViewModel.test.tsx` and
+`useRideMonitorViewModel.test.tsx`): banner render + CTAs (5 tests),
+useOpenSettings stable callback + Linking mock + rejection swallow
+(3), permission-refresh listener mount/unmount + 'active'-only
+filter + re-poll path + grant-edge toast + grant-edge `start()` +
+disabled-no-start + steady-state silence (7), DriverHome
+bgPermissionDenied surface + toggle gating + happy-path still works
+
+- stable callback (6), RideMonitor bgPermissionDenied gated on
+  `['dispatched','started']` + 'undetermined' carve-out + stable
+  callback (5). Acceptance: **184 suites / 1599 tests** (+3 suites /
+  +26 tests over Turn 9's 181/1573 — at the floor of the kickoff's
+  "+3 to +5 suites" estimate band; tests slightly above the +25
+  estimated upper bound). **No native rebuild required** — pure JS/TS
+  work; no new dependencies; no plugin patches; no DI container
+  changes. Manual smoke checklist documented in
+  `docs/PHASE_9_TURN_10.md` § "Smoke checklist (user-driven)" — real-
+  device round-trip required (decline OS dialog → see banner +
+  disabled toggle → tap "Open settings" → grant in Settings → return
+  to YeRide → toast fires + banner disappears + toggle becomes
+  interactive).
 
 **Phase 9 Turn 9 closed.** SDK-adapter telemetry flips — the four
 candidate sites in `BackgroundGeolocationClient.ts` that Turn 8's
@@ -951,6 +1056,7 @@ pending (Turn 5).
 | Phase 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component                            | ✅     |
 | Phase 9 turn 8              | GPS lifecycle telemetry — 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures to recordError               | ✅     |
 | Phase 9 turn 9              | SDK-adapter telemetry — 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient (onLocation error code + invalid coords + 2× subscriber-threw) | ✅     |
+| Phase 9 turn 10             | Permission-denied UX — `<PermissionDeniedBanner/>` + `useOpenSettings` + AppState `usePermissionRefresh` with grant-edge toast and SDK auto-start  | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -1029,7 +1135,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 7              | Receipt UX polish — card brand + last-4 wallet-cache join + email-button stub removal + shared CardBrandBadge component                            | ✅                             |
 | 9 turn 8              | GPS lifecycle telemetry — 2 LOG.warn → LOG.error flips routing UserLocation.create + updateLocation-mutation failures to recordError               | ✅                             |
 | 9 turn 9              | SDK-adapter telemetry — 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient (onLocation error code + invalid coords + 2× subscriber-threw) | ✅                             |
-| 9 turn 10+            | Future Phase 9 polish (per-brand SVG glyphs / cross-cutting Firestore mapper audit / permission-denied UX / RNFirebase / receipt PDF)              | Pending                        |
+| 9 turn 10             | Permission-denied UX — `<PermissionDeniedBanner/>` + `useOpenSettings` + AppState `usePermissionRefresh` with grant-edge toast and SDK auto-start  | ✅                             |
+| 9 turn 11+            | Future Phase 9 polish (per-brand SVG glyphs / cross-cutting Firestore mapper audit / RNFirebase / receipt PDF)                                     | Pending                        |
 | 10                    | Cutover from legacy yeride                                                                                                                         | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
