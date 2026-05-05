@@ -610,35 +610,42 @@ const mockNotifications = {
 
 jest.mock('expo-notifications', () => mockNotifications);
 
-// @react-native-firebase/crashlytics (Phase 9 turn 3): the SDK's default
-// export is a callable singleton accessor `crashlytics()` that returns a
-// module instance whose methods are TurboModule-backed and crash outside a
-// real RN runtime. The shape:
+// @react-native-firebase/crashlytics (Phase 9 turn 3 / migrated to modular
+// API in Phase 9 turn 14): the SDK ships both shapes in v24, but the
+// namespaced default export (`crashlytics()`) fires runtime deprecation
+// warnings on every call and is slated for removal in v25. The rewrite
+// uses the modular API exclusively — `getCrashlytics()` returns a
+// `Crashlytics` instance, and per-method functions
+// (`setCrashlyticsCollectionEnabled(c, enabled)`,
+// `setUserId(c, uid)`, `setAttributes(c, attrs)`,
+// `recordError(c, err, name?)`, `log(c, msg)`, `crash(c)`) take that
+// instance as the first argument.
 //
-//   crashlytics(): {
-//     log(msg): void
-//     recordError(err, name?): void
-//     setUserId(uid): Promise<null>
-//     setAttributes(attrs): Promise<null>
-//     setCrashlyticsCollectionEnabled(enabled): Promise<null>
-//     crash(): void  // would actually crash a real device
-//     ...
-//   }
-//
-// The mock returns the SAME singleton instance on every call (the SDK
-// memoizes natively, our mock memoizes in JS) so per-test mock setup via
-// `(crashlytics().log as jest.Mock).mockImplementation(...)` flows through
-// to subsequent calls. `crash()` is a `jest.fn()` here — it does NOT crash
-// the test runner — so the dev "Force crash" tests can assert it fired
+// The mock memoizes a single `mockCrashlyticsInstance` and exposes BOTH
+// surfaces: the modular named functions (each delegating to a per-method
+// jest.fn() on the singleton, so the existing `c.setUserId.mock` assertion
+// shape still works) AND the legacy default export (kept for any
+// downstream consumer that hasn't migrated). The methods are
+// TurboModule-backed in real builds and crash outside an RN runtime, so
+// every export here is a `jest.fn()` — including `crash()`, which is a
+// no-op in tests so the dev "Force crash" suite can assert it fired
 // without taking the Jest worker down.
 //
-// Per-test usage:
+// Per-test usage (modular):
 //
-//   import crashlytics from '@react-native-firebase/crashlytics';
-//   const c = crashlytics();
+//   import { getCrashlytics } from '@react-native-firebase/crashlytics';
+//   const c = getCrashlytics();
 //   (c.recordError as jest.Mock).mockClear();
 //   // ...exercise code...
 //   expect(c.recordError).toHaveBeenCalledWith(expect.any(Error), 'Foo');
+//
+// To simulate `getCrashlytics()` itself throwing (native module missing,
+// app not configured), per-test override:
+//
+//   import { getCrashlytics } from '@react-native-firebase/crashlytics';
+//   (getCrashlytics as jest.Mock).mockImplementationOnce(() => {
+//     throw new Error('native module not found');
+//   });
 
 interface MockCrashlyticsModule {
   isCrashlyticsCollectionEnabled: boolean;
@@ -672,7 +679,45 @@ const mockCrashlyticsInstance: MockCrashlyticsModule = {
 
 jest.mock('@react-native-firebase/crashlytics', () => ({
   __esModule: true,
+  // Legacy namespaced default export — preserved for backward compat.
   default: jest.fn(() => mockCrashlyticsInstance),
+  // Modular API (Phase 9 turn 14). Each function delegates to the
+  // singleton's per-method jest.fn() so `expect(sdk.setUserId)
+  // .toHaveBeenCalledWith(...)` keeps working in adapter tests.
+  getCrashlytics: jest.fn(() => mockCrashlyticsInstance),
+  setCrashlyticsCollectionEnabled: jest.fn(
+    (c: MockCrashlyticsModule, enabled: boolean) =>
+      c.setCrashlyticsCollectionEnabled(enabled),
+  ),
+  setUserId: jest.fn((c: MockCrashlyticsModule, uid: string) =>
+    c.setUserId(uid),
+  ),
+  setAttribute: jest.fn(
+    (c: MockCrashlyticsModule, name: string, value: string) =>
+      c.setAttribute(name, value),
+  ),
+  setAttributes: jest.fn(
+    (c: MockCrashlyticsModule, attrs: Record<string, string>) =>
+      c.setAttributes(attrs),
+  ),
+  recordError: jest.fn(
+    (c: MockCrashlyticsModule, error: Error, name?: string) =>
+      c.recordError(error, name),
+  ),
+  log: jest.fn((c: MockCrashlyticsModule, message: string) => c.log(message)),
+  crash: jest.fn((c: MockCrashlyticsModule) => c.crash()),
+  checkForUnsentReports: jest.fn((c: MockCrashlyticsModule) =>
+    c.checkForUnsentReports(),
+  ),
+  deleteUnsentReports: jest.fn((c: MockCrashlyticsModule) =>
+    c.deleteUnsentReports(),
+  ),
+  didCrashOnPreviousExecution: jest.fn((c: MockCrashlyticsModule) =>
+    c.didCrashOnPreviousExecution(),
+  ),
+  sendUnsentReports: jest.fn((c: MockCrashlyticsModule) =>
+    c.sendUnsentReports(),
+  ),
 }));
 
 // react-native-svg (Phase 9 turn 13): manual mock lives at
