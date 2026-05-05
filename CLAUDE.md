@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** May 4, 2026 (Phase 9 Turn 11 closed — Cross-cutting Firestore mapper telemetry audit: 17 LOG.warn → LOG.error flips across 6 files (FirestoreLocationRepository / userMapper / rideMapper / tripPaymentMapper / FirestoreRideRepository / FirestoreServiceAreaRepository), per-doc validation + getLastKnown surface fans through the rawMeta channel to Crashlytics recordError under stable scope_kind prefixes; 187 suites / 1616 tests)
+**Last updated:** May 4, 2026 (Phase 9 Turn 12 closed — NavigationSdk subscriber-threw telemetry flip: 1 LOG.warn → LOG.error at NavigationSdkClient L520 (handleArrival fan-out loop), `e` already a real Error so no constructed-Error wrapper; mirrors Turn 9's BG L502/L547 pattern verbatim; +1 regression test asserts reference-identity recordError + peer fan-out resilience + scope-name pin under YeRide:NavigationSdk; 187 suites / 1617 tests)
 **Codebase:** the clean-architecture rewrite of YeRide. New project at
 `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still lives at
 `/Users/papagallo/yeapptech/dev/yeride/` and is the source of truth for
@@ -8,6 +8,56 @@ domain knowledge — read its `CLAUDE.md` for trip lifecycle, Stripe,
 Navigation SDK quirks, and other behaviors not yet ported.
 
 ## Project status
+
+**Phase 9 Turn 12 closed.** NavigationSdk subscriber-threw telemetry
+flip — the smallest follow-up Turn 11's audit logged. Pure mechanical
+extension of Turn 9's `BackgroundGeolocationClient` L502 / L547
+subscriber-threw pattern. Both pre-checklist questions landed on the
+Recommended option: scope is just L512 (no re-walk of the file's
+other warn sites — Turn 11's audit already classified L387 / L415 /
+L428 as cleanup-best-effort teardown swallows with self-documenting
+message text), and no explicit `// stays warn — best-effort cleanup`
+tag comments on the three classified sites. **One flip lands** at
+`NavigationSdkClient.ts:520` — the `handleArrival` fan-out loop's
+defensive `try/catch` around each subscriber callback. `LOG.warn` →
+`LOG.error`; `e` is already a real `Error` from the synchronously-
+throwing subscriber, so no constructed-Error wrapper is needed —
+the rawMeta channel's `extractError(rawMeta ?? meta)` resolves the
+reference directly through to `recordError`. The fan-out resilience
+invariant (one bad subscriber doesn't take down the others) is
+preserved by the surrounding `for`-loop's `try/catch`; the new
+telemetry just makes the bug visible. The prior stays-warn comment
+block is replaced with inline JSDoc explaining the level + Error-
+shape choice (mirrors Turn 9's L502 / L547 inline comments). **One
+new regression test** in `NavigationSdkClient.test.ts` under a new
+describe block `'telemetry — recordError fan-out via rawMeta channel
+(Phase 9 turn 12)'`: the test attaches a `CrashlyticsLogTransport(
+fakeCrash)` to the singleton `LOG`, registers a throwing subscriber
+alongside a peer, drives an arrival via the existing `__emitArrival`
+SDK mock helper, and asserts (a) reference identity on the recorded
+`Error` (rawMeta channel preserves the throw through
+`sanitizeForLogging`), (b) `seededRecord.name === 'YeRide:NavigationSdk'`
+so Firebase Console groups non-fatals under the correct scope, (c)
+peer subscriber DID receive the event despite the prior subscriber
+throwing (fan-out resilience), and (d) throwing subscriber was
+called once before throwing. `try/finally { LOG.removeTransport(
+transport) }` per Turn 4 / Turn 8 / Turn 9 / Turn 11 hygiene.
+Existing `__emitArrival` helper in `jest.setup.ts` covers the SDK
+mock — no new mock infrastructure. Acceptance: **187 suites / 1617
+tests** (+0 suites / +1 test over Turn 11's 187/1616, exactly at the
+floor of the kickoff's "+0 suites / +1-2 tests" estimate band). **No
+native rebuild required** — pure TS refactor; no new dependencies;
+no plugin patches; no DI container changes; no cross-repo work.
+Manual smoke is mostly N/A — pure telemetry; field-validation note
+documented in `docs/PHASE_9_TURN_12.md` § "Smoke checklist (user-
+driven)" — after the next deploy lands, watch Firebase Console for
+the new `YeRide:NavigationSdk` issue with message starting
+`handleArrival: subscriber threw` to populate; sustained zero-rate
+flags either dead telemetry or genuinely robust subscribers,
+sustained non-zero rate flags a domain-side subscriber bug worth
+investigating (likely a stale closure inside
+`useDriverNavigationViewModel` or an unhandled exception in the
+auto-pop `useEffect`).
 
 **Phase 9 Turn 11 closed.** Cross-cutting Firestore mapper telemetry
 audit — the long-deferred Phase 9 polish item that Turn 9's close
@@ -1142,6 +1192,7 @@ pending (Turn 5).
 | Phase 9 turn 9              | SDK-adapter telemetry — 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient (onLocation error code + invalid coords + 2× subscriber-threw)                                                                                | ✅     |
 | Phase 9 turn 10             | Permission-denied UX — `<PermissionDeniedBanner/>` + `useOpenSettings` + AppState `usePermissionRefresh` with grant-edge toast and SDK auto-start                                                                                 | ✅     |
 | Phase 9 turn 11             | Cross-cutting Firestore mapper telemetry audit — 17 LOG.warn → LOG.error flips across 6 files; per-doc validation + getLastKnown surface fans through rawMeta channel to Crashlytics recordError under stable scope_kind prefixes | ✅     |
+| Phase 9 turn 12             | NavigationSdk subscriber-threw telemetry flip — 1 LOG.warn → LOG.error at NavigationSdkClient L520 (handleArrival fan-out loop), pass `e` directly (no constructed wrapper); mirrors Turn 9's BG L502/L547 pattern verbatim       | ✅     |
 
 **Phase 6 turn 3 shipped.** First Stripe-SDK surface in the rewrite.
 `@stripe/stripe-react-native@0.63.0` installed (Expo SDK 55 picked
@@ -1222,7 +1273,8 @@ meta) land. Driver Earnings + tip flow still pending — Turns 4-5.
 | 9 turn 9              | SDK-adapter telemetry — 4 LOG.warn → LOG.error flips in BackgroundGeolocationClient (onLocation error code + invalid coords + 2× subscriber-threw)                                                                                   | ✅                             |
 | 9 turn 10             | Permission-denied UX — `<PermissionDeniedBanner/>` + `useOpenSettings` + AppState `usePermissionRefresh` with grant-edge toast and SDK auto-start                                                                                    | ✅                             |
 | 9 turn 11             | Cross-cutting Firestore mapper telemetry audit — 17 LOG.warn → LOG.error flips across 6 files (FirestoreLocationRepository / userMapper / rideMapper / tripPaymentMapper / FirestoreRideRepository / FirestoreServiceAreaRepository) | ✅                             |
-| 9 turn 12+            | Future Phase 9 polish (per-brand SVG glyphs / RNFirebase modular API / receipt PDF / NavigationSdk subscriber-threw telemetry)                                                                                                       | Pending                        |
+| 9 turn 12             | NavigationSdk subscriber-threw telemetry flip — 1 LOG.warn → LOG.error at NavigationSdkClient L520 (handleArrival fan-out loop), pass `e` directly; mirrors Turn 9's BG L502/L547 pattern verbatim                                   | ✅                             |
+| 9 turn 13+            | Future Phase 9 polish (per-brand SVG glyphs / RNFirebase modular API / receipt PDF / NavigationSdk teardown telemetry L387/L415/L428)                                                                                                | Pending                        |
 | 10                    | Cutover from legacy yeride                                                                                                                                                                                                           | Pending                        |
 
 End of Phase 7 turn 3 / Phase 7 close acceptance: **152 test suites
@@ -2346,5 +2398,5 @@ import { ... } from '@shared/testing';
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_7.md`),
+`docs/PHASE_*.md` for what shipped (latest: `PHASE_9_TURN_12.md`),
 then ask.

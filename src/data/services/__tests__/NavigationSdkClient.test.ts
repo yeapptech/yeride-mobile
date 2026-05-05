@@ -2,6 +2,8 @@
  * @jest-environment node
  */
 import { Coordinates } from '@domain/entities/Coordinates';
+import { CrashlyticsLogTransport, LOG } from '@shared/logger';
+import { FakeCrashReportingService } from '@shared/testing';
 
 import {
   NavigationSdkClient,
@@ -543,6 +545,77 @@ describe('NavigationSdkClient', () => {
       sdk.__emitArrival(sampleArrivalEvent());
       expect(cb).toHaveBeenCalledTimes(1);
       dispose();
+    });
+  });
+
+  /**
+   * Phase 9 turn 12 — telemetry: the L512 `handleArrival: subscriber
+   * threw` site flipped from `LOG.warn` to `LOG.error` so the rawMeta
+   * channel fans throwing arrival subscribers out to
+   * `CrashlyticsLogTransport.recordError` (Phase 9 turn 6 contract).
+   * Mirrors Turn 9's BackgroundGeolocationClient L502/L547
+   * subscriber-threw flips verbatim:
+   *   - attach a `CrashlyticsLogTransport` to the singleton `LOG`
+   *   - register a throwing subscriber alongside a peer
+   *   - emit an arrival
+   *   - assert reference identity on the recorded Error AND that the
+   *     peer DID receive the event (fan-out resilience)
+   *   - detach in `try/finally` so subsequent tests in the same Jest
+   *     worker don't see leaked transports
+   *
+   * Asserts `recorded.name === 'YeRide:NavigationSdk'` so Firebase
+   * Console groups non-fatals correctly under the adapter's scope.
+   */
+  describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 12)', () => {
+    const SCOPE = 'YeRide:NavigationSdk';
+
+    it('arrival subscriber throws → recordError fires with the thrown Error (fan-out continues)', () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new NavigationSdkClient();
+        const controller = sdk.__makeController();
+        const listeners = sdk.__makeListeners();
+        client.setController({
+          controller: controller as unknown as Parameters<
+            NavigationSdkClient['setController']
+          >[0]['controller'],
+          listeners: listeners as unknown as NavigationListenerSetters,
+        });
+
+        const seededError = new Error('arrival-subscriber-bug');
+        const throwingCb = jest.fn(() => {
+          throw seededError;
+        });
+        const peerCb = jest.fn();
+
+        const disposeA = client.subscribeToArrival(throwingCb);
+        const disposeB = client.subscribeToArrival(peerCb);
+
+        sdk.__emitArrival(sampleArrivalEvent());
+
+        const recorded = fakeCrash.getRecordedErrors();
+        // Reference identity — `e` in the catch is the seededError
+        // instance; the rawMeta channel preserves it through
+        // `sanitizeForLogging`.
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        // Scope-pin: Firebase Console groups by `name` field. Pinning
+        // here catches any future scope rename that would silently
+        // re-cluster these reports.
+        expect(seededRecord?.name).toBe(SCOPE);
+        // Fan-out resilience: peer subscriber DID receive the event
+        // despite the prior subscriber throwing.
+        expect(peerCb).toHaveBeenCalledTimes(1);
+        // Throwing subscriber was called once before throwing.
+        expect(throwingCb).toHaveBeenCalledTimes(1);
+
+        disposeA();
+        disposeB();
+      } finally {
+        LOG.removeTransport(transport);
+      }
     });
   });
 });

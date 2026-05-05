@@ -509,15 +509,21 @@ export class NavigationSdkClient {
       try {
         cb(domainEvent);
       } catch (e) {
-        // stays warn — same shape as Turn 9's BackgroundGeolocation
-        // subscriber-threw flips (L502/L547), but the cross-cutting
-        // Firestore mapper audit (Phase 9 turn 11) explicitly scoped
-        // this out. Flipping is a logical follow-up turn — would
-        // surface domain-side subscriber bugs in the navigation
-        // arrival fan-out via Crashlytics. Defer until field telemetry
-        // shows whether arrival callbacks see real-world subscriber
-        // throws.
-        logger.warn('handleArrival: subscriber threw', e);
+        // Phase 9 turn 12 — flipped from LOG.warn to LOG.error so the
+        // rawMeta channel fans this out to `recordError`. A throwing
+        // arrival subscriber is a domain-side bug (the registered
+        // hook/VM callback threw inside the SDK fan-out); making it
+        // visible to Crashlytics is the whole point. `e` here is
+        // already a real `Error` from the synchronously-throwing
+        // subscriber, so no constructed-Error wrapper is needed —
+        // reference identity flows directly through to `recordError`
+        // via `extractError(rawMeta ?? meta)`. Mirrors Turn 9's
+        // BackgroundGeolocationClient L502/L547 flips verbatim. The
+        // fan-out resilience invariant (one bad subscriber doesn't
+        // take down the others) is preserved by the surrounding
+        // for-loop's `try/catch`; the new telemetry just makes the
+        // bug visible.
+        logger.error('handleArrival: subscriber threw', e);
       }
     }
   };
