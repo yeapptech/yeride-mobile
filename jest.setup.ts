@@ -720,6 +720,82 @@ jest.mock('@react-native-firebase/crashlytics', () => ({
   ),
 }));
 
+// expo-print + expo-sharing + expo-file-system (Phase 9 turn 16):
+// the SDKs' native methods (`printToFileAsync`, `shareAsync`,
+// `new File(uri).delete()`) are TurboModule-backed and crash outside
+// a real RN runtime. We mock all three at the module boundary so the
+// receipt-PDF VM tests can prime per-call behaviour with the canonical
+// Jest patterns.
+//
+// Per-test usage:
+//
+//   import * as Print from 'expo-print';
+//   (Print.printToFileAsync as jest.Mock).mockResolvedValueOnce({
+//     uri: 'file:///tmp/receipt.pdf',
+//   });
+//   import * as Sharing from 'expo-sharing';
+//   (Sharing.isAvailableAsync as jest.Mock).mockResolvedValueOnce(false);
+//
+// `expo-file-system` exports a `File` class whose constructor is
+// invoked with the PDF uri and whose `.delete()` method is called for
+// best-effort cleanup. The mock holds a per-instance `delete()` jest.fn
+// so tests can assert via:
+//
+//   import { File } from 'expo-file-system';
+//   const f = new File('file:///tmp/receipt.pdf');
+//   expect(f.delete).toHaveBeenCalled();
+//
+// Or assert against the constructor itself with `(File as jest.Mock)`.
+
+jest.mock('expo-print', () => ({
+  __esModule: true,
+  printAsync: jest.fn().mockResolvedValue(undefined),
+  printToFileAsync: jest.fn().mockResolvedValue({
+    uri: 'file:///tmp/mock-receipt.pdf',
+    numberOfPages: 1,
+  }),
+  selectPrinterAsync: jest
+    .fn()
+    .mockResolvedValue({ name: 'Mock Printer', url: 'mock://printer' }),
+  Orientation: { portrait: 'portrait', landscape: 'landscape' },
+}));
+
+jest.mock('expo-sharing', () => ({
+  __esModule: true,
+  isAvailableAsync: jest.fn().mockResolvedValue(true),
+  shareAsync: jest.fn().mockResolvedValue(undefined),
+  getSharedPayloads: jest.fn(() => []),
+  getResolvedSharedPayloads: jest.fn().mockResolvedValue([]),
+  clearSharedPayloads: jest.fn(),
+  useIncomingShare: jest.fn(() => null),
+}));
+
+jest.mock('expo-file-system', () => {
+  // Per-File instance jest.fn() for `.delete()` so individual tests
+  // can assert "the temp PDF was cleaned up". A module-level jest.fn
+  // wouldn't work because each new File() should yield an independent
+  // delete spy.
+  const File = jest.fn().mockImplementation(function (
+    this: { uri: string; delete: jest.Mock },
+    ...uris: unknown[]
+  ) {
+    this.uri = String(uris[uris.length - 1] ?? '');
+    this.delete = jest.fn();
+  });
+  const Directory = jest.fn();
+  const Paths = {
+    cache: { uri: 'file:///mock-cache/' },
+    document: { uri: 'file:///mock-document/' },
+    bundle: { uri: 'file:///mock-bundle/' },
+  };
+  return {
+    __esModule: true,
+    File,
+    Directory,
+    Paths,
+  };
+});
+
 // react-native-svg (Phase 9 turn 13): manual mock lives at
 // `<rootDir>/__mocks__/react-native-svg.tsx`. Jest auto-resolves it.
 //

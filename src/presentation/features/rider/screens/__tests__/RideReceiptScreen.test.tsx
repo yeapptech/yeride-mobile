@@ -27,6 +27,7 @@ import { UserId } from '@domain/entities/UserId';
 
 const mockUseRideReceiptViewModel = jest.fn();
 const mockUseTipFlowViewModel = jest.fn();
+const mockUseGenerateReceiptPdfViewModel = jest.fn();
 
 jest.mock('@presentation/components/map', () => {
   const { View } = jest.requireActual('react-native');
@@ -45,6 +46,16 @@ jest.mock('../../view-models/useTipFlowViewModel', () => {
     ...actual,
     useTipFlowViewModel: (...args: unknown[]) =>
       mockUseTipFlowViewModel(...args),
+  };
+});
+jest.mock('../../view-models/useGenerateReceiptPdfViewModel', () => {
+  const actual = jest.requireActual(
+    '../../view-models/useGenerateReceiptPdfViewModel',
+  );
+  return {
+    ...actual,
+    useGenerateReceiptPdfViewModel: (...args: unknown[]) =>
+      mockUseGenerateReceiptPdfViewModel(...args),
   };
 });
 
@@ -163,6 +174,10 @@ describe('RideReceiptScreen — Phase 6 turn 5 wiring', () => {
   beforeEach(() => {
     mockUseRideReceiptViewModel.mockReset();
     mockUseTipFlowViewModel.mockReset();
+    mockUseGenerateReceiptPdfViewModel.mockReset();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'idle', onShare: () => undefined },
+    });
   });
 
   it('mounts the TipSelector when the tip flow is in idle on a completed ride', () => {
@@ -258,7 +273,11 @@ describe('RideReceiptScreen — Phase 9 Turn 7 payment row', () => {
   beforeEach(() => {
     mockUseRideReceiptViewModel.mockReset();
     mockUseTipFlowViewModel.mockReset();
+    mockUseGenerateReceiptPdfViewModel.mockReset();
     mockUseTipFlowViewModel.mockReturnValue({ state: { kind: 'hidden' } });
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'idle', onShare: () => undefined },
+    });
   });
 
   it('renders the brand badge + "Brand •••• last4" line when the join hits', () => {
@@ -346,5 +365,236 @@ describe('RideReceiptScreen — Phase 9 Turn 7 payment row', () => {
     expect(queryByTestId('receipt-email')).toBeNull();
     expect(queryByText('Email receipt')).toBeNull();
     expect(queryByText('Emailed receipts land in Phase 9 polish.')).toBeNull();
+  });
+});
+
+/* ─── Phase 9 Turn 16 — Share-receipt CTA ──────────────────────── */
+
+describe('RideReceiptScreen — Phase 9 Turn 16 share-receipt CTA', () => {
+  beforeEach(() => {
+    mockUseRideReceiptViewModel.mockReset();
+    mockUseTipFlowViewModel.mockReset();
+    mockUseGenerateReceiptPdfViewModel.mockReset();
+    mockUseTipFlowViewModel.mockReturnValue({ state: { kind: 'hidden' } });
+  });
+
+  function withCompletedRide() {
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: makeCompletedRide(),
+      payments: [FARE],
+      fareTotal: usd(18),
+      farePayment: FARE,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
+      isLoading: false,
+      error: null,
+    });
+  }
+
+  it('mounts the Share-receipt CTA when the PDF VM is in idle', () => {
+    withCompletedRide();
+    const onShare = jest.fn();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'idle', onShare },
+    });
+
+    const { getByTestId, getByText } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(getByTestId('receipt-share-cta')).toBeTruthy();
+    expect(getByText('Share receipt')).toBeTruthy();
+  });
+
+  it('calls onShare when the CTA is pressed', () => {
+    withCompletedRide();
+    const onShare = jest.fn();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'idle', onShare },
+    });
+
+    const { getByTestId } = render(<RideReceiptScreen {...baseScreenProps} />);
+    const { fireEvent } = require('@testing-library/react-native');
+    fireEvent.press(getByTestId('receipt-share-cta'));
+    expect(onShare).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the spinner + "Generating PDF…" label during generating', () => {
+    withCompletedRide();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'generating' },
+    });
+
+    const { getByTestId, getByText } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(getByTestId('receipt-share-cta-spinner')).toBeTruthy();
+    expect(getByText('Generating PDF…')).toBeTruthy();
+  });
+
+  it('renders the inline error band with "Try again" CTA when in error arm', () => {
+    withCompletedRide();
+    const onShare = jest.fn();
+    const onDismissError = jest.fn();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: {
+        kind: 'error',
+        error: {
+          kind: 'pdf_generation_failed',
+          message: 'Print SDK exploded',
+        },
+        onShare,
+        onDismissError,
+      },
+    });
+
+    const { getByTestId, getByText } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(getByTestId('receipt-share-cta-error')).toBeTruthy();
+    expect(getByText("Couldn't build the PDF. Please try again.")).toBeTruthy();
+    expect(getByText('Try again')).toBeTruthy();
+    expect(getByText('Dismiss')).toBeTruthy();
+  });
+
+  it('Dismiss button calls onDismissError', () => {
+    withCompletedRide();
+    const onDismissError = jest.fn();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: {
+        kind: 'error',
+        error: { kind: 'unknown', message: 'something went wrong' },
+        onShare: () => undefined,
+        onDismissError,
+      },
+    });
+
+    const { getByTestId } = render(<RideReceiptScreen {...baseScreenProps} />);
+    const { fireEvent } = require('@testing-library/react-native');
+    fireEvent.press(getByTestId('receipt-share-cta-error-dismiss'));
+    expect(onDismissError).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the sharing_unavailable message verbatim from the VM', () => {
+    withCompletedRide();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: {
+        kind: 'error',
+        error: {
+          kind: 'sharing_unavailable',
+          message:
+            "Sharing isn't available on this device — try emailing yourself the receipt instead.",
+        },
+        onShare: () => undefined,
+        onDismissError: () => undefined,
+      },
+    });
+
+    const { getByText } = render(<RideReceiptScreen {...baseScreenProps} />);
+    expect(
+      getByText(
+        "Sharing isn't available on this device — try emailing yourself the receipt instead.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it('renders "Share again" label in the shared arm so the rider can re-share', () => {
+    withCompletedRide();
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'shared', onShare: () => undefined },
+    });
+
+    const { getByText } = render(<RideReceiptScreen {...baseScreenProps} />);
+    expect(getByText('Share again')).toBeTruthy();
+  });
+
+  it('hides the Share-receipt CTA when ride.status is not completed', () => {
+    // payment_failed ride — receipt is not finalized; the share CTA
+    // should be hidden, but the screen otherwise still renders so
+    // the rider sees the in-progress charge state.
+    const passenger = unwrap(
+      PassengerSnapshot.create({
+        id: unwrap(UserId.create('aaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
+        name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+        email: unwrap(Email.create('rider@yeapp.tech')),
+        phoneNumber: unwrap(PhoneNumber.create('+14155550123')),
+        pushToken: null,
+        avatarUrl: null,
+        stripeCustomerId: null,
+        defaultPaymentMethod: null,
+      }),
+    );
+    const tier = unwrap(
+      RideServiceSnapshot.create({
+        id: unwrap(RideServiceId.create('economy')),
+        name: 'Economy',
+        baseFare: usd(2.5),
+        minimumFare: usd(5),
+        cancelationFee: usd(2),
+        costPerKm: usd(1.25),
+        costPerMinute: usd(0.2),
+        seatCapacity: 4,
+      }),
+    );
+    const failedRide = unwrap(
+      Ride.fromProps({
+        id: RIDE_ID,
+        status: 'payment_failed',
+        passenger,
+        driver: null,
+        rideService: tier,
+        pickup: unwrap(
+          Endpoint.create({
+            location: unwrap(Coordinates.create(25.7617, -80.1918)),
+            address: 'Bayfront Park',
+            placeName: 'Bayfront Park',
+            directions: null,
+          }),
+        ),
+        dropoff: unwrap(
+          Endpoint.create({
+            location: unwrap(Coordinates.create(26.1224, -80.1373)),
+            address: '1 Las Olas Blvd',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        createdAt: new Date('2026-04-28T10:00:00Z'),
+        pickupTiming: {
+          startedAt: new Date('2026-04-28T10:00:00Z'),
+          completedAt: new Date('2026-04-28T10:05:00Z'),
+          odometerMeters: 0,
+          elapsedSeconds: 300,
+        },
+        dropoffTiming: {
+          startedAt: new Date('2026-04-28T10:05:00Z'),
+          completedAt: new Date('2026-04-28T10:30:00Z'),
+          odometerMeters: 10_000,
+        },
+        cancellation: null,
+        routePreference: null,
+      }),
+    );
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: failedRide,
+      payments: [],
+      fareTotal: null,
+      farePayment: null,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
+      isLoading: false,
+      error: null,
+    });
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'idle', onShare: () => undefined },
+    });
+
+    const { queryByTestId } = render(
+      <RideReceiptScreen {...baseScreenProps} />,
+    );
+    expect(queryByTestId('receipt-share-cta')).toBeNull();
   });
 });

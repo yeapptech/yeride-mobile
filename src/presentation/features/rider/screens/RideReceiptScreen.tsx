@@ -25,6 +25,10 @@ import type {
 } from '@presentation/navigation/types';
 
 import { TipSelector } from '../components/TipSelector';
+import {
+  useGenerateReceiptPdfViewModel,
+  type ReceiptPdfState,
+} from '../view-models/useGenerateReceiptPdfViewModel';
 import { useRideReceiptViewModel } from '../view-models/useRideReceiptViewModel';
 import { useTipFlowViewModel } from '../view-models/useTipFlowViewModel';
 
@@ -107,7 +111,44 @@ function RideReceiptContent({
     );
   }
 
-  const ride = vm.ride;
+  // Hand off to a child so the PDF VM (which requires a non-null
+  // `Ride`) can mount unconditionally — keeps hook order clean.
+  return (
+    <LoadedReceipt
+      ride={vm.ride}
+      vm={vm}
+      tipFlowVM={tipFlowVM}
+      navigation={navigation}
+    />
+  );
+}
+
+function LoadedReceipt({
+  ride,
+  vm,
+  tipFlowVM,
+  navigation,
+}: {
+  readonly ride: Ride;
+  readonly vm: ReturnType<typeof useRideReceiptViewModel>;
+  readonly tipFlowVM: ReturnType<typeof useTipFlowViewModel>;
+  readonly navigation: RiderStackNavigation;
+}) {
+  // Phase 9 Turn 16 — receipt-PDF flow. Mounted alongside the
+  // existing TipSelector so both run independently. The CTA is
+  // gated on `ride.status === 'completed'` (a `'payment_failed'`
+  // ride doesn't have a finalizable receipt; the PaymentFailed
+  // view's retry path is the rider's affordance there).
+  const pdfVM = useGenerateReceiptPdfViewModel({
+    ride,
+    farePayment: vm.farePayment,
+    tipPayment: vm.tipPayment,
+    refundPayment: vm.refundPayment,
+    fareTotal: vm.fareTotal,
+    paymentBrand: vm.paymentBrand,
+    paymentLast4: vm.paymentLast4,
+  });
+  const pdfShareEnabled = ride.status === 'completed';
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={['top']}>
@@ -198,6 +239,9 @@ function RideReceiptContent({
       </ScrollView>
 
       <View className="border-t border-border px-4 py-3">
+        {pdfShareEnabled && (
+          <ShareReceiptCta state={pdfVM.state} testID="receipt-share-cta" />
+        )}
         <Pressable
           onPress={() =>
             // Reset (rather than `popToTop`) so the rider always lands
@@ -221,6 +265,122 @@ function RideReceiptContent({
       </View>
     </SafeAreaView>
   );
+}
+
+/**
+ * Phase 9 Turn 16 — Share-receipt CTA + inline error band.
+ *
+ * Single state-driven row pinned above the Done CTA. The button
+ * label and behavior shift based on `state.kind`:
+ *   - `idle`        — "Share receipt" (default text)
+ *   - `generating`  — spinner + "Generating PDF…"; disabled
+ *   - `ready`       — spinner + "Preparing share…"; disabled (transient)
+ *   - `sharing`     — spinner + "Opening share…"; disabled
+ *   - `shared`      — "Share again" (the rider may want a second copy)
+ *   - `error`       — error band above + "Try again" CTA
+ *
+ * Error-band copy maps from `error.kind`:
+ *   - `pdf_generation_failed` — "Couldn't build the PDF. Try again?"
+ *   - `sharing_unavailable`   — uses the message from the error
+ *                                (already user-friendly; tells the
+ *                                rider to email themselves instead)
+ *   - `unknown`               — uses the SDK's error message verbatim
+ */
+function ShareReceiptCta({
+  state,
+  testID,
+}: {
+  readonly state: ReceiptPdfState;
+  readonly testID: string;
+}) {
+  let label: string;
+  let busy = false;
+  let onPress: (() => void) | null = null;
+  switch (state.kind) {
+    case 'idle':
+      label = 'Share receipt';
+      onPress = state.onShare;
+      break;
+    case 'generating':
+      label = 'Generating PDF…';
+      busy = true;
+      break;
+    case 'ready':
+      label = 'Preparing share…';
+      busy = true;
+      break;
+    case 'sharing':
+      label = 'Opening share…';
+      busy = true;
+      break;
+    case 'shared':
+      label = 'Share again';
+      onPress = state.onShare;
+      break;
+    case 'error':
+      label = 'Try again';
+      onPress = state.onShare;
+      break;
+  }
+
+  return (
+    <View className="mb-3" testID={`${testID}-container`}>
+      {state.kind === 'error' && (
+        <View
+          className="mb-2 rounded-lg border border-error/30 bg-error/10 px-3 py-2"
+          testID={`${testID}-error`}
+        >
+          <Text className="text-sm text-error" testID={`${testID}-error-text`}>
+            {errorCopyFor(state.error.kind, state.error.message)}
+          </Text>
+          <Pressable
+            onPress={state.onDismissError}
+            accessibilityRole="button"
+            className="mt-1 self-start"
+            testID={`${testID}-error-dismiss`}
+          >
+            <Text className="text-xs font-semibold text-error">Dismiss</Text>
+          </Pressable>
+        </View>
+      )}
+      <Pressable
+        onPress={onPress ?? undefined}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: onPress === null }}
+        disabled={onPress === null}
+        className={`flex-row items-center justify-center rounded-xl border border-border px-4 py-3 ${
+          onPress === null ? 'opacity-60' : ''
+        }`}
+        testID={testID}
+      >
+        {busy && (
+          <ActivityIndicator
+            size="small"
+            className="mr-2"
+            testID={`${testID}-spinner`}
+          />
+        )}
+        <Text className="text-base font-semibold text-foreground">{label}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function errorCopyFor(
+  kind: 'pdf_generation_failed' | 'sharing_unavailable' | 'unknown',
+  message: string,
+): string {
+  switch (kind) {
+    case 'pdf_generation_failed':
+      return "Couldn't build the PDF. Please try again.";
+    case 'sharing_unavailable':
+      // The VM already supplies the user-friendly message
+      // ("Sharing isn't available on this device — try emailing
+      // yourself the receipt instead.").
+      return message;
+    case 'unknown':
+      return message;
+  }
 }
 
 function ReceiptRow({
