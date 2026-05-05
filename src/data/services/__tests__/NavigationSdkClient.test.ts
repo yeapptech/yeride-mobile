@@ -618,4 +618,156 @@ describe('NavigationSdkClient', () => {
       }
     });
   });
+
+  /**
+   * Phase 9 turn 15 — three teardown LOG.warn sites in this file
+   * (L387 stopGuidance standalone, L415 cleanup setOnArrival(null),
+   * L428 cleanup-internal stopGuidance) flipped to LOG.error so the
+   * rawMeta channel fans them out to `recordError`. Mirrors Turn 12's
+   * L520 fan-out test verbatim — attach a `CrashlyticsLogTransport`
+   * to the singleton `LOG`, drive the failure path via the existing
+   * SDK mock, assert `getRecordedErrors()` contains a record with
+   * reference identity on `Error`, name=='YeRide:NavigationSdk',
+   * and the inline log message substring (Crashlytics groups by
+   * scope + leading message text). VM-side teardown logs at
+   * `useDriverNavigationViewModel.ts` L296/L300 stay at LOG.warn
+   * (which doesn't fan out), so these flips do NOT create duplicate
+   * Crashlytics reports today.
+   */
+  describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 15)', () => {
+    const SCOPE = 'YeRide:NavigationSdk';
+
+    it('standalone stopGuidance throw → recordError fires with the thrown Error', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new NavigationSdkClient();
+        const controller = sdk.__makeController();
+        const seededError = new Error('stopGuidance-bug');
+        controller.stopGuidance.mockRejectedValueOnce(seededError);
+        client.setController({
+          controller: controller as unknown as Parameters<
+            NavigationSdkClient['setController']
+          >[0]['controller'],
+          listeners:
+            sdk.__makeListeners() as unknown as NavigationListenerSetters,
+        });
+
+        const result = await client.stopGuidance();
+
+        // Result.err still surfaces to the caller — the LOG.error is
+        // the breadcrumb fan-out, not a replacement for the wrapped
+        // NetworkError.
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.code).toBe('navigation_stop_guidance_failed');
+        }
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe(SCOPE);
+        // Inline message substring — pinning the leading text catches
+        // any future cosmetic edit that would re-cluster Crashlytics
+        // issues by changing the grouping key.
+        expect(seededRecord?.error.message).toContain('stopGuidance-bug');
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('cleanup: setOnArrival(null) throw → recordError fires; cleanup continues', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new NavigationSdkClient();
+        const controller = sdk.__makeController();
+        const listeners = sdk.__makeListeners();
+        client.setController({
+          controller: controller as unknown as Parameters<
+            NavigationSdkClient['setController']
+          >[0]['controller'],
+          listeners: listeners as unknown as NavigationListenerSetters,
+        });
+        // Activate the SDK arrival listener so cleanup will call
+        // setOnArrival(null) on teardown.
+        const cb = jest.fn();
+        const dispose = client.subscribeToArrival(cb);
+
+        // setOnArrival is called ONCE on subscribe (with the handler)
+        // and then on cleanup with null — the second call is the one
+        // we need to throw on. Use mockImplementation on a counter
+        // so we throw only when invoked with `null`.
+        const seededError = new Error('setOnArrival-detach-bug');
+        listeners.setOnArrival.mockImplementation(
+          (arg: ((e: unknown) => void) | null | undefined) => {
+            if (arg === null) throw seededError;
+          },
+        );
+
+        const result = await client.cleanup();
+
+        // Cleanup should still resolve Ok — the listener-detach
+        // failure is intentionally swallowed; controller.cleanup()
+        // ran successfully.
+        expect(result.ok).toBe(true);
+        // Confirm the controller's cleanup() was reached after the
+        // listener-detach throw (proves the function continued past
+        // the catch).
+        expect(controller.cleanup).toHaveBeenCalledTimes(1);
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe(SCOPE);
+        expect(seededRecord?.error.message).toContain(
+          'setOnArrival-detach-bug',
+        );
+
+        dispose();
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+
+    it('cleanup-internal stopGuidance throw → recordError fires; cleanup continues', async () => {
+      const fakeCrash = new FakeCrashReportingService();
+      const transport = new CrashlyticsLogTransport(fakeCrash);
+      LOG.addTransport(transport);
+      try {
+        const client = new NavigationSdkClient();
+        const controller = sdk.__makeController();
+        const seededError = new Error('cleanup-stopGuidance-bug');
+        controller.stopGuidance.mockRejectedValueOnce(seededError);
+        client.setController({
+          controller: controller as unknown as Parameters<
+            NavigationSdkClient['setController']
+          >[0]['controller'],
+          listeners:
+            sdk.__makeListeners() as unknown as NavigationListenerSetters,
+        });
+
+        const result = await client.cleanup();
+
+        // Cleanup should still resolve Ok — the cleanup-internal
+        // stopGuidance failure is intentionally swallowed so the
+        // session isn't stranded; controller.cleanup() ran
+        // successfully.
+        expect(result.ok).toBe(true);
+        expect(controller.cleanup).toHaveBeenCalledTimes(1);
+
+        const recorded = fakeCrash.getRecordedErrors();
+        const seededRecord = recorded.find((r) => r.error === seededError);
+        expect(seededRecord).toBeDefined();
+        expect(seededRecord?.name).toBe(SCOPE);
+        expect(seededRecord?.error.message).toContain(
+          'cleanup-stopGuidance-bug',
+        );
+      } finally {
+        LOG.removeTransport(transport);
+      }
+    });
+  });
 });

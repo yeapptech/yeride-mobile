@@ -384,7 +384,25 @@ export class NavigationSdkClient {
       await this.controller.stopGuidance();
       return Result.ok(true);
     } catch (e) {
-      logger.warn('stopGuidance threw — swallowing', e);
+      // Phase 9 turn 15 — flipped from LOG.warn to LOG.error so the
+      // rawMeta channel fans this out to `recordError`. A teardown
+      // failure indicates a stale-controller bug (e.g. SDK internal
+      // state racing with React Navigation's screen unmount); making
+      // it visible to Crashlytics surfaces real bugs that would
+      // otherwise be masked by the next session boot. The standalone
+      // path's caller still sees the wrapped `NetworkError` via the
+      // returned Result.err — flipping the breadcrumb here adds
+      // telemetry coverage for the cleanup-internal call site (L428)
+      // where no Result-channel telemetry exists. `e` is already a
+      // real `Error` from the rejected SDK Promise, so reference
+      // identity flows directly through the rawMeta channel without
+      // a constructed-Error wrapper. VM-side teardown logs at
+      // `useDriverNavigationViewModel.ts` L296 stay at `LOG.warn`
+      // (which doesn't fan out to recordError), so flipping here
+      // does NOT create a duplicate Crashlytics report today —
+      // the adapter↔VM duplicate-noise tradeoff Turn 9 documented
+      // doesn't apply.
+      logger.error('stopGuidance threw — swallowing', e);
       return Result.err(
         new NetworkError({
           code: 'navigation_stop_guidance_failed',
@@ -412,7 +430,16 @@ export class NavigationSdkClient {
       try {
         this.listeners.setOnArrival(null);
       } catch (e) {
-        logger.warn('cleanup: setOnArrival(null) threw — swallowing', e);
+        // Phase 9 turn 15 — flipped from LOG.warn to LOG.error so the
+        // rawMeta channel fans this out to `recordError`. The
+        // listener-removal failure is intentionally NOT propagated up
+        // (the surrounding `cleanup()` continues to teardown the
+        // controller below); without telemetry the only signal of a
+        // failed listener-detach is leaked SDK state on the next
+        // session boot. `e` is already a real `Error` from the
+        // rejected SDK call, so reference identity flows directly
+        // through the rawMeta channel.
+        logger.error('cleanup: setOnArrival(null) threw — swallowing', e);
       }
       this.sdkArrivalListenerActive = false;
     }
@@ -425,7 +452,18 @@ export class NavigationSdkClient {
     try {
       await this.controller.stopGuidance();
     } catch (e) {
-      logger.warn('cleanup: stopGuidance threw — continuing to cleanup', e);
+      // Phase 9 turn 15 — flipped from LOG.warn to LOG.error so the
+      // rawMeta channel fans this out to `recordError`. This is the
+      // cleanup-internal stopGuidance call: the failure is
+      // intentionally swallowed (we continue to `controller.cleanup()`
+      // below so a hung stop doesn't strand the session), so this LOG
+      // is the ONLY telemetry channel — there is no Result.err for the
+      // caller to inspect. `e` is already a real `Error` from the
+      // rejected SDK Promise; reference identity flows through rawMeta
+      // directly. The post-Result-err catch on
+      // `controller.cleanup()` (L434) already logs at error and is the
+      // sibling site for the second leg of teardown.
+      logger.error('cleanup: stopGuidance threw — continuing to cleanup', e);
     }
     try {
       await this.controller.cleanup();
