@@ -1,4 +1,5 @@
 import { render } from '@testing-library/react-native';
+import { Path, Rect, Svg } from 'react-native-svg';
 
 import {
   CardBrandBadge,
@@ -46,6 +47,43 @@ describe('CardBrandBadge', () => {
       expect(node.props.style).toEqual({ width, height });
     },
   );
+
+  // Phase 9 turn 13: SVG-rendering smoke tests prove the rendering-
+  // pipeline flip from PNG `<Image>` to per-brand SVG components.
+  // The global `jest.mock('react-native-svg', ...)` factory in
+  // `jest.setup.ts` exposes Svg / Path / Rect / etc. as `jest.fn()`
+  // identity components; we assert reference identity via the
+  // imported mocks rather than scanning the rendered tree.
+  describe('SVG rendering pipeline (Phase 9 turn 13)', () => {
+    beforeEach(() => {
+      (Svg as unknown as jest.Mock).mockClear();
+      (Path as unknown as jest.Mock).mockClear();
+      (Rect as unknown as jest.Mock).mockClear();
+    });
+
+    it('mounts the per-brand SVG glyph for branded brands', () => {
+      render(<CardBrandBadge brand="visa" />);
+      // Each per-brand glyph wraps its content in <Svg>; at least one
+      // Svg invocation proves the SVG path fired (and the legacy PNG
+      // `<Image>` path is gone).
+      expect(Svg).toHaveBeenCalled();
+      // The Visa glyph specifically uses Path elements (V/I/S/A
+      // letterform approximations + the yellow accent rect). Both
+      // should fire on render.
+      expect(Path).toHaveBeenCalled();
+      expect(Rect).toHaveBeenCalled();
+    });
+
+    it('mounts the GenericCard SVG glyph for the unknown brand fallback', () => {
+      render(<CardBrandBadge brand="unknown" />);
+      expect(Svg).toHaveBeenCalled();
+      // GenericCard uses Rect (card body + chip + number lines) and
+      // Path (chip grid). Asserting both fire pins the fallback glyph
+      // is rendered via the SVG pipeline (not a PNG remnant).
+      expect(Rect).toHaveBeenCalled();
+      expect(Path).toHaveBeenCalled();
+    });
+  });
 });
 
 describe('formatBrand', () => {

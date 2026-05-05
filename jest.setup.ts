@@ -675,4 +675,21 @@ jest.mock('@react-native-firebase/crashlytics', () => ({
   default: jest.fn(() => mockCrashlyticsInstance),
 }));
 
+// react-native-svg (Phase 9 turn 13): manual mock lives at
+// `<rootDir>/__mocks__/react-native-svg.tsx`. Jest auto-resolves it.
+//
+// Why a separate file: same NativeWind / babel hoisting issue as the
+// react-native-maps mock — `jest.mock` factories are hoisted above
+// all file-scope bindings, including NativeWind's auto-injected
+// `_ReactNativeCSSInterop` helper, so the factory body fails with
+// "module factory ... not allowed to reference any out-of-scope
+// variables" the moment it touches `View` from `react-native`. A
+// manual mock at `__mocks__/react-native-svg.tsx` is a regular module
+// (not a hoisted factory), so NativeWind's transform binds correctly.
+//
+// Every SVG primitive (Svg / Path / Rect / Circle / G / etc.) is
+// exported as a `jest.fn()` passthrough that renders its `children`
+// inside a `<View/>`. Tests can assert on reference identity:
+// `expect(Svg).toHaveBeenCalled()` etc.
+
 export {};
