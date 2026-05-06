@@ -171,36 +171,25 @@ module.exports = [
   // must implement domain repository interfaces and compose presentation
   // providers.
   // src/presentation/di/container.ts is the composition root — by
-  // architectural convention it's allowed to wire every layer together.
-  // Phase 7 turn 2: useGpsLifecycle.ts and useGpsStore.ts are the
-  // presentation-layer seam over the BackgroundGeolocationClient SDK
-  // adapter. They import the adapter's `Bg*Event` / `BgPermissionStatus`
-  // domain-shaped types so the rest of the presentation layer never has
-  // to know the SDK exists. Same architectural exception as the DI
-  // container: a single composition file allowed to cross layers.
-  // Phase 8 turn 2: useNavigationSdkConnector.ts and
-  // useDriverNavigationViewModel.ts are the presentation-layer seam over
-  // the NavigationSdkClient adapter. They import the adapter's
-  // `Nav*` domain-shaped types so the rest of the presentation layer
-  // never has to know the SDK exists. Same architectural exception as
-  // useGpsLifecycle / useGpsStore.
-  // Phase 9 turn 10: usePermissionRefresh.ts is the AppState-driven
-  // re-poll of the OS permission grant. Same SDK seam as
-  // useGpsLifecycle — type-imports `BackgroundGeolocationClient` /
-  // `BgPermissionStatus` from the data layer for the call signature
-  // and the `'always' | 'when_in_use' | 'denied' | 'undetermined'`
-  // branded union.
+  // architectural convention it's allowed to wire every layer together
+  // (it lazy-`require()`s concrete data-layer adapters at runtime).
+  //
+  // Note: the four SDK-seam consumers (`useGpsLifecycle`, `useGpsStore`,
+  // `usePermissionRefresh`, `useNavigationSdkConnector`,
+  // `useDriverNavigationViewModel`) used to live here as data-layer-
+  // type-importers. They've been migrated to the
+  // `@domain/services/{BackgroundGeolocationService,NavigationService}`
+  // interfaces (project SDK-seam convention; `CrashReportingService` and
+  // `PushNotificationService` are the canonical examples). The
+  // presentation layer no longer imports SDK adapter types directly —
+  // the boundaries-rule override list has shrunk to just the composition
+  // root.
   {
     files: [
       '**/__tests__/**/*.{ts,tsx}',
       '**/*.test.{ts,tsx}',
       'src/shared/testing/**/*.{ts,tsx}',
       'src/presentation/di/container.ts',
-      'src/presentation/hooks/useGpsLifecycle.ts',
-      'src/presentation/hooks/usePermissionRefresh.ts',
-      'src/presentation/stores/useGpsStore.ts',
-      'src/presentation/features/driver/hooks/useNavigationSdkConnector.ts',
-      'src/presentation/features/driver/view-models/useDriverNavigationViewModel.ts',
     ],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

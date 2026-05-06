@@ -1,9 +1,6 @@
-import type {
-  BgGeofenceEvent,
-  BgLocationEvent,
-} from '@data/services/BackgroundGeolocationClient';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { RideId } from '@domain/entities/RideId';
+import type { BgGeofenceEvent, BgLocationEvent } from '@domain/services';
 
 import { useGpsStore } from '../useGpsStore';
 

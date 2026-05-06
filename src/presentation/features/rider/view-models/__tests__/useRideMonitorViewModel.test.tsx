@@ -1,7 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
-import type { BgGeofenceEvent } from '@data/services/BackgroundGeolocationClient';
 import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
@@ -17,6 +16,7 @@ import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { UserId } from '@domain/entities/UserId';
 import { NetworkError } from '@domain/errors';
+import type { BgGeofenceEvent } from '@domain/services';
 import { useGeofenceUiStore, useGpsStore } from '@presentation/stores';
 import { InMemoryRideRepository, TestContainerProvider } from '@shared/testing';
 

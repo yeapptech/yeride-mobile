@@ -5,14 +5,11 @@ import BackgroundGeolocation from 'react-native-background-geolocation';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { RideId } from '@domain/entities/RideId';
+import type { BgGeofenceEvent, BgLocationEvent } from '@domain/services';
 import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import { FakeCrashReportingService } from '@shared/testing';
 
-import {
-  BackgroundGeolocationClient,
-  type BgGeofenceEvent,
-  type BgLocationEvent,
-} from '../BackgroundGeolocationClient';
+import { BackgroundGeolocationClient } from '../BackgroundGeolocationClient';
 
 /**
  * Type cast for the global SDK mock from jest.setup.ts. The mock exposes

@@ -1,10 +1,9 @@
 import { useNavigation as useSdkNavigation } from '@googlemaps/react-native-navigation-sdk';
 import { useEffect } from 'react';
 
-import type { NavigationSdkClient } from '@data/services/NavigationSdkClient';
+import type { NavigationService } from '@domain/services';
 import { useNavigationSdk } from '@presentation/di';
 import { LOG } from '@shared/logger';
-import type { FakeNavigationSdkClient } from '@shared/testing';
 
 const logger = LOG.extend('NavConnector');
 
@@ -61,11 +60,12 @@ const logger = LOG.extend('NavConnector');
 type SdkNavigationContext = ReturnType<typeof useSdkNavigation>;
 
 /**
- * Type alias covering both the production adapter and the in-memory
- * fake. Same structural pattern as `useGpsLifecycle`'s
- * `GeolocationClient` alias.
+ * Type alias for the navigation seam. The domain interface
+ * `NavigationService` covers both the production adapter
+ * (`NavigationSdkClient`) and the in-memory fake
+ * (`FakeNavigationSdkClient`); both `implements` it.
  */
-type NavSdk = NavigationSdkClient | FakeNavigationSdkClient;
+type NavSdk = NavigationService;
 
 export function useNavigationSdkConnector(): void {
   const navigationSdk: NavSdk = useNavigationSdk();

@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react';
 
-import type {
-  BackgroundGeolocationClient,
-  BgGeofenceEvent,
-  BgLocationEvent,
-} from '@data/services/BackgroundGeolocationClient';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { RideId } from '@domain/entities/RideId';
 import type { UserId } from '@domain/entities/UserId';
 import { UserLocation } from '@domain/entities/UserLocation';
+import type {
+  BackgroundGeolocationService,
+  BgGeofenceEvent,
+  BgLocationEvent,
+} from '@domain/services';
 import { useBackgroundGeolocation } from '@presentation/di';
 // Direct file import (not the queries barrel) to avoid a require cycle:
 // the barrel re-exports `ride.queries.ts`, which imports
@@ -18,7 +18,6 @@ import { useBackgroundGeolocation } from '@presentation/di';
 import { useUpdateLocationMutation } from '@presentation/queries/location.queries';
 import { useGpsStore } from '@presentation/stores';
 import { LOG } from '@shared/logger';
-import type { FakeBackgroundGeolocationClient } from '@shared/testing';
 
 const logger = LOG.extend('GpsLifecycle');
 
@@ -119,12 +118,12 @@ export interface UseGpsLifecycleArgs {
 }
 
 /**
- * Type alias covering both the production adapter and the in-memory
- * fake. Keeps internals from caring which is wired by the Container.
+ * Type alias for the background-geolocation seam. The domain interface
+ * `BackgroundGeolocationService` covers both the production adapter
+ * (`BackgroundGeolocationClient`) and the in-memory fake
+ * (`FakeBackgroundGeolocationClient`); both `implements` it.
  */
-type GeolocationClient =
-  | BackgroundGeolocationClient
-  | FakeBackgroundGeolocationClient;
+type GeolocationClient = BackgroundGeolocationService;
 
 const DISTANCE_FILTER_METERS = 200;
 const PICKUP_GEOFENCE_RADIUS_METERS = 200;

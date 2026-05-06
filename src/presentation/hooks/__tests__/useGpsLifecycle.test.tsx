@@ -1,14 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
-import type {
-  BgGeofenceEvent,
-  BgLocationEvent,
-} from '@data/services/BackgroundGeolocationClient';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { RideId } from '@domain/entities/RideId';
 import { UserId } from '@domain/entities/UserId';
 import { AuthorizationError, NetworkError } from '@domain/errors';
+import type { BgGeofenceEvent, BgLocationEvent } from '@domain/services';
 import { useGpsStore } from '@presentation/stores';
 import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import {

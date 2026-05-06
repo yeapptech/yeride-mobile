@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { Coordinates } from '@domain/entities/Coordinates';
 import type {
   NavArrivalEvent,
-  NavigationSdkClient,
+  NavigationService,
   NavRouteStatus,
   NavSetDestinationsArgs,
   NavWaypoint,
-} from '@data/services/NavigationSdkClient';
-import type { Coordinates } from '@domain/entities/Coordinates';
+} from '@domain/services';
 import { useNavigationSdk } from '@presentation/di';
 import { LOG } from '@shared/logger';
-import type { FakeNavigationSdkClient } from '@shared/testing';
 
 const logger = LOG.extend('DriverNavigationVM');
 
@@ -66,7 +65,7 @@ const logger = LOG.extend('DriverNavigationVM');
  *      down by an earlier `onEndNavigation`, both calls are no-ops).
  */
 
-type NavSdk = NavigationSdkClient | FakeNavigationSdkClient;
+type NavSdk = NavigationService;
 
 export type DriverNavigationVMState =
   | { readonly kind: 'uninitialized' }

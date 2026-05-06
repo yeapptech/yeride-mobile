@@ -1,12 +1,13 @@
+import type { Coordinates } from '@domain/entities/Coordinates';
+import type { RideId } from '@domain/entities/RideId';
+import type { AuthorizationError, NetworkError } from '@domain/errors';
 import type {
+  BackgroundGeolocationService,
   BgGeofenceAction,
   BgGeofenceEvent,
   BgLocationEvent,
   BgPermissionStatus,
-} from '@data/services/BackgroundGeolocationClient';
-import type { Coordinates } from '@domain/entities/Coordinates';
-import type { RideId } from '@domain/entities/RideId';
-import type { AuthorizationError, NetworkError } from '@domain/errors';
+} from '@domain/services';
 import { Result } from '@domain/shared/Result';
 
 /**
@@ -63,7 +64,7 @@ export interface FakeBgSpies {
   readonly requestAuthorizationCalls: number;
 }
 
-export class FakeBackgroundGeolocationClient {
+export class FakeBackgroundGeolocationClient implements BackgroundGeolocationService {
   private initialized = false;
   private enabled = false;
   private odometerMeters = 0;

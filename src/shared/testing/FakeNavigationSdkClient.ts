@@ -1,12 +1,13 @@
+import type { AuthorizationError, NetworkError } from '@domain/errors';
 import type {
   NavArrivalEvent,
   NavigationListenerSetters,
+  NavigationService,
   NavInitError,
   NavRouteStatus,
   NavSetDestinationsArgs,
   NavTermsResult,
-} from '@data/services/NavigationSdkClient';
-import type { AuthorizationError, NetworkError } from '@domain/errors';
+} from '@domain/services';
 import { Result } from '@domain/shared/Result';
 
 /**
@@ -79,7 +80,7 @@ export interface FakeNavigationSdkSpies {
 
 type AnyFakeError = NetworkError | AuthorizationError;
 
-export class FakeNavigationSdkClient {
+export class FakeNavigationSdkClient implements NavigationService {
   private initialized = false;
   private guiding = false;
 

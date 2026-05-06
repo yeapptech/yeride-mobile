@@ -1,11 +1,11 @@
 import { create } from 'zustand';
 
+import type { Coordinates } from '@domain/entities/Coordinates';
 import type {
   BgGeofenceEvent,
   BgLocationEvent,
   BgPermissionStatus,
-} from '@data/services/BackgroundGeolocationClient';
-import type { Coordinates } from '@domain/entities/Coordinates';
+} from '@domain/services';
 
 /**
  * Transient mirror of the SDK's location + geofence streams.

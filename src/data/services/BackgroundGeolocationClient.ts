@@ -7,6 +7,13 @@ import BackgroundGeolocation, {
 import { Coordinates } from '@domain/entities/Coordinates';
 import { RideId } from '@domain/entities/RideId';
 import { AuthorizationError, NetworkError } from '@domain/errors';
+import type {
+  BackgroundGeolocationClientInitArgs,
+  BackgroundGeolocationService,
+  BgGeofenceEvent,
+  BgLocationEvent,
+  BgPermissionStatus,
+} from '@domain/services';
 import { Result } from '@domain/shared/Result';
 import { LOG } from '@shared/logger';
 
@@ -79,63 +86,9 @@ const logger = LOG.extend('BgGeolocation');
  *     the prompt.
  */
 
-/* ───── Types ───── */
-
-/**
- * One delivery from the SDK, normalised to domain values. Speed and
- * odometer are nullable because the SDK reports `-1` / `0` when GPS is
- * indoors or warming up.
- */
-export interface BgLocationEvent {
-  readonly coords: Coordinates;
-  /** Speed in meters per second, or `null` if unavailable. */
-  readonly speed: number | null;
-  /** Cumulative distance traveled this session, in meters. */
-  readonly odometerMeters: number;
-  /** Device system time at recording, as `Date.getTime()` ms. */
-  readonly timestampMs: number;
-  /** True if the SDK reports the device as currently moving. */
-  readonly isMoving: boolean;
-}
-
-export type BgGeofenceAction = 'ENTER' | 'EXIT';
-
-/**
- * One delivery from the SDK's geofence stream. `rideId` is reconstructed
- * from `extras.rideId` set at registration time; `null` if the geofence
- * was registered without rideId metadata or the round-trip dropped it.
- */
-export interface BgGeofenceEvent {
-  readonly identifier: string;
-  readonly action: BgGeofenceAction;
-  readonly rideId: RideId | null;
-  readonly coords: Coordinates | null;
-  readonly timestampMs: number;
-}
-
-/**
- * Authorization level granted by the OS. `'always'` is the goal for
- * background tracking; `'when_in_use'` works only while the app is
- * foregrounded (the geofence pipeline degrades to
- * polled-evaluations-while-foreground in that case). `'denied'` /
- * `'undetermined'` mean the SDK can't fire `onLocation` at all.
- */
-export type BgPermissionStatus =
-  | 'always'
-  | 'when_in_use'
-  | 'denied'
-  | 'undetermined';
-
-export interface BackgroundGeolocationClientInitArgs {
-  /** SDK's `distanceFilter` config — meters between deliveries. Legacy default: 200. */
-  readonly distanceFilter: number;
-  /** Enable verbose SDK logging. Defaults to false (release-safe). */
-  readonly debug?: boolean;
-}
-
 /* ───── Adapter ───── */
 
-export class BackgroundGeolocationClient {
+export class BackgroundGeolocationClient implements BackgroundGeolocationService {
   /**
    * Set on the first successful `init()`. The SDK itself tolerates a
    * second `ready()` call but it returns the cached state without

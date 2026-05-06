@@ -20,3 +20,21 @@ export type {
   PushNotificationService,
 } from './PushNotificationService';
 export type { CrashReportingService } from './CrashReportingService';
+export type {
+  BackgroundGeolocationClientInitArgs,
+  BackgroundGeolocationService,
+  BgGeofenceAction,
+  BgGeofenceEvent,
+  BgLocationEvent,
+  BgPermissionStatus,
+} from './BackgroundGeolocationService';
+export type {
+  NavArrivalEvent,
+  NavigationListenerSetters,
+  NavigationService,
+  NavInitError,
+  NavRouteStatus,
+  NavSetDestinationsArgs,
+  NavTermsResult,
+  NavWaypoint,
+} from './NavigationService';

@@ -1921,6 +1921,47 @@ Strict split, never mix:
 Do not put server-fetched ride data in Zustand. Do not put pure UI
 flags in TanStack Query.
 
+### SDK seams: domain interface + data adapter + fake
+
+Every native-SDK boundary follows the same shape. The interface lives
+in `src/domain/services/`; the real adapter lives in
+`src/data/services/` and `implements` the interface; the in-memory
+fake lives in `src/shared/testing/` and `implements` the same
+interface. `Container.<seam>` is typed as the interface (no
+`Real | Fake` union leakage into presentation). Presentation hooks
+import the interface from `@domain/services` and never reach into the
+data layer for SDK types.
+
+Canonical examples: `CrashReportingService` (Phase 9 turn 3a) and
+`PushNotificationService` (Phase 9 turn 2a). After the seam-promotion
+turn, `BackgroundGeolocationService` and `NavigationService` follow
+the same pattern. The boundaries-rule override list in
+`eslint.config.js` is now a single entry — `container.ts` — because
+nothing in presentation type-imports a data-layer adapter.
+
+When adding a new SDK seam:
+
+1. Define the interface + any domain-shaped types in
+   `src/domain/services/<X>Service.ts`. Re-export from the package
+   barrel `src/domain/services/index.ts`.
+2. Build the in-memory fake first in
+   `src/shared/testing/Fake<X>.ts`. The fake `implements <X>Service`.
+3. Build the real adapter in `src/data/services/<X>Adapter.ts`. The
+   adapter `implements <X>Service` and translates SDK types to the
+   domain shapes at the boundary.
+4. Wire `Container.<x>: <X>Service` in `src/presentation/di/container.ts`
+   with a lazy `require()` for the real adapter. Add a sibling hook
+   `use<X>()` on the ContainerProvider if presentation needs direct
+   access (the alternative is wrapping in a use case).
+5. Add an optional override slot to `TestContainerProvider`.
+
+When the SDK type can't be cleanly translated to a domain primitive
+at the seam (e.g. `setController({controller: NavigationController})`
+on `NavigationService`), accept `unknown` in the interface and narrow
+internally with a cast in the adapter. Keep the SDK type in a private
+field. The cast is one line and well-contained; the alternative
+(SDK type leaking through the interface) defeats the boundary.
+
 ### Status-router pattern for live trip surfaces
 
 Both `RideMonitorScreen` (rider) and `DriverMonitorScreen` (driver) use

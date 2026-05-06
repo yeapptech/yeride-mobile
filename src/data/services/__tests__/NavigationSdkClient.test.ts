@@ -2,14 +2,14 @@
  * @jest-environment node
  */
 import { Coordinates } from '@domain/entities/Coordinates';
+import type {
+  NavArrivalEvent,
+  NavigationListenerSetters,
+} from '@domain/services';
 import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import { FakeCrashReportingService } from '@shared/testing';
 
-import {
-  NavigationSdkClient,
-  type NavArrivalEvent,
-  type NavigationListenerSetters,
-} from '../NavigationSdkClient';
+import { NavigationSdkClient } from '../NavigationSdkClient';
 
 /**
  * Type cast for the global SDK mock from jest.setup.ts. The mock exposes

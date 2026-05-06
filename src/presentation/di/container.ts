@@ -65,12 +65,10 @@ import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@da
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
 import type { FirestoreUserRepository as FirestoreUserRepositoryType } from '@data/repositories/FirestoreUserRepository';
 import type { FirestoreVehicleRepository as FirestoreVehicleRepositoryType } from '@data/repositories/FirestoreVehicleRepository';
-import type { BackgroundGeolocationClient as BackgroundGeolocationClientType } from '@data/services/BackgroundGeolocationClient';
 import type { CloudFunctionsService as CloudFunctionsServiceType } from '@data/services/CloudFunctionsService';
 import type { ExpoNotificationsAdapter as ExpoNotificationsAdapterType } from '@data/services/ExpoNotificationsAdapter';
 import type { FirebaseCrashlyticsAdapter as FirebaseCrashlyticsAdapterType } from '@data/services/FirebaseCrashlyticsAdapter';
 import type { GoogleRoutesService as GoogleRoutesServiceType } from '@data/services/GoogleRoutesService';
-import type { NavigationSdkClient as NavigationSdkClientType } from '@data/services/NavigationSdkClient';
 import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data/services/NhtsaVinDecoderService';
 import type { StripeServerHttpAdapter as StripeServerHttpAdapterType } from '@data/services/StripeServerHttpAdapter';
 import type {
@@ -83,7 +81,9 @@ import type {
   VehicleStorageRepository,
 } from '@domain/repositories';
 import type {
+  BackgroundGeolocationService,
   CrashReportingService,
+  NavigationService,
   PaymentCallableService,
   PushNotificationService,
   RoutesService,
@@ -93,10 +93,8 @@ import type {
 import { getGoogleMapsApiKey, getStripeServerConfig } from '@shared/env';
 import { LOG } from '@shared/logger';
 import type {
-  FakeBackgroundGeolocationClient as FakeBackgroundGeolocationClientType,
   FakeCloudFunctionsService as FakeCloudFunctionsServiceType,
   FakeCrashReportingService as FakeCrashReportingServiceType,
-  FakeNavigationSdkClient as FakeNavigationSdkClientType,
   FakePushNotificationService as FakePushNotificationServiceType,
   FakeRoutesService as FakeRoutesServiceType,
   FakeStripeServerService as FakeStripeServerServiceType,
@@ -239,9 +237,7 @@ export interface Container {
    * Tests inject a `FakeBackgroundGeolocationClient` via
    * `TestContainerProvider`'s optional `bgGeolocation` prop.
    */
-  bgGeolocation:
-    | BackgroundGeolocationClientType
-    | FakeBackgroundGeolocationClientType;
+  bgGeolocation: BackgroundGeolocationService;
   /**
    * Phase 8 turn 1: the Google Navigation SDK seam. Exposed alongside
    * `useCases` and `bgGeolocation` rather than wrapped in a use case
@@ -251,7 +247,7 @@ export interface Container {
    * directly. Tests inject a `FakeNavigationSdkClient` via
    * `TestContainerProvider`'s optional `navigationSdk` prop.
    */
-  navigationSdk: NavigationSdkClientType | FakeNavigationSdkClientType;
+  navigationSdk: NavigationService;
   /**
    * Phase 9 turn 2: the `expo-notifications` SDK seam. Exposed alongside
    * the other SDK seams rather than wrapped in a use case because the
@@ -600,9 +596,9 @@ export function buildContainer(): Container {
  * not exercised under jest because `react-native-background-geolocation`
  * is mocked globally in `jest.setup.ts`.
  */
-function buildBackgroundGeolocationClient(): BackgroundGeolocationClientType {
+function buildBackgroundGeolocationClient(): BackgroundGeolocationService {
   const dataBg = require('@data/services/BackgroundGeolocationClient') as {
-    BackgroundGeolocationClient: new () => BackgroundGeolocationClientType;
+    BackgroundGeolocationClient: new () => BackgroundGeolocationService;
   };
   return new dataBg.BackgroundGeolocationClient();
 }
@@ -622,9 +618,9 @@ function buildBackgroundGeolocationClient(): BackgroundGeolocationClientType {
  * exercised under jest because `@googlemaps/react-native-navigation-sdk`
  * is mocked globally in `jest.setup.ts`.
  */
-function buildNavigationSdkClient(): NavigationSdkClientType {
+function buildNavigationSdkClient(): NavigationService {
   const dataNav = require('@data/services/NavigationSdkClient') as {
-    NavigationSdkClient: new () => NavigationSdkClientType;
+    NavigationSdkClient: new () => NavigationService;
   };
   return new dataNav.NavigationSdkClient();
 }

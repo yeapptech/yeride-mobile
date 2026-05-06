@@ -3,13 +3,12 @@ import { AppState, type AppStateStatus } from 'react-native';
 import Toast from 'react-native-toast-message';
 
 import type {
-  BackgroundGeolocationClient,
+  BackgroundGeolocationService,
   BgPermissionStatus,
-} from '@data/services/BackgroundGeolocationClient';
+} from '@domain/services';
 import { useBackgroundGeolocation } from '@presentation/di';
 import { useGpsStore } from '@presentation/stores';
 import { LOG } from '@shared/logger';
-import type { FakeBackgroundGeolocationClient } from '@shared/testing';
 
 const logger = LOG.extend('PermissionRefresh');
 
@@ -71,9 +70,7 @@ const logger = LOG.extend('PermissionRefresh');
  *     the start.
  */
 
-type GeolocationClient =
-  | BackgroundGeolocationClient
-  | FakeBackgroundGeolocationClient;
+type GeolocationClient = BackgroundGeolocationService;
 
 export interface UsePermissionRefreshArgs {
   /**

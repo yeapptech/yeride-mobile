@@ -10,6 +10,16 @@ import {
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { AuthorizationError, NetworkError } from '@domain/errors';
+import type {
+  NavArrivalEvent,
+  NavInitError,
+  NavigationListenerSetters,
+  NavigationService,
+  NavRouteStatus,
+  NavSetDestinationsArgs,
+  NavTermsResult,
+  NavWaypoint,
+} from '@domain/services';
 import { Result } from '@domain/shared/Result';
 import { LOG } from '@shared/logger';
 
@@ -69,87 +79,23 @@ const logger = LOG.extend('NavigationSdk');
  *   on iOS/Android boundary transitions.
  */
 
-/* ───── Domain-shaped types exported to the rest of the codebase ───── */
-
-/**
- * Mapped from the SDK's `RouteStatus` enum (string values like 'OK',
- * 'NO_ROUTE_FOUND', 'NETWORK_ERROR', …). Kept as a string-tagged union
- * so callers can branch on each case without importing the SDK enum.
- */
-export type NavRouteStatus =
-  | 'ok'
-  | 'no_route_found'
-  | 'network_error'
-  | 'quota_check_failed'
-  | 'route_canceled'
-  | 'location_disabled'
-  | 'location_unknown'
-  | 'waypoint_error'
-  | 'invalid_place_id'
-  | 'duplicate_waypoints_error'
-  | 'unknown';
-
-/**
- * One-shot result of `init()`. Successful init resolves
- * `Result.ok(true)`; non-OK SDK statuses get mapped to
- * `AuthorizationError` (terms / API key / permission) or `NetworkError`
- * (transport).
- */
-export type NavInitError = AuthorizationError | NetworkError;
-
-/**
- * The arrival event domain shape. Coordinates are derived from the
- * waypoint's `position` if present, else `null` (SDK allows place-id-
- * only waypoints).
- */
-export interface NavArrivalEvent {
-  readonly title: string | null;
-  readonly coords: Coordinates | null;
-  readonly placeId: string | null;
-  readonly isFinalDestination: boolean;
-  /** Adapter-stamped event time; the SDK doesn't surface a server timestamp. */
-  readonly timestampMs: number;
-}
-
-/**
- * Domain shape of a single waypoint for `setDestinations`. Either
- * `placeId` or `coords` must be provided (matches the SDK's `Waypoint`
- * shape but in domain primitives).
- */
-export interface NavWaypoint {
-  readonly title?: string;
-  readonly coords?: Coordinates;
-  readonly placeId?: string;
-  /** Forwarded to the SDK; defaults to right-side-of-road bias on Android. */
-  readonly preferSameSideOfRoad?: boolean;
-}
-
-/**
- * Args to `setDestinations`. `routeToken` (rider-selected route from the
- * Routes API) wins over `routingOptions` when both are provided —
- * matches the SDK's `routeTokenOptions` vs. `routingOptions` mutual
- * exclusion.
- */
-export interface NavSetDestinationsArgs {
-  readonly waypoints: readonly NavWaypoint[];
-  readonly routeToken?: string;
-  readonly avoidTolls?: boolean;
-  readonly avoidFerries?: boolean;
-  readonly avoidHighways?: boolean;
-}
-
-export interface NavTermsResult {
-  readonly accepted: boolean;
-}
-
-/** The subset of `NavigationListenerSetters` the adapter needs. */
-export interface NavigationListenerSetters {
-  setOnArrival: (callback: ((event: SdkArrivalEvent) => void) | null) => void;
-}
-
 /* ───── Adapter ───── */
 
-export class NavigationSdkClient {
+/**
+ * Internal SDK-typed counterpart to the domain
+ * `NavigationListenerSetters` (which uses `(event: unknown) => void`
+ * for the callback so the domain layer doesn't import SDK types).
+ *
+ * The adapter narrows the listener bag passed via `setController` to
+ * this shape so internal calls like `this.listeners.setOnArrival(this.handleArrival)`
+ * typecheck cleanly against the SDK's `SdkArrivalEvent` callback
+ * signature.
+ */
+type SdkNavigationListenerSetters = {
+  setOnArrival: (callback: ((event: SdkArrivalEvent) => void) | null) => void;
+};
+
+export class NavigationSdkClient implements NavigationService {
   /**
    * The currently-connected SDK controller, set by `setController`. Null
    * when no `<NavigationProvider/>`-rooted component is mounted (i.e. the
@@ -158,12 +104,14 @@ export class NavigationSdkClient {
   private controller: NavigationController | null = null;
 
   /**
-   * The subset of `NavigationListenerSetters` we register listeners
+   * The subset of the SDK's listener-setters bag we register listeners
    * against. Held alongside the controller so we can re-apply the
    * underlying SDK listener if the controller changes mid-subscription
-   * (e.g. React re-render).
+   * (e.g. React re-render). Typed with the SDK-narrow shape (not the
+   * domain `NavigationListenerSetters`) so internal calls keep their
+   * `SdkArrivalEvent` type info.
    */
-  private listeners: NavigationListenerSetters | null = null;
+  private listeners: SdkNavigationListenerSetters | null = null;
 
   /** Multi-subscriber facade over the SDK's single-slot setOnArrival. */
   private arrivalCallbacks = new Set<(event: NavArrivalEvent) => void>();
@@ -184,23 +132,31 @@ export class NavigationSdkClient {
    * is re-applied to the new controller.
    */
   setController(args: {
-    controller: NavigationController | null;
+    controller: unknown;
     listeners: NavigationListenerSetters | null;
   }): void {
+    // Narrow the domain-relaxed types to the SDK shapes the adapter
+    // works against internally. The connector hook
+    // (`useNavigationSdkConnector`) pushes the SDK's
+    // `useNavigation()` return value through here verbatim, so
+    // structurally these casts are exact.
+    const newController = args.controller as NavigationController | null;
+    const newListeners = args.listeners as SdkNavigationListenerSetters | null;
+
     // Clear the SDK listener on the OLD controller before swapping —
     // otherwise the old controller will keep firing into our handler if
     // the SDK retains the reference.
     if (
       this.sdkArrivalListenerActive &&
       this.listeners &&
-      this.listeners !== args.listeners
+      this.listeners !== newListeners
     ) {
       this.listeners.setOnArrival(null);
       this.sdkArrivalListenerActive = false;
     }
 
-    this.controller = args.controller;
-    this.listeners = args.listeners;
+    this.controller = newController;
+    this.listeners = newListeners;
 
     // Re-register on the new listener bag if we still have subscribers.
     if (
