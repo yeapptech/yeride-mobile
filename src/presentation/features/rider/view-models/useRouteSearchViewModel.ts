@@ -1,7 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
-import Constants from 'expo-constants';
 import { useCallback, useMemo } from 'react';
-import { Platform } from 'react-native';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Endpoint } from '@domain/entities/Endpoint';
@@ -12,6 +10,7 @@ import {
   useTripDraftPickup,
   useTripDraftStore,
 } from '@presentation/stores';
+import { getGoogleMapsApiKey } from '@shared/env';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RouteSearchVM');
@@ -88,7 +87,7 @@ export function useRouteSearchViewModel(): UseRouteSearchViewModel {
   const activeArea = useActiveServiceArea();
   const navigation = useNavigation<RiderStackNavigation>();
 
-  const apiKey = useMemo(() => getMapsApiKey(), []);
+  const apiKey = useMemo(() => getGoogleMapsApiKey() ?? '', []);
   const isApiKeyMissing = apiKey.length === 0;
 
   const autocompleteQuery = useMemo(() => {
@@ -186,22 +185,4 @@ function predictionToEndpoint(
     directions: null,
   });
   return r.ok ? r.value : null;
-}
-
-/**
- * Read the platform-appropriate Google Maps API key from
- * `Constants.expoConfig.extra` (set by `app.config.ts`). Falls back to
- * empty string so the UI can render a "key missing" banner instead of
- * crashing.
- */
-function getMapsApiKey(): string {
-  const extra = (Constants.expoConfig?.extra ?? {}) as {
-    googleMapsApiKeyAndroid?: string | null;
-    googleMapsApiKeyIos?: string | null;
-  };
-  const key =
-    Platform.OS === 'ios'
-      ? extra.googleMapsApiKeyIos
-      : extra.googleMapsApiKeyAndroid;
-  return key ?? '';
 }
