@@ -79,6 +79,23 @@ const logger = LOG.extend('EarningsVM');
  *
  * Authorization is enforced by the underlying use cases — the VM doesn't
  * pre-check.
+ *
+ * **SDK seam status.** This VM imports `expo-web-browser` directly
+ * (the dashboard-open call at `WebBrowser.openBrowserAsync`; the
+ * onboarding-launch call lives in the sibling
+ * `useStripeConnectOnboarding` hook, which is also covered by this
+ * note). Qualifies for the single-call SDK escape hatch (CLAUDE.md
+ * § "Single-call SDK escape hatch"): (a) one-shot call per tap to
+ * open the Express dashboard or the auth session, no listener
+ * stream, (b) no permissions involved at all, (c) `expo-web-browser`
+ * mocks cleanly in Jest via `jest.mock('expo-web-browser', ...)`.
+ * The `AppState` listener and `useFocusEffect` in this VM exist for
+ * refresh-trigger purposes (re-poll Connect status after a browser
+ * session closes), not for SDK lifecycle management — so condition
+ * (b)'s "no permission state to mirror" still holds. If a future
+ * change introduces a continuous browser-session listener (e.g.
+ * mid-session URL hooks) or a mirrored consent state that drives a
+ * UI banner, promote to a `SystemBrowserService` domain interface.
  */
 
 export type DriverEarningsState =

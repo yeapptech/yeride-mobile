@@ -81,6 +81,21 @@ const logger = LOG.extend('ReceiptPdf');
  *     fired (i.e. when the failure is in the `sharing_unavailable`
  *     or `unknown`-from-shareAsync branch); a
  *     `pdf_generation_failed` error has no temp file to clean up.
+ *
+ * **SDK seam status.** This VM imports `expo-print`, `expo-sharing`,
+ * and `expo-file-system` directly rather than through a domain
+ * interface. Qualifies for the single-call SDK escape hatch
+ * (CLAUDE.md § "Single-call SDK escape hatch"): (a) the entire flow
+ * is one-shot per tap with no listener stream, (b) no permission
+ * state — `Print.printToFileAsync` needs none,
+ * `Sharing.isAvailableAsync` is a one-shot capability probe rather
+ * than a lifecycle, and `expo-file-system`'s `File.delete()` is
+ * best-effort cleanup, (c) all three SDKs export module-level
+ * functions that mock cleanly in Jest via `jest.mock('expo-print',
+ * ...)` etc. If a future change introduces a continuous listener
+ * (e.g. share-completion callbacks the rider sees on a banner) or
+ * a mirrored permission state, promote to a `PdfGenerationService`
+ * domain interface.
  */
 
 export type ReceiptPdfErrorKind =

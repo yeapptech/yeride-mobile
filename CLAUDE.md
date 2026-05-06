@@ -1962,6 +1962,47 @@ internally with a cast in the adapter. Keep the SDK type in a private
 field. The cast is one line and well-contained; the alternative
 (SDK type leaking through the interface) defeats the boundary.
 
+### Single-call SDK escape hatch
+
+Not every SDK that a view-model touches needs an interface in
+`@domain/services`. View-models may import an SDK directly when all
+three conditions hold:
+
+- **(a) one-shot call with no listener stream.** The view-model
+  invokes the SDK in response to a single user action (a tap, a
+  picker-cancel, an `Alert.alert` confirmation) and the call resolves
+  to a single `Promise<Result>`. No `subscribeTo*` / `addListener`
+  surface to manage.
+- **(b) no permission state to mirror.** A one-shot
+  `request*PermissionsAsync()` per tap is fine. What's not fine is
+  continuous permission status tracked in a Zustand store, surfaced
+  via an `AppState 'change' → 'active'` listener, or driving a UI
+  banner — that's lifecycle, and it goes through a domain interface.
+- **(c) trivially mockable in Jest.** The SDK exports module-level
+  functions that `jest.mock('<package-path>', () => ({ ... }))`
+  substitutes cleanly, with no React-context provider, no native-
+  module bridge, and no construction shape to mirror.
+
+Qualifying today (Phase 9 Turn 18 audit): `expo-print` +
+`expo-sharing` + `expo-file-system` in `useGenerateReceiptPdfViewModel`
+(tap → Share receipt); `expo-image-picker` in
+`useVehiclePhotosViewModel` (tap-tile → request permission → pick →
+upload); `expo-web-browser` in `useDriverEarningsViewModel` and
+`useStripeConnectOnboarding` (tap → open auth session). Any of
+(a)/(b)/(c) flipping false moves the SDK back into the seamed
+pattern. Counter-examples that don't qualify and are correctly
+seamed: `BackgroundGeolocationClient` (continuous location +
+geofence streams; permission lifecycle), `NavigationSdkClient`
+(continuous arrival stream; SDK-context-provider construction),
+`ExpoNotificationsAdapter` (continuous notification-response
+listener; permission lifecycle), `FirebaseCrashlyticsAdapter`
+(boot-time setup + runtime collection toggle; lazy-cached
+singleton), RNFirebase Auth/Firestore/Storage/Functions (continuous
+subscription streams; cross-cutting). When an SDK escapes via this
+hatch, add a JSDoc note on the consuming VM naming which condition
+lets it skip the seam, so a future reader doesn't waste time
+wondering why this VM dodged the rule that Turn 17 tightened.
+
 ### Status-router pattern for live trip surfaces
 
 Both `RideMonitorScreen` (rider) and `DriverMonitorScreen` (driver) use

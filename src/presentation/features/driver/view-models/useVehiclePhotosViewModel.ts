@@ -52,6 +52,20 @@ const logger = LOG.extend('VehiclePhotosVM');
  * Ownership and authorization are enforced by `UploadVehiclePhotos`
  * itself — the VM doesn't pre-check. An `AuthorizationError` from a
  * mismatched VIN/owner surfaces as a tile error.
+ *
+ * **SDK seam status.** This VM imports `expo-image-picker` directly
+ * rather than through a domain interface. Qualifies for the
+ * single-call SDK escape hatch (CLAUDE.md § "Single-call SDK escape
+ * hatch"): (a) one-shot call per tile tap, no listener stream —
+ * `requestMediaLibraryPermissionsAsync` and `launchImageLibraryAsync`
+ * are both promise-resolving one-shots, (b) no permission state to
+ * mirror — denial surfaces as a tile error and the user re-taps to
+ * retry; there's no Zustand store, no AppState listener, and no UI
+ * banner outside the tile, (c) `expo-image-picker` mocks cleanly in
+ * Jest via `jest.mock('expo-image-picker', ...)`. If a future change
+ * adds camera-fallback UX with continuous capture state, or a
+ * permission banner that mirrors permanent-deny status, promote to
+ * a `MediaPickerService` domain interface.
  */
 
 export type VehiclePhotoTileState =
