@@ -148,12 +148,17 @@ describe('BackgroundGeolocationClient', () => {
 
       expect(result.ok).toBe(true);
       expect(sdk.ready).toHaveBeenCalledTimes(1);
+      // v5.x compound config: settings are grouped under
+      // `geolocation` / `app` / `activity` / `logger` / `persistence`
+      // sub-objects rather than at the top level. `reset` stays top-level.
       const passed = sdk.ready.mock.calls[0]?.[0] as Record<string, unknown>;
+      const geo = passed['geolocation'] as Record<string, unknown>;
+      const app = passed['app'] as Record<string, unknown>;
       expect(passed['reset']).toBe(true);
-      expect(passed['distanceFilter']).toBe(200);
-      expect(passed['stopOnTerminate']).toBe(true);
-      expect(passed['startOnBoot']).toBe(false);
-      expect(passed['locationAuthorizationRequest']).toBe('Always');
+      expect(geo['distanceFilter']).toBe(200);
+      expect(geo['locationAuthorizationRequest']).toBe('Always');
+      expect(app['stopOnTerminate']).toBe(true);
+      expect(app['startOnBoot']).toBe(false);
     });
 
     it('is idempotent — second init is a no-op', async () => {
