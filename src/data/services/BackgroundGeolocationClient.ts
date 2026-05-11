@@ -1,3 +1,17 @@
+// v5.x packaging quirk: `react-native-background-geolocation/src/index.d.ts`
+// has `export * from '@transistorsoft/background-geolocation-types'` but
+// the sibling `src/index.js` does NOT mirror that re-export — its only
+// runtime export is the default class. Named imports for the enums
+// (`DesiredAccuracy`, `LogLevel`, `AuthorizationStatus`) come back
+// `undefined` on a device, even though TypeScript sees them as exported.
+// Source from the types package directly (already a transitive dep of
+// the SDK; its `dist/index.js` emits real `__exportStar` runtime values
+// for each enum). Switch back to the SDK if/when their packaging is fixed.
+import {
+  AuthorizationStatus,
+  DesiredAccuracy,
+  LogLevel,
+} from '@transistorsoft/background-geolocation-types';
 import BackgroundGeolocation, {
   type GeofenceEvent as SdkGeofenceEvent,
   type Location as SdkLocation,
@@ -118,39 +132,102 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
       logger.info('init: already initialized — no-op');
       return Result.ok(true);
     }
+    // 2026-05-07 — Android-emulator workaround, v2.
+    //
+    // Background:
+    //   v4.19.4's `rapidActivityLaunch` kill loop is gone in v5 (the
+    //   v5.0.2 SDK changelog refactored Android Activity-lifecycle
+    //   management to be SDK-internal). HOWEVER, v5 ships
+    //   `tslocationmanager:4.1.5` which has a SEPARATE regression:
+    //   `buildLocationRequest` passes the SDK's internal
+    //   `DesiredAccuracy` sentinel (`-1` for `High`) directly to GMS's
+    //   `LocationRequest.setPriority()` instead of translating it into
+    //   `Priority.PRIORITY_HIGH_ACCURACY` (100). On
+    //   `play-services-location:21.x`, `setPriority` strictly validates
+    //   and throws `IllegalArgumentException: priority -1 must be a
+    //   Priority.PRIORITY_* constant` from `TSLocationManagerActivity.onCreate`,
+    //   killing the app the first time `start()` triggers a settings refine.
+    //
+    //   We attempted three workarounds: (1) `ext { tslocationmanagerVersion =
+    //   "4.1.4" }` — Gradle still resolved 4.1.5; (2) `subprojects {
+    //   configurations.all { resolutionStrategy.force ... } }` — same
+    //   outcome; (3) directly patching the SDK's own android/build.gradle
+    //   to hard-code `'4.1.4'` — STILL resolved 4.1.5 in the merged-
+    //   manifest report. Something in the Expo SDK 55 build graph
+    //   (likely `expoAutolinking.useExpoVersionCatalog()`) overrides
+    //   our pin in a way we couldn't reach. File an issue with
+    //   Transistor about the 4.1.5 priority-translation regression.
+    //
+    // Mitigation: skip native init in __DEV__. The kill loop's gone
+    // (real win from v5), but `start()` would still crash on the
+    // priority bug if the SDK actually initialized. Production
+    // builds — different keystore + obfuscation map — should be
+    // tested on a real device; if 4.1.5 ships there too, escalate.
+    //
+    // To re-enable real init for testing on a real device: comment
+    // out the early-return below.
+    if (__DEV__) {
+      this.initialized = true;
+      logger.warn(
+        'init: skipping native init in __DEV__ (Android emulator ' +
+          'tslocationmanager:4.1.5 setPriority(-1) crash workaround). ' +
+          'GPS/geofence features disabled until tested on a real device.',
+      );
+      return Result.ok(true);
+    }
     try {
+      // v5.x: SDK migrated from flat-config to compound-config (groups
+      // related options under geolocation/app/activity/logger/persistence
+      // sub-objects). Flat config is still accepted at runtime for
+      // backward compat but only the compound shape is in the TS type
+      // defs. See help/MIGRATION-GUIDE-5.0.0.md.
       await BackgroundGeolocation.ready({
         // Force re-apply config on every launch. Without this, persisted
         // config from a prior install can mask `stopOnTerminate: true` —
         // legacy gpsLocation.js comment.
         reset: true,
-        // Geolocation
-        desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
-        distanceFilter: args.distanceFilter,
-        // Activity recognition: how long the SDK waits before declaring the
-        // device stationary (5s = legacy default).
-        stopTimeout: 5,
-        // Application
-        locationAuthorizationRequest: 'Always',
-        backgroundPermissionRationale: {
-          title:
-            'Allow YeRide Next to access your location even when the app is in the background.',
-          message:
-            'YeRide Next uses location data to track trips, estimate arrival times, and calculate distances traveled. This data is required for the trip-tracking and pickup-area features.',
-          positiveAction: 'Enable "{backgroundPermissionOptionLabel}"',
-          negativeAction: 'Cancel',
+        geolocation: {
+          desiredAccuracy: DesiredAccuracy.High,
+          distanceFilter: args.distanceFilter,
+          // How long the SDK waits before declaring the device stationary
+          // (5s = legacy default).
+          stopTimeout: 5,
+          locationAuthorizationRequest: 'Always',
         },
-        debug: args.debug ?? false,
-        logLevel: args.debug
-          ? BackgroundGeolocation.LOG_LEVEL_VERBOSE
-          : BackgroundGeolocation.LOG_LEVEL_ERROR,
-        // Storage
-        locationsOrderDirection: 'DESC',
-        maxDaysToPersist: 14,
-        // CRITICAL: stop tracking when the user force-quits the app, and
-        // do NOT auto-start on device boot. Matches legacy contract.
-        stopOnTerminate: true,
-        startOnBoot: false,
+        activity: {
+          // Disable the SDK's internal MotionActivityCheck loop. On the
+          // Android emulator (no real GPS hardware) this loop is what
+          // drives the worst-case TSLocationManagerActivity launch rate;
+          // disabling it cuts the rate ~8× (32/s → 4/s) — still enough
+          // to trip rapidActivityLaunch eventually, but worth keeping
+          // because the rate without these flags is dramatically worse.
+          // Re-enable at trip-start time via `changePace(true)` if
+          // motion-activity classification is needed (we don't use it).
+          disableMotionActivityUpdates: true,
+          disableStopDetection: true,
+        },
+        app: {
+          backgroundPermissionRationale: {
+            title:
+              'Allow YeRide Next to access your location even when the app is in the background.',
+            message:
+              'YeRide Next uses location data to track trips, estimate arrival times, and calculate distances traveled. This data is required for the trip-tracking and pickup-area features.',
+            positiveAction: 'Enable "{backgroundPermissionOptionLabel}"',
+            negativeAction: 'Cancel',
+          },
+          // CRITICAL: stop tracking when the user force-quits the app, and
+          // do NOT auto-start on device boot. Matches legacy contract.
+          stopOnTerminate: true,
+          startOnBoot: false,
+        },
+        logger: {
+          debug: args.debug ?? false,
+          logLevel: args.debug ? LogLevel.Verbose : LogLevel.Error,
+        },
+        persistence: {
+          locationsOrderDirection: 'DESC',
+          maxDaysToPersist: 14,
+        },
       });
       this.initialized = true;
       logger.info('init: SDK ready');
@@ -168,6 +245,7 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async start(): Promise<Result<true, NetworkError>> {
+    if (__DEV__) return Result.ok(true);
     try {
       const state = (await BackgroundGeolocation.getState()) as SdkState;
       if (state.enabled) {
@@ -190,6 +268,7 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async stop(): Promise<Result<true, NetworkError>> {
+    if (__DEV__) return Result.ok(true);
     try {
       await BackgroundGeolocation.stop();
       this.lastLocationKey = null;
@@ -213,6 +292,7 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
     radiusMeters: number;
     rideId: RideId;
   }): Promise<Result<true, NetworkError>> {
+    if (__DEV__) return Result.ok(true);
     try {
       await BackgroundGeolocation.addGeofence({
         identifier: 'pickup',
@@ -242,6 +322,7 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async removePickupGeofence(): Promise<Result<true, NetworkError>> {
+    if (__DEV__) return Result.ok(true);
     try {
       await BackgroundGeolocation.removeGeofence('pickup');
       logger.info('removePickupGeofence: removed');
@@ -259,6 +340,7 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async removeAllGeofences(): Promise<Result<true, NetworkError>> {
+    if (__DEV__) return Result.ok(true);
     try {
       await BackgroundGeolocation.removeGeofences();
       logger.info('removeAllGeofences: cleared');
@@ -286,6 +368,15 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
    * the void.
    */
   subscribeToLocation(callback: (event: BgLocationEvent) => void): () => void {
+    if (__DEV__) {
+      // No-op in dev — SDK is not initialized. Track the callback so the
+      // disposer contract still holds, but never wire it to a real SDK
+      // listener.
+      this.locationCallbacks.add(callback);
+      return () => {
+        this.locationCallbacks.delete(callback);
+      };
+    }
     this.locationCallbacks.add(callback);
     if (!this.locationSubscription) {
       this.locationSubscription = BackgroundGeolocation.onLocation(
@@ -334,6 +425,12 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
    * the same `'pickup'` identifier still fan out their first fire each.
    */
   subscribeToGeofence(callback: (event: BgGeofenceEvent) => void): () => void {
+    if (__DEV__) {
+      this.geofenceCallbacks.add(callback);
+      return () => {
+        this.geofenceCallbacks.delete(callback);
+      };
+    }
     this.geofenceCallbacks.add(callback);
     if (!this.geofenceSubscription) {
       this.geofenceSubscription = BackgroundGeolocation.onGeofence(
@@ -395,6 +492,7 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   async requestAuthorizationIfNeeded(): Promise<
     Result<BgPermissionStatus, AuthorizationError>
   > {
+    if (__DEV__) return Result.ok('always');
     try {
       const status = await BackgroundGeolocation.requestPermission();
       return Result.ok(this.mapAuthorizationStatus(status));
@@ -427,7 +525,9 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
         this.geofenceSubscription.remove();
         this.geofenceSubscription = null;
       }
-      await BackgroundGeolocation.removeAllListeners();
+      // v5.x: `removeAllListeners` is a runtime alias that calls
+      // `removeListeners`, but only `removeListeners` is in the type defs.
+      await BackgroundGeolocation.removeListeners();
     } catch (e) {
       // stays warn — best-effort cleanup. The next session's adapter
       // instance is fresh, so listener leakage doesn't carry forward;
@@ -441,7 +541,14 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
 
   private handleLocation(loc: SdkLocation): void {
     const { coords } = loc;
-    const ts = Date.parse(loc.timestamp);
+    // v5.x: `loc.timestamp` is `string | number` in the type defs (new
+    // `PersistenceConfig.timestampFormat: 'epoch'` option). We never set
+    // that option so we always receive ISO-8601 strings, but narrow
+    // defensively in case the SDK or a future config flips the shape.
+    const ts =
+      typeof loc.timestamp === 'number'
+        ? loc.timestamp
+        : Date.parse(loc.timestamp);
     const key = `${coords.latitude},${coords.longitude},${String(ts)},${String(loc.odometer)}`;
     if (key === this.lastLocationKey) return;
     this.lastLocationKey = key;
@@ -511,7 +618,12 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
     if (key === this.lastGeofenceKey) return;
     this.lastGeofenceKey = key;
 
-    const ts = Date.parse(geo.timestamp);
+    // v5.x: same narrowing as `handleLocation` — `geo.timestamp` is
+    // `string | number` in the type defs.
+    const ts =
+      typeof geo.timestamp === 'number'
+        ? geo.timestamp
+        : Date.parse(geo.timestamp);
     let coords: Coordinates | null = null;
     if (geo.location?.coords) {
       const c = Coordinates.create(
@@ -541,15 +653,18 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   private mapAuthorizationStatus(status: number): BgPermissionStatus {
-    if (status === BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS) {
+    // v5.x: compound enum `AuthorizationStatus` replaces the legacy
+    // `AUTHORIZATION_STATUS_*` flat constants in the type defs (the
+    // flat names still exist as runtime aliases on the default export).
+    if (status === AuthorizationStatus.Always) {
       return 'always';
     }
-    if (status === BackgroundGeolocation.AUTHORIZATION_STATUS_WHEN_IN_USE) {
+    if (status === AuthorizationStatus.WhenInUse) {
       return 'when_in_use';
     }
     if (
-      status === BackgroundGeolocation.AUTHORIZATION_STATUS_DENIED ||
-      status === BackgroundGeolocation.AUTHORIZATION_STATUS_RESTRICTED
+      status === AuthorizationStatus.Denied ||
+      status === AuthorizationStatus.Restricted
     ) {
       return 'denied';
     }

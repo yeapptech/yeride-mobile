@@ -221,6 +221,14 @@ jest.mock('react-native-background-geolocation', () => ({
   __esModule: true,
   default: mockBg,
 }));
+// Note: `@transistorsoft/background-geolocation-types` (the runtime
+// home of `DesiredAccuracy` / `LogLevel` / `AuthorizationStatus` —
+// the SDK's `index.d.ts` claims to re-export them but `src/index.js`
+// doesn't actually emit them, so the adapter imports from the types
+// package directly) is intentionally NOT mocked. Its `dist/index.js`
+// is plain CommonJS that loads cleanly in jest's node env, and the
+// real enum values match what the runtime delivers — closer-to-prod
+// than a hand-rolled mock would be.
 
 // @googlemaps/react-native-navigation-sdk (Phase 8 turn 1): the SDK's
 // React-tied surface (`useNavigationController` + `<NavigationView/>` +

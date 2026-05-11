@@ -386,10 +386,22 @@ function withNavigationSdkPodfile(config) {
  *      pause transaction from cratering on a transient Nav-SDK
  *      delegate state.
  *
- * Both patches are idempotent — they check for the patched-state string
- * presence before applying. `expo prebuild --clean` does NOT clear
- * node_modules, so a re-prebuild won't re-apply if the file is already
- * patched, which is the desired behaviour.
+ *   3. Wrap the `MapView.this.onResume()` call in `onResume(LifecycleOwner)`
+ *      with the same NPE swallow. Sibling generated method
+ *      (`libraries.navigation.internal.agf.df.aD`) fires on the resume
+ *      path — symptoms identical to (2) but on background→foreground,
+ *      permission-dialog dismissal, screen-unlock, etc. Legacy yeride
+ *      surfaced only the pause path; the rewrite catches the resume
+ *      path on first idle DriverHome → background → foreground (the
+ *      BackgroundGeolocation Always-permission system dialog drives
+ *      MainActivity through pause/resume within ~60s of boot on real
+ *      devices). The observer's bookkeeping (`paused = false`,
+ *      `setMyLocationEnabled`, `setLocationSource`) still runs.
+ *
+ * All three patches are idempotent — they check for the patched-state
+ * string presence before applying. `expo prebuild --clean` does NOT
+ * clear node_modules, so a re-prebuild won't re-apply if the file is
+ * already patched, which is the desired behaviour.
  */
 function withNavigationSdkRnMapsPatches(config) {
   return withDangerousMod(config, [
@@ -453,10 +465,140 @@ function withNavigationSdkRnMapsPatches(config) {
       if (
         content.includes(pauseObserverOriginal) &&
         !content.includes(
-          'catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
+          '                try { MapView.this.onPause(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
         )
       ) {
         content = content.replace(pauseObserverOriginal, pauseObserverPatched);
+        changed = true;
+      }
+
+      // 3a. `onStart(LifecycleOwner)` NPE swallow — defensive. Same
+      //    family of NPE can fire on `super.onStart()` during the same
+      //    background→foreground transition as onResume. The activity
+      //    moves CREATED → STARTED → RESUMED, calling onStart before
+      //    onResume. If onStart NPEs, we never reach onResume.
+      const startObserverOriginal =
+        '    public void onStart(LifecycleOwner owner) {\n' +
+        '        super.onStart();\n' +
+        '    }';
+      const startObserverPatched =
+        '    public void onStart(LifecycleOwner owner) {\n' +
+        '        try { super.onStart(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }\n' +
+        '    }';
+      if (
+        content.includes(startObserverOriginal) &&
+        !content.includes(
+          'try { super.onStart(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
+        )
+      ) {
+        content = content.replace(startObserverOriginal, startObserverPatched);
+        changed = true;
+      }
+
+      // 3b. `onStop(LifecycleOwner)` NPE swallow — defensive. Sibling
+      //    of onStart on the foreground→background transition.
+      const stopObserverOriginal =
+        '    public void onStop(LifecycleOwner owner) {\n' +
+        '        super.onStop();\n' +
+        '    }';
+      const stopObserverPatched =
+        '    public void onStop(LifecycleOwner owner) {\n' +
+        '        try { super.onStop(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }\n' +
+        '    }';
+      if (
+        content.includes(stopObserverOriginal) &&
+        !content.includes(
+          'try { super.onStop(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
+        )
+      ) {
+        content = content.replace(stopObserverOriginal, stopObserverPatched);
+        changed = true;
+      }
+
+      // 3c. `onDestroy(LifecycleOwner)` NPE swallow — defensive. The
+      //    `doDestroy()` call dispatches to the gms MapView's destroy
+      //    path, which the Nav SDK can NPE through.
+      const destroyObserverOriginal =
+        '    public void onDestroy(LifecycleOwner owner) {\n' +
+        '        MapView.this.doDestroy();\n' +
+        '    }';
+      const destroyObserverPatched =
+        '    public void onDestroy(LifecycleOwner owner) {\n' +
+        '        try { MapView.this.doDestroy(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }\n' +
+        '    }';
+      if (
+        content.includes(destroyObserverOriginal) &&
+        !content.includes(
+          'try { MapView.this.doDestroy(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
+        )
+      ) {
+        content = content.replace(
+          destroyObserverOriginal,
+          destroyObserverPatched,
+        );
+        changed = true;
+      }
+
+      // 4. `onResume(LifecycleOwner)` NPE swallow — symmetric to (2).
+      //    Same family of NPE
+      //    (`com.google.android.libraries.navigation.internal.agf.df.aD()`
+      //    — sibling generated method to the `aE()` that fires on the
+      //    pause path). Triggered by background→foreground transitions,
+      //    OS permission dialog dismissals, screen-lock unlocks, anything
+      //    that drives the Activity through an `onResume` cycle while the
+      //    Nav SDK has rewired `com.google.android.gms.maps.MapView`'s
+      //    delegate. Legacy yeride didn't surface this path because its
+      //    integration testing focused on the image-picker pause flow;
+      //    the rewrite hits it on first idle DriverHome → background →
+      //    foreground (within ~60s on real devices, when BackgroundGeolocation
+      //    requests Always-permission and the system dialog pauses MainActivity).
+      //    Wrap `MapView.this.onResume()` in try/catch(NullPointerException) —
+      //    the observer's own bookkeeping (`paused = false`,
+      //    `setMyLocationEnabled` / `setLocationSource`) still runs, and
+      //    Activity resume completes instead of cratering the whole
+      //    transaction.
+      //
+      //    Note: unlike onPause, the observer does NOT call
+      //    `super.onResume()` — only `MapView.this.onResume()` — so this
+      //    patch is single-call.
+      const resumeObserverOriginal =
+        '    public void onResume(LifecycleOwner owner) {\n' +
+        '        if (hasPermissions() && map != null) {\n' +
+        '            //noinspection MissingPermission\n' +
+        '            map.setMyLocationEnabled(showUserLocation);\n' +
+        '            map.setLocationSource(fusedLocationSource);\n' +
+        '        }\n' +
+        '        synchronized (MapView.this) {\n' +
+        '            if (!destroyed) {\n' +
+        '                MapView.this.onResume();\n' +
+        '            }\n' +
+        '            paused = false;\n' +
+        '        }\n' +
+        '    }';
+      const resumeObserverPatched =
+        '    public void onResume(LifecycleOwner owner) {\n' +
+        '        if (hasPermissions() && map != null) {\n' +
+        '            //noinspection MissingPermission\n' +
+        '            map.setMyLocationEnabled(showUserLocation);\n' +
+        '            map.setLocationSource(fusedLocationSource);\n' +
+        '        }\n' +
+        '        synchronized (MapView.this) {\n' +
+        '            if (!destroyed) {\n' +
+        '                try { MapView.this.onResume(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }\n' +
+        '            }\n' +
+        '            paused = false;\n' +
+        '        }\n' +
+        '    }';
+      if (
+        content.includes(resumeObserverOriginal) &&
+        !content.includes(
+          '                try { MapView.this.onResume(); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
+        )
+      ) {
+        content = content.replace(
+          resumeObserverOriginal,
+          resumeObserverPatched,
+        );
         changed = true;
       }
 

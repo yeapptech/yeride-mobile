@@ -37,9 +37,18 @@ const NAME_BY_ENV: Record<AppEnv, string> = {
 };
 
 const BUNDLE_BY_ENV: Record<AppEnv, string> = {
-  development: 'tech.yeapp.yeridenext.dev',
-  stage: 'tech.yeapp.yeridenext.stage',
-  production: 'tech.yeapp.yeridenext',
+  // 2026-05-07: switched from `tech.yeapp.yeridenext.*` to the legacy
+  // `app.yeride.*` bundle pattern so the inherited Transistor SDK
+  // license (`b1e2d160d6...`, bound to `app.yeride.dev`) validates and
+  // doesn't trip the rapidActivityLaunch loop. Tradeoff: cannot install
+  // both yeride-next and legacy yeride side-by-side on a single device
+  // (they share `applicationId`); during active development the new
+  // build replaces the legacy one. Once a license for
+  // `tech.yeapp.yeridenext.*` is provisioned, revert to the original
+  // bundle pattern.
+  development: 'app.yeride.dev',
+  stage: 'app.yeride.stage',
+  production: 'app.yeride',
 };
 
 const SCHEME_BY_ENV: Record<AppEnv, string> = {
@@ -92,6 +101,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   owner: 'yeapptech',
   scheme: SCHEME_BY_ENV[APP_ENV],
   version: '0.1.0',
+  // Pin a stable runtime version so `expo-dev-client` doesn't keep
+  // re-resolving it on every manifest fetch. Without this, the
+  // resolveRuntimeVersion middleware computes a different fingerprint each
+  // poll and the dev client interprets the mismatch as "an update is
+  // available", forcing a full bundle reload (visible in logcat as
+  // Firebase Crashlytics reinitializing every ~1 minute, app process
+  // restarting silently with no native crash trace). `appVersion` policy
+  // ties the runtime to `version` above (one runtime per app version) —
+  // perfectly stable for dev and intentional for the cutover-to-production
+  // runtime model.
+  runtimeVersion: { policy: 'appVersion' },
+  // Belt + suspenders against the dev-client manifest-polling reload loop.
+  // `enabled: false` turns expo-updates off entirely; `checkAutomatically:
+  // 'NEVER'` ensures the OS-level launch check never fires either (the
+  // baseline AndroidManifest still emits CHECK_ON_LAUNCH = ALWAYS by
+  // default, even with ENABLED=false, which can keep the polling layer
+  // alive in dev). This pair guarantees the dev client never inspects a
+  // manifest after launch, eliminating the periodic ~1-minute process
+  // restart we were seeing in logcat.
+  updates: {
+    enabled: false,
+    checkAutomatically: 'NEVER',
+  },
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   // New Architecture is the default in Expo SDK 55+; no flag needed.
@@ -139,6 +171,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-dev-client',
+    // Bump Gradle JVM heap from default 2GB to 4GB. Required because
+    // the SDK 55 module set + Navigation SDK + Maps + Stripe + Firebase
+    // + v5 background-geolocation push `mergeDebugResources` past the
+    // 2GB daemon limit and the build dies with "Could not receive a
+    // message from the daemon". Mirrors legacy yeride.
+    './plugins/withGradleHeap.js',
     [
       'expo-location',
       {
@@ -205,13 +243,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'react-native-background-geolocation',
       { license: process.env.BG_GEOLOCATION_LICENSE_KEY ?? '' },
     ],
-    // The SDK's own plugin only registers a maven URL for its own libs/.
-    // `react-native-background-fetch` is a sibling peer dep with its own
-    // flatdir AAR (`tsbackgroundfetch:1.0.4`); without this extra repo
-    // entry, Gradle's `:app:processDebugResources` fails with "Could not
-    // find com.transistorsoft:tsbackgroundfetch:1.0.4". Must run AFTER
-    // the SDK plugin so the merge anchor lands inside the same repos block.
-    './plugins/withBackgroundFetchMaven.js',
+    // 2026-05-07 — `react-native-background-geolocation@5.x` no longer
+    // depends on `react-native-background-fetch` as a peer; the
+    // `tsbackgroundfetch:1.0.4` AAR isn't part of the v5 build graph.
+    // Removed `./plugins/withBackgroundFetchMaven.js` from the chain
+    // because the project path it referenced (`:react-native-background-fetch`)
+    // no longer exists, breaking `app:assembleDebug` configuration. The
+    // plugin file remains on disk for now in case we need to revert; can
+    // be deleted in a follow-up cleanup.
     // Phase 7 turn 2 (post-device-smoke fix): pin
     // `playServicesLocationVersion = "21.0.1"` so the SDK selects the
     // `tslocationmanager-v21` AAR (binary-compatible with
