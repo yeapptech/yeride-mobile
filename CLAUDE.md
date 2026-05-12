@@ -528,15 +528,17 @@ Live in `.env.development` / `.env.stage` / `.env.production`:
   string blob.
 - `STRIPE_SERVER_URL` + `STRIPE_SERVER_API_KEY` — both required as
   a unit; falls back to `FakeStripeServerService` if either missing.
-- `BG_GEOLOCATION_LICENSE_KEY` — consumed at BUILD time only by the
-  background-geolocation Expo plugin; SDK degrades to time-limited
-  debug mode without. Must be the v5 **JWT format** (starts with
-  `eyJ...`, ~670 chars). The v4 32-char hex license format is
-  rejected by the SDK with `LICENSE VALIDATION FAILURE` since the
-  4.19.4 → 5.1.1 upgrade. On iOS, v5 also requires the JWT in
-  `Info.plist` under the key `TSLocationManagerLicense` (the Expo
-  plugin's iOS handler is a no-op — add it manually before iOS
-  builds).
+- `BG_GEOLOCATION_LICENSE_KEY_ANDROID` /
+  `BG_GEOLOCATION_LICENSE_KEY_IOS` — consumed at BUILD time only;
+  SDK degrades to time-limited debug mode without. Must be the v5
+  **JWT format** (starts with `eyJ...`, ~670 chars). The v4 32-char
+  hex license format is rejected by the SDK with `LICENSE VALIDATION
+  FAILURE` since the 4.19.4 → 5.1.1 upgrade. Android and iOS use
+  DIFFERENT per-platform JWTs issued by Transistor's licensing
+  portal. Wiring in `app.config.ts`: Android flows through the
+  plugin block (`{ license: ... }`), iOS flows through
+  `ios.infoPlist.TSLocationManagerLicense` because the Expo
+  plugin's iOS handler is a no-op.
 
 ## Common tasks
 

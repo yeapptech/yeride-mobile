@@ -158,6 +158,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       ],
       NSMotionUsageDescription:
         'YeRide Next uses motion-activity data to detect when your trip starts and stops, improving battery life.',
+      // react-native-background-geolocation iOS license (v5+). The SDK's
+      // Expo plugin handler is a no-op on iOS — `license` in the plugin
+      // block below only configures the Android side. iOS reads the JWT
+      // from this Info.plist key at native init; without it, the SDK
+      // runs in time-limited debug mode (blocks release builds). The
+      // iOS license is a DIFFERENT JWT than the Android one — they're
+      // issued per-platform by Transistor's licensing portal. Empty
+      // string is treated as "no license" by the SDK and is safe in
+      // dev (degrades to debug mode); leave the env var unset locally
+      // and the key emits as "" without breaking the build.
+      TSLocationManagerLicense:
+        process.env.BG_GEOLOCATION_LICENSE_KEY_IOS ?? '',
     },
   },
   android: {
@@ -235,13 +247,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // Expo plugin (a) writes the iOS `BGTaskSchedulerPermittedIdentifiers`
       // helper config and patches Android `AndroidManifest.xml` with the
       // foreground-service permissions / notification channel scaffolding,
-      // and (b) bakes the license key into the native bundle. The license is
-      // consumed at BUILD time only — there is no runtime read. Without the
-      // env var set, the SDK runs in time-limited debug mode (fine for dev,
-      // blocks release builds). `npm run prebuild` is required after this
-      // plugin lands so the native config takes effect.
+      // and (b) bakes the ANDROID license key into the native bundle. The
+      // license is consumed at BUILD time only — there is no runtime read.
+      //
+      // The plugin's `license` option only feeds the Android SDK. The iOS
+      // plugin handler is a no-op (verified in
+      // node_modules/react-native-background-geolocation/expo/plugin/build/iOSPlugin.js).
+      // The iOS license is written separately into `ios.infoPlist`
+      // above as `TSLocationManagerLicense`. The two JWTs are distinct
+      // per-platform licenses issued by Transistor's portal.
+      //
+      // Without `BG_GEOLOCATION_LICENSE_KEY_ANDROID` set, the SDK runs in
+      // time-limited debug mode on Android (fine for dev, blocks release
+      // builds). `npm run prebuild` is required after this plugin lands
+      // so the native config takes effect.
       'react-native-background-geolocation',
-      { license: process.env.BG_GEOLOCATION_LICENSE_KEY ?? '' },
+      { license: process.env.BG_GEOLOCATION_LICENSE_KEY_ANDROID ?? '' },
     ],
     // 2026-05-07 — `react-native-background-geolocation@5.x` no longer
     // depends on `react-native-background-fetch` as a peer; the
