@@ -151,7 +151,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // when the user opens a push from the lock screen / notification
       // center while the app is suspended (cold-start taps still flow
       // through `getLastNotificationResponseAsync()` instead).
-      UIBackgroundModes: ['location', 'fetch', 'remote-notification'],
+      // Phase 10 turn 1 restores `audio` — the Google Navigation SDK's
+      // turn-by-turn voice guidance plays on the device speaker, and
+      // iOS suspends audio output when the app backgrounds (e.g. screen
+      // locks, incoming call interrupts) without this background mode.
+      // Legacy yeride ships `audio` for the same reason. The SDK ships
+      // with `VOICE_ALERTS_AND_GUIDANCE` as the default `AudioGuidance`
+      // (see node_modules/@googlemaps/react-native-navigation-sdk types).
+      UIBackgroundModes: ['location', 'fetch', 'remote-notification', 'audio'],
       BGTaskSchedulerPermittedIdentifiers: [
         'com.transistorsoft.fetch',
         'com.transistorsoft.customtask',
