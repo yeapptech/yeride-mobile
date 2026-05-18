@@ -196,6 +196,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // 2GB daemon limit and the build dies with "Could not receive a
     // message from the daemon". Mirrors legacy yeride.
     './plugins/withGradleHeap.js',
+    // Phase 10 Turn 3: enable Material Components theme on Android so
+    // Stripe's `<CardForm/>` renders without crashing. The upstream
+    // `@stripe/stripe-react-native@0.63.0` Expo plugin only handles
+    // Apple Pay / Google Pay / Onramp — it does NOT mutate styles.xml
+    // or the Material dependency. Without this plugin, `AddPaymentMethodScreen`
+    // crashes on first render under Android, blocking the rider-onboarding
+    // flow. Parent is `Theme.MaterialComponents.DayNight.NoActionBar`
+    // (NOT legacy's `Light` variant) so dark mode keeps working. See
+    // `plugins/withMaterialTheme.js` for the full rationale and removal
+    // exit condition.
+    './plugins/withMaterialTheme.js',
     [
       'expo-location',
       {
