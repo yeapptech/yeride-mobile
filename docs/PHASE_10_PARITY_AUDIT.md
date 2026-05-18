@@ -1,8 +1,8 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1)
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
-**Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings.
+**Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 closure annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
 cutover rollout (§6) cannot begin until every ❌ row below is
 resolved or explicitly de-scoped.
@@ -27,9 +27,11 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1):** **7 ❌ rows, 2 🟡 rows, 0 ⚠️ rows** block the
-rollout. Turn 1's verification pass resolved the four v1 ⚠️ rows
-and surfaced three additional ❌ gaps:
+**v2 (post-Turn-1) + Turn 2 closure:** **6 ❌ rows, 2 🟡 rows, 0 ⚠️ rows**
+block the rollout (down from 7 ❌ at v2 — Turn 2 closed the highest-
+severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js` to
+inject `$FirebaseSDKVersion = '12.12.0'`). Turn 1's verification pass
+resolved the four v1 ⚠️ rows and surfaced three additional ❌ gaps:
 
 - **§3.5 rider ETA** flipped ⚠️ → ❌. The rewrite has only static
   ETA baked at trip-create / dispatch time; no driver-side telemetry
@@ -57,13 +59,16 @@ and surfaced three additional ❌ gaps:
   on Android; the upstream `@stripe/stripe-react-native@0.63.0`
   plugin does not apply it. Without porting, Android Add-Card
   crashes.
-- **§4 withFirebaseSdkVersion** flipped ⚠️ → ❌ **CRITICAL**. rnfb
-  24.0.0 ships `sdkVersions.ios.firebase = 12.10.0` which carries
-  the Swift 6.3 `async let` miscompile under Xcode 26.4 / iOS 26.3+.
-  Every Cloud Function callable (`completeTrip` / `cancelTrip` /
-  `tipDriver`) crashes in iOS release-mode builds. The rewrite's
-  `withFirebasePodfileFix.js` only handles modular-headers, NOT the
-  SDK-version pin. **Production blocker for iOS cutover.**
+- **§4 withFirebaseSdkVersion** flipped ⚠️ → ❌ **CRITICAL** in Turn 1
+  → **✅ closed in Turn 2 (2026-05-18)**. rnfb 24.0.0 ships
+  `sdkVersions.ios.firebase = 12.10.0` which carries the Swift 6.3
+  `async let` miscompile under Xcode 26.4 / iOS 26.3+. Every Cloud
+  Function callable (`completeTrip` / `cancelTrip` / `tipDriver`)
+  crashes in iOS release-mode builds. Turn 2 inlined the
+  `$FirebaseSDKVersion = '12.12.0'` Podfile-header injection into
+  `plugins/withFirebasePodfileFix.js` (Path b per the kickoff) and
+  flipped this row to ✅. See `docs/PHASE_10_TURN_2.md` for the
+  patch + idempotency-test record.
 - **§4 withPackagingOptions / withFmtFix / withStripeIosSdkOverride
   / react-native-map-link** flipped ⚠️ → ✅ (4 retirements
   confirmed). `withPackagingOptions` reduces to `withGradleHeap` +
@@ -501,7 +506,7 @@ and the two are NOT competing surfaces.
 | `withPackagingOptions` custom plugin            | Present                                                               | ❌ not found                                                                                             | ✅ retired (verified Turn 1). JVM heap is handled by `withGradleHeap`. The Detox-related bits (META-INF/LICENSE excludes, protobuf-lite exclusion, JUnit conflict workarounds, Stripe androidTest disable) aren't needed because rewrite has no Detox suite (Phase 10.x or later concern). The minSdk-24 forcing reduces to `expo-build-properties.android.minSdkVersion: 24` already in the rewrite.                                                                                                                                                                                                                                                                               |
 | `withFmtFix` custom plugin                      | Present                                                               | ❌ not found                                                                                             | 🟡 likely retired (verified Turn 1). The plugin patches fmt 11.0.2's `#if FMT_USE_CONSTEVAL` (missing `#ifndef` guard) for Xcode 26+ — a known fmt 11.x bug. RN 0.83.6 pulls in fmt **12.1.0** per `node_modules/react-native/third-party-podspecs/fmt.podspec` (a major-version bump). Upstream fmt 12.x likely fixed the guard but we have not confirmed against the actual cloned-pod source. Verify on the first Xcode 26 prebuild attempt; re-add the plugin only if `FMT_USE_CONSTEVAL` redefinition errors recur.                                                                                                                                                            |
 | `withStripeIosSdkOverride` custom plugin        | Present                                                               | ❌ not found                                                                                             | ✅ retired (verified Turn 1). Both purposes of the plugin are covered upstream: (a) `stripe-react-native@0.63.0`'s `ios/StripeSwiftInterop.h` already declares `NS_ENUM(NSInteger, STPPaymentStatus)` (no NSUInteger forward-decl mismatch); (b) `stripe-react-native@0.63.0`'s podspec pins `stripe_version = '~> 25.10.0'` — newer than the legacy plugin's `~> 25.9.0` pin.                                                                                                                                                                                                                                                                                                      |
-| `withFirebaseSdkVersion` custom plugin          | Present                                                               | ❌ not found                                                                                             | ❌ **CRITICAL needed** (verified Turn 1). rnfb 24.0.0's `package.json` declares `sdkVersions.ios.firebase = 12.10.0`. 12.10.0 carries the Swift 6.3 `async let` miscompile (firebase-ios-sdk#15974) that crashes every Cloud Function callable (`completeTrip` / `cancelTrip` / `tipDriver`) in iOS release builds on Xcode 26.4 / iOS 26.3+. The rewrite's `withFirebasePodfileFix.js` patches modular-headers ONLY — it does NOT set `$FirebaseSDKVersion`. **Production blocker for iOS cutover.** Port the plugin (or inline an equivalent into `withFirebasePodfileFix.js`). |
+| `withFirebaseSdkVersion` custom plugin          | Present                                                               | ✅ inlined into `withFirebasePodfileFix.js` (Turn 2)                                                     | ✅ **closed Turn 2 (2026-05-18)**. rnfb 24.0.0's `package.json` still declares `sdkVersions.ios.firebase = 12.10.0` (the bug-carrying version), so Turn 2 added a second numbered patch to `plugins/withFirebasePodfileFix.js:86-118` that injects `$FirebaseSDKVersion = '12.12.0'` at top level of the iOS Podfile (after the existing `$RNFirebaseAsStaticFramework = true` block), guarded by a `# yeride:firebase-sdk-version` sentinel for idempotency. Pins every `Firebase/*` pod past the Swift 6.3 `async let` miscompile (firebase-ios-sdk#15974). Remove this patch once `@react-native-firebase` ships a release whose `sdkVersions.ios.firebase` is 12.12.0 or newer. |
 | `react-native-map-link` plugin                  | Present                                                               | ❌ not found                                                                                             | ✅ retired (verified Turn 1). `PHASE_8_TURN_2_KICKOFF.md:350` explicitly lists "External-Google-Maps fallback (legacy `showLocation` path)" as out-of-scope: "If `init()` returns `'navigation_api_not_authorized'`, the VM lands in the `error` arm with a user-facing message + a `retry` callback. No external-app fallback this phase."                                                                                                                                                                                                                                                                                                                                         |
 | `withGradleHeap` custom plugin                  | ❌                                                                    | Present                                                                                                  | ✅ Rewrite-only; required by larger module set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `withGoogleMapsApiKey` custom plugin            | ❌                                                                    | Present                                                                                                  | ✅ Different key-injection mechanism.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -517,9 +522,10 @@ and the two are NOT competing surfaces.
   (Turn 1 left both in conflict, low-risk but worth resolving).
 - ❌ Port `withMaterialTheme` (gated on Android Add-Card not
   crashing — required before §6.1 internal track).
-- ❌ Port `withFirebaseSdkVersion` (or inline the equivalent
-  `$FirebaseSDKVersion = '12.12.0'` Podfile-header injection into
-  `withFirebasePodfileFix.js`) — **production blocker for iOS**.
+- ✅ `withFirebaseSdkVersion` inlined into `withFirebasePodfileFix.js`
+  (Turn 2, 2026-05-18) — `$FirebaseSDKVersion = '12.12.0'` patch
+  closes the iOS Cloud-Function-callable crash on Xcode 26.4 / iOS
+  26.3+. Production blocker resolved.
 - 🟡 Verify `withFmtFix` retirement on the first Xcode 26 build;
   re-add only if `FMT_USE_CONSTEVAL` errors recur.
 
@@ -603,7 +609,7 @@ one-line `audio` UIBackgroundMode restoration). Remaining turns:
 | #     | Turn                                                                                                                                                                                                                                                                                                                                                | Driver                            | Size                | Blocked by                                                              |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ------------------- | ----------------------------------------------------------------------- |
 | ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                    | small (1d)          | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)      |
-| 2     | **Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.                                                                                                                                   | **Production blocker — iOS**      | tiny (½d)           | —                                                                       |
+| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~  | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`) |
 | 3     | **Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.                                                                                                                                                                                                             | **Production blocker — Android**  | tiny (½d)           | —                                                                       |
 | 4     | **`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.                                                                                                                              | Latent BGTaskScheduler misconfig  | tiny (½d)           | —                                                                       |
 | 5     | **Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.                                                                                                                                                                            | User-visible regression vs legacy | small-medium (1-2d) | —                                                                       |
