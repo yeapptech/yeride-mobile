@@ -84,6 +84,38 @@ const SchedulePickupAtSchema = z.preprocess((val) => {
   return null;
 }, z.date().nullable());
 
+/**
+ * Two on-disk shapes for an embedded vehicle snapshot's `photos` co-exist:
+ *
+ *   1. **Canonical (the rewrite writes this)** — a flat array of photo URL
+ *      strings.
+ *
+ *   2. **Legacy yeride** — an object keyed by camera angle,
+ *      `{front, back, left, right, interior}`, each value a URL string or
+ *      `null`. Legacy `sanitizeVehiclePhotos` (yeride
+ *      `src/utils/vehicleValidation.js`) builds this object and
+ *      `dispatchDriver` embeds it whole onto the trip's `driver.vehicle`.
+ *
+ * Permissive read across both; the preprocess collapses the legacy object
+ * to a string array (non-empty values, fixed `front…interior` key order).
+ * Anything else (`null` / missing / unexpected) yields `[]`. Strict write
+ * of the array shape only.
+ */
+const VehicleSnapshotPhotosSchema = z.preprocess((val) => {
+  if (Array.isArray(val)) {
+    return val.filter(
+      (p): p is string => typeof p === 'string' && p.length > 0,
+    );
+  }
+  if (val !== null && typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    return (['front', 'back', 'left', 'right', 'interior'] as const)
+      .map((k) => obj[k])
+      .filter((p): p is string => typeof p === 'string' && p.length > 0);
+  }
+  return [];
+}, z.array(z.string()));
+
 const VehicleSnapshotDocSchema = z.object({
   make: z.string().min(1).max(80),
   model: z.string().min(1).max(80),
@@ -91,7 +123,7 @@ const VehicleSnapshotDocSchema = z.object({
   color: z.string().min(1).max(80),
   licensePlate: z.string().min(1).max(40),
   stockPhoto: z.string().nullish(),
-  photos: z.array(z.string()).default([]),
+  photos: VehicleSnapshotPhotosSchema,
 });
 
 /**

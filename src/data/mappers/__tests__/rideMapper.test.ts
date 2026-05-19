@@ -854,6 +854,79 @@ describe('toDomain — legacy yeride awaiting_driver trip shape', () => {
       ).toBe(true);
     }
   });
+
+  // Phase 10 regression: legacy `dispatchDriver` embeds the vehicle
+  // snapshot with `photos` as a `{front,back,left,right,interior}` object
+  // (yeride `sanitizeVehiclePhotos`), not the canonical array. The DTO
+  // must collapse it instead of failing schema validation — a failure
+  // logs `ride_doc_invalid_schema` and drops the whole ride from
+  // `listByDriver`.
+  function driverWithVehiclePhotos(photos: unknown): Record<string, unknown> {
+    return {
+      id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      email: 'grace@yeapp.tech',
+      phoneNumber: '+14155552222',
+      stripeAccountId: 'acct_abc',
+      vehicle: {
+        make: 'Toyota',
+        model: 'Camry',
+        year: 2024,
+        color: 'White',
+        licensePlate: 'ABC1234',
+        photos,
+      },
+    };
+  }
+
+  it('collapses a legacy `{front,back,…}` vehicle photos object to a string array', () => {
+    const doc = legacyAwaitingDriverDoc({
+      driver: driverWithVehiclePhotos({
+        front: 'url-f',
+        back: null,
+        left: 'url-l',
+        right: null,
+        interior: null,
+      }),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.driver?.vehicle?.photos).toEqual(['url-f', 'url-l']);
+  });
+
+  it('passes through a canonical array of vehicle photo URLs', () => {
+    const doc = legacyAwaitingDriverDoc({
+      driver: driverWithVehiclePhotos(['a', 'b']),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.driver?.vehicle?.photos).toEqual(['a', 'b']);
+  });
+
+  it('treats a missing vehicle photos field as an empty array', () => {
+    const doc = legacyAwaitingDriverDoc({
+      driver: driverWithVehiclePhotos(undefined),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.driver?.vehicle?.photos).toEqual([]);
+  });
+
+  it('treats an all-null legacy vehicle photos object as an empty array', () => {
+    const doc = legacyAwaitingDriverDoc({
+      driver: driverWithVehiclePhotos({
+        front: null,
+        back: null,
+        left: null,
+        right: null,
+        interior: null,
+      }),
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.driver?.vehicle?.photos).toEqual([]);
+  });
 });
 
 // Phase 8 turn 3 regression coverage. The deployed Cloud Function
