@@ -658,6 +658,36 @@ describe('NavigationSdkClient', () => {
       expect(event.remainingSeconds).toBe(0);
     });
 
+    it('preserves exact-zero SDK readings (driver on the destination waypoint)', () => {
+      // Regression — review fix. The predicate uses `>= 0` so an
+      // exact-zero reading lands as a legitimate "0 m / 0 s
+      // remaining" emission rather than being collapsed into the
+      // negative-input sentinel.
+      const client = new NavigationSdkClient();
+      const controller = sdk.__makeController();
+      const listeners = sdk.__makeListeners();
+      client.setController({
+        controller: controller as unknown as Parameters<
+          NavigationSdkClient['setController']
+        >[0]['controller'],
+        listeners: listeners as unknown as NavigationListenerSetters,
+      });
+      const cb = jest.fn();
+      client.subscribeToTimeAndDistance(cb);
+      sdk.__emitTimeAndDistance({
+        meters: 0,
+        seconds: 0,
+        delaySeverity: 0,
+      });
+      expect(cb).toHaveBeenCalledTimes(1);
+      const event = cb.mock.calls[0][0] as {
+        remainingMeters: number;
+        remainingSeconds: number;
+      };
+      expect(event.remainingMeters).toBe(0);
+      expect(event.remainingSeconds).toBe(0);
+    });
+
     it('disposer removes the subscriber; final disposer clears the SDK listener', () => {
       const client = new NavigationSdkClient();
       const controller = sdk.__makeController();

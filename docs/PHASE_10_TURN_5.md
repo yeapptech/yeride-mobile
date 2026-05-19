@@ -345,4 +345,119 @@ Turn 6 — Activity tab port (rider + driver). Audit §3.3, audit
 
 ---
 
+## Review fixes (2026-05-19)
+
+Post-merge code review surfaced two correctness gaps in the
+shipped pipeline and one adapter-predicate nit. All three were
+addressed in a follow-up patch on top of the Turn 5 commit
+(0ecb33e). Same scope boundary — no architectural changes, no new
+files, no new SDK seams.
+
+### Fix 1 — Cross-trip `tripTracking` staleness gate on the rider VM
+
+**Symptom.** Nothing in the write path clears
+`users/{driverId}.location.tripTracking` at trip end —
+`useGpsLifecycle` emits `tripTracking: null` on the entity, but
+`userLocationMapper.toDoc` OMITS the field entirely when null
+(intentional, so GPS writes don't clobber the VM's throttled writes
+under `setDoc({merge: true})`). That means a driver's location doc
+can carry the previous ride's `tripTracking` until the new ride's
+`useDriverMonitorViewModel` lands its first write. The rider on
+the new trip would otherwise see the previous trip's ETA on
+`DispatchedView` for that brief window (typically <60s, but
+non-zero, and easy to amplify on flaky networks).
+
+**Fix.** `useRideMonitorViewModel` now gates `liveDurationSeconds`
+/ `liveDistanceMeters` on
+`String(tripTracking.tripId) === String(ride.id)`. A stale
+`tripTracking` surfaces as `null` and the view falls back to the
+static `ride.pickup.directions.durationSeconds` (same
+"Calculating…" UX as the no-driver-doc-yet branch).
+
+**Test.** New regression test "ignores stale tripTracking from a
+previous trip (tripId mismatch)" in
+`useRideMonitorViewModel.test.tsx`: seeds a driver-location doc
+whose `tripTracking.tripId` points at a different ride, asserts the
+live fields stay null, then writes a matching-tripId doc and
+asserts the fields flip through.
+
+### Fix 2 — Bypass refire on dispatched → started destination swap
+
+**Symptom.** The NavSdk + GPS effects key on `isActiveTripStatus`
+(true for both `dispatched` AND `started`), so they don't re-run
+on the in-active-window status flip. The original one-shot bypass
+only triggers on the nav-less → live edge — so after the driver
+picks the rider up and `ride.status` flips to `started`, the
+existing 30s throttle would hold the pickup-leg telemetry on the
+doc for up to 30s. Rider's `StartedView` would show the stale
+pickup ETA after the driver had already cleared the pickup
+geofence. Legacy `distanceTrackingService` had the same gap
+(also keyed only on tripId — destination switches within a tripId
+were not special-cased), but the rewrite can do better cheaply.
+
+**Fix.** A new `activeRideStatus`-keyed effect in
+`useDriverMonitorViewModel` resets `lastWriteAtMsRef = 0` and
+`lastWriteHadTelemetryRef = false` whenever `ride.status` changes
+within the active window. The 50m distance gate is intentionally
+left intact (`lastWriteCoordsRef` is NOT reset) so a stationary
+driver doesn't generate a write the instant the status flips —
+the time-gate reset alone unblocks the existing nav-less → live
+bypass, which then fires on the next NavSdk callback with the
+dropoff-leg telemetry.
+
+**Test.** New regression test "re-bypasses the 30s gate when ride
+status flips dispatched → started (destination swap)" in
+`useDriverMonitorViewModel.test.tsx`: drives a dispatched ride to
+a first-write via NavSdk fire, calls the real `onStartRide()`
+(so the rides-repo notifies subscribers), then emits a fresh
+NavSdk fire and asserts the write lands immediately with
+`tripTracking.destination.type === 'dropoff'` and the new
+distance/duration.
+
+### Fix 3 — GPS effect dependency churn
+
+**Symptom.** The GPS-driven write effect in
+`useDriverMonitorViewModel` had `updateLocationMutation` and
+`driverUserId` in its dependency array. TanStack's `useMutation`
+returns a fresh wrapper on every state transition, and Zustand
+GPS state updates re-render the VM many times per second during
+an active trip — so the effect was re-firing on every render
+rather than only on actual GPS movement. The throttle gate
+short-circuited inside `tryWriteTripTracking` so no Firestore
+traffic resulted, but the function was paying a haversine +
+closure allocation per render.
+
+**Fix.** GPS effect deps trimmed to `[isActiveTripStatus,
+gpsLocation, gpsSpeed]`. `driverUserId`, `updateLocationMutation`,
+and `ride` are read through their refs (matching the NavSdk
+effect's existing pattern, just made consistent across both
+write paths).
+
+### Fix 4 — Adapter zero-coercion predicate
+
+**Symptom.** `NavigationSdkClient.handleTimeAndDistance` used
+`event.meters > 0` and `event.seconds > 0` to gate the
+negative-coercion. A legitimate exact-zero reading (driver
+standing on the destination waypoint, before the arrival event
+fires) collapsed into the same sentinel as NaN / negative inputs.
+
+**Fix.** Predicate changed to `>= 0` for both fields. NaN /
+Infinity / negatives still coerce to 0; an exact-zero reading
+passes through verbatim.
+
+**Test.** New regression test "preserves exact-zero SDK readings
+(driver on the destination waypoint)" in
+`NavigationSdkClient.test.ts`.
+
+### Verify
+
+- typecheck ✓ / lint ✓ / format ✓ (modulo pre-existing CLAUDE.md
+  warning) / jest ✓ on the touched suites (driver VM 30/30,
+  rider VM 25/25, adapter 35/35, mappers + UserLocation +
+  FakeNavigationSdkClient 173/173).
+- 3 new regression tests added (driver VM bypass refire, rider VM
+  tripId staleness gate, adapter zero-coercion).
+
+---
+
 **End of PHASE_10_TURN_5.md.**

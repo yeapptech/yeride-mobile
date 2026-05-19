@@ -1350,6 +1350,86 @@ describe('useDriverMonitorViewModel', () => {
       expect(setup.locationsRepo.spies.updateLocation).toBe(2);
     });
 
+    it('re-bypasses the 30s gate when ride status flips dispatched → started (destination swap)', async () => {
+      // Regression — Phase 10 turn 5 review fix. The NavSdk + GPS
+      // effects key on `isActiveTripStatus` (true for both dispatched
+      // AND started), so they don't re-run on the in-active-window
+      // status flip. Without the activeRideStatus reset effect, the
+      // throttle would hold the stale pickup-leg ETA for up to 30s
+      // after the driver picks the rider up. The reset effect clears
+      // `lastWriteAtMsRef` + `lastWriteHadTelemetryRef` so the next
+      // NavSdk fire on the dropoff leg lands immediately.
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      // Real odometer so `onStartRide()` exercises the post-Phase-7
+      // path (`Ride.start` reads `useGpsCurrentOdometer()`).
+      act(() => {
+        useGpsStore.getState().setLocation(bgLocationEvent(2_500));
+      });
+      const fake = new FakeNavigationSdkClient();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(fake.getTimeAndDistanceSubscriberCount()).toBeGreaterThan(0);
+      });
+
+      // First NavSdk fire on the pickup leg — lands via bypass.
+      act(() => {
+        fake.emitTimeAndDistance({
+          remainingMeters: 2500,
+          remainingSeconds: 300,
+          timestampMs: Date.now(),
+        });
+      });
+      await waitFor(() => {
+        expect(setup.locationsRepo.spies.updateLocation).toBeGreaterThanOrEqual(
+          2,
+        );
+      });
+      const writesBeforeFlip = setup.locationsRepo.spies.updateLocation;
+
+      // Flip ride to started via the real `StartRide` use case — that
+      // way the rides-repo notifies subscribers, the VM re-renders
+      // with `ride.status === 'started'`, and our new
+      // `activeRideStatus` reset effect runs (which is what we're
+      // exercising).
+      await act(async () => {
+        await result.current.onStartRide();
+      });
+      await waitFor(() => {
+        expect(result.current.status).toBe('started');
+      });
+
+      // Fresh NavSdk fire on the dropoff leg — distinct (m, s) so the
+      // adapter dedup doesn't swallow it. Must land immediately
+      // (bypass refire), not 30s from now.
+      act(() => {
+        fake.emitTimeAndDistance({
+          remainingMeters: 4200,
+          remainingSeconds: 540,
+          timestampMs: Date.now(),
+        });
+      });
+      await waitFor(() => {
+        expect(setup.locationsRepo.spies.updateLocation).toBeGreaterThan(
+          writesBeforeFlip,
+        );
+      });
+      const lastWritten = await setup.locationsRepo.getLastKnown(DRIVER_ID);
+      expect(lastWritten.ok).toBe(true);
+      if (lastWritten.ok && lastWritten.value) {
+        expect(lastWritten.value.tripTracking?.distanceMeters).toBe(4200);
+        expect(lastWritten.value.tripTracking?.durationSeconds).toBe(540);
+        expect(lastWritten.value.tripTracking?.destination.type).toBe(
+          'dropoff',
+        );
+      }
+    });
+
     it('clears tripTracking writes after the ride leaves the active window', async () => {
       const setup = setupSeededState({ seedRide: makeDispatchedRide() });
       useGpsStore.getState().setLocation(bgLocationEvent(0));

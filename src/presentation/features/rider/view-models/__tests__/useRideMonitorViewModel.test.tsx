@@ -879,5 +879,74 @@ describe('useRideMonitorViewModel', () => {
       expect(result.current.liveDurationSeconds).toBeNull();
       expect(result.current.liveDistanceMeters).toBeNull();
     });
+
+    it('ignores stale tripTracking from a previous trip (tripId mismatch)', async () => {
+      // Regression — Phase 10 turn 5 review fix. Nothing clears
+      // `users/{driverId}.location.tripTracking` at trip end, so a
+      // driver's location doc can carry the previous ride's
+      // tripTracking when they're dispatched for a new ride. The VM
+      // must NOT surface those values on the new ride — gate on
+      // `tripTracking.tripId === ride.id`.
+      const ridesRepo = new InMemoryRideRepository();
+      const locationsRepo = new InMemoryLocationRepository();
+      ridesRepo.seed(makeDispatchedRideWithDriver());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        {
+          wrapper: withTestContainer({ ridesRepo, locationsRepo }),
+        },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+
+      // Seed a driver-location doc whose tripTracking points at a
+      // DIFFERENT, terminated ride. Same driver id, same location
+      // shape, just a stale tripId.
+      const otherRideId = unwrap(RideId.create('rideZyxWvu0987654321zy'));
+      const stalePayload = unwrap(
+        UserLocation.create({
+          userId: DRIVER_ID,
+          location: unwrap(Coordinates.create(25.79, -80.2)),
+          speed: 12,
+          updatedAt: new Date('2026-04-28T10:01:00Z'),
+          tripTracking: {
+            tripId: otherRideId,
+            tripStatus: 'dispatched',
+            destination: {
+              type: 'pickup',
+              location: unwrap(Coordinates.create(25.7617, -80.1918)),
+            },
+            distanceMeters: 9999,
+            durationSeconds: 1234,
+            updatedAt: new Date('2026-04-28T10:01:00Z'),
+          },
+        }),
+      );
+      await act(async () => {
+        await locationsRepo.updateLocation(stalePayload);
+      });
+      // Give the subscription a tick to deliver the emission, then
+      // assert the stale telemetry is filtered out.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(result.current.liveDurationSeconds).toBeNull();
+      expect(result.current.liveDistanceMeters).toBeNull();
+
+      // Sanity check the gate flips open when the driver writes for
+      // the CURRENT ride.
+      await act(async () => {
+        await locationsRepo.updateLocation(
+          makeDriverLocationWithLiveEta({
+            distanceMeters: 2500,
+            durationSeconds: 300,
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(result.current.liveDurationSeconds).toBe(300);
+      });
+      expect(result.current.liveDistanceMeters).toBe(2500);
+    });
   });
 });

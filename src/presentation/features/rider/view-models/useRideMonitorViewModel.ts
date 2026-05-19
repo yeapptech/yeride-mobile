@@ -325,6 +325,19 @@ export function useRideMonitorViewModel(args: {
   // chose (a): reuse the generic use case keyed by driver id rather
   // than introducing an `ObserveDriverLocation` wrapper — VM effect
   // cleanup already handles the ride-switch race.
+  //
+  // Cross-trip staleness gate: nothing in the write path clears
+  // `users/{driverId}.location.tripTracking` at trip end —
+  // `useGpsLifecycle` emits `tripTracking: null` on the entity but
+  // `userLocationMapper.toDoc` OMITS the field entirely when null
+  // (intentional, so GPS writes don't clobber the VM's throttled
+  // writes via `merge:true`). That means a driver's location doc
+  // can carry the previous trip's `tripTracking` until the new
+  // ride's `useDriverMonitorViewModel` lands its first write. The
+  // rider would otherwise see the previous trip's ETA on the new
+  // trip's `DispatchedView` for that brief window. Gate the live
+  // fields on `tripTracking.tripId === ride.id` so a stale doc
+  // surfaces as `null` (→ static `ride.pickup.directions` fallback).
   const driverId = ride?.driver?.id ?? null;
   const [driverLocation, setDriverLocation] = useState<UserLocation | null>(
     null,
@@ -344,10 +357,23 @@ export function useRideMonitorViewModel(args: {
     return unsubscribe;
   }, [useCases, driverId]);
 
+  // Compare-by-value: `tripTracking.tripId` is a branded RideId
+  // (string under the hood); `ride.id` is the same brand. `String(…)`
+  // coerce on both sides avoids the brand-equality footgun if a
+  // future change drifts the brand.
+  const driverTripTracking = driverLocation?.tripTracking ?? null;
+  const driverTripIdMatchesRide =
+    driverTripTracking !== null &&
+    ride !== null &&
+    String(driverTripTracking.tripId) === String(ride.id);
   const liveDurationSeconds =
-    driverLocation?.tripTracking?.durationSeconds ?? null;
+    driverTripIdMatchesRide && driverTripTracking !== null
+      ? (driverTripTracking.durationSeconds ?? null)
+      : null;
   const liveDistanceMeters =
-    driverLocation?.tripTracking?.distanceMeters ?? null;
+    driverTripIdMatchesRide && driverTripTracking !== null
+      ? (driverTripTracking.distanceMeters ?? null)
+      : null;
 
   return {
     ride,

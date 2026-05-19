@@ -69,6 +69,64 @@ driver status view.
   null inside `<NavigationView/>`, so init must run in the parent
   screen before navigating. `useDriverMonitorViewModel.onLaunchNavigation`
   runs the `init → terms-dialog → navigate` chain.
+- **Live `tripTracking` write path (Phase 10 turn 5).**
+  `useDriverMonitorViewModel` owns the
+  `users/{driverId}.location.tripTracking` write while
+  `ride.status ∈ {dispatched, started}` — NOT `useGpsLifecycle`,
+  which intentionally writes `tripTracking: null` on every GPS
+  event. The mapper OMITS `tripTracking` from the doc when the
+  entity value is `null`, so `setDoc({merge: true})` from
+  `useGpsLifecycle` does not clobber the VM's throttled writes.
+  Throttle constants (30s min interval / 50m min movement / 60s
+  NavSdk staleness) are copied verbatim from legacy
+  `distanceTrackingService.js` — tuning is a post-cutover concern.
+  - **One-shot bypass on the nav-less → live edge.** When a
+    NavSdk fire arrives AND the last write was nav-less (the
+    initial `useGpsLifecycle` write at mount, or a tunnel
+    recovery), the 30s gate is skipped so the rider sees a live
+    ETA on the first NavSdk callback. Subsequent NavSdk fires
+    respect the gate normally — bypass is one-shot per nav-less →
+    live edge.
+  - **Bypass refire on dispatched → started.** The active-window
+    status flip changes the destination (pickup → dropoff) but
+    not `isActiveTripStatus`, so neither effect re-runs. A
+    separate `activeRideStatus`-keyed effect resets
+    `lastWriteAtMsRef` + `lastWriteHadTelemetryRef` (NOT
+    `lastWriteCoordsRef`, so a stationary driver doesn't trigger
+    a write the instant the status flips) which unblocks the
+    existing bypass for the dropoff leg.
+  - **Effect deps stay minimal.** The GPS effect reads
+    `driverUserId`, `updateLocationMutation`, and `ride` through
+    refs — depending on them directly causes the effect to
+    re-fire on every render because TanStack's `useMutation`
+    returns a fresh wrapper on every state transition. Only
+    `[isActiveTripStatus, gpsLocation, gpsSpeed]` belong in the
+    dep array.
+
+## Rider-side specifics
+
+Read before touching `useRideMonitorViewModel` or the rider's
+status views (`DispatchedView`, `StartedView`).
+
+- **Live ETA reads gate on tripId (Phase 10 turn 5).** Nothing in
+  the write path clears
+  `users/{driverId}.location.tripTracking` at trip end, so a
+  driver's doc can carry the previous ride's tripTracking when
+  they're dispatched for a new one. `useRideMonitorViewModel`
+  gates `liveDurationSeconds` / `liveDistanceMeters` on
+  `String(tripTracking.tripId) === String(ride.id)` so a stale
+  tripTracking surfaces as `null` (→ static
+  `ride.pickup.directions` fallback). Don't drop the gate even
+  after a future "clear tripTracking on trip end" write lands —
+  in-flight clear writes can race with the new ride's first
+  driver-side write and the rider VM is the simpler place to
+  enforce this invariant.
+- **Live ETA hooks into existing `SubscribeToUserLocation`.** No
+  `ObserveDriverLocation(rideId)` wrapper — the generic use case
+  keyed off `ride.driver?.id` is enough because the VM effect's
+  cleanup handles the driver-switch race. If you find yourself
+  reaching for a wrapper, check whether you actually need a
+  domain-level invariant or just a different memoization.
 
 ## Vehicle-side specifics
 

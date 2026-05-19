@@ -446,31 +446,50 @@ export function useDriverMonitorViewModel(
     return unsubscribe;
   }, [isActiveTripStatus, navigationSdk]);
 
+  // Phase 10 turn 5 (review fix) — reset bypass-eligibility on a
+  // destination switch WITHIN the active window. Legacy parity has
+  // dispatched→started keep the same tripId so the throttle would
+  // otherwise hold for up to 30s after the swap, showing the stale
+  // pickup-leg ETA on the rider's `StartedView`. Resetting both the
+  // time gate AND the telemetry flag lets the next NavSdk fire land
+  // the dropoff-leg ETA via the existing bypass path.
+  const activeRideStatus = isActiveTripStatus ? (ride?.status ?? null) : null;
+  useEffect(() => {
+    if (activeRideStatus === null) return;
+    lastWriteAtMsRef.current = 0;
+    lastWriteHadTelemetryRef.current = false;
+    // Intentionally leave `lastWriteCoordsRef` so the 50m distance
+    // gate still rejects writes if the driver hasn't physically
+    // moved. The time-gate reset alone is what unblocks the bypass.
+  }, [activeRideStatus]);
+
   // Second effect: on every GPS update, also try a write. This handles
   // the case where NavSdk telemetry hasn't arrived yet but the driver
   // is moving — we still want the throttle to advance against
   // distance/time, and we still want `tripTracking.destination` on
   // the doc so the rider's UI can map it.
+  //
+  // Deps are intentionally minimal: `gpsLocation` and `gpsSpeed` are
+  // the only stimuli we want to react to. `driverUserId` /
+  // `updateLocationMutation` / `ride` are read from refs so this
+  // effect doesn't churn on every render (TanStack's `useMutation`
+  // returns a fresh wrapper on each state transition, which would
+  // otherwise re-fire this effect dozens of times per active GPS
+  // second).
   useEffect(() => {
     if (!isActiveTripStatus) return;
     tryWriteTripTracking({
       source: 'gps',
       navSdk: latestNavSdkRef.current,
       gps: { location: gpsLocation, speed: gpsSpeed },
-      userId: driverUserId,
+      userId: driverUserIdRef.current,
       ride: rideRef.current,
       lastWriteAtMsRef,
       lastWriteCoordsRef,
       lastWriteHadTelemetryRef,
-      mutation: updateLocationMutation,
+      mutation: updateLocationMutationRef.current,
     });
-  }, [
-    isActiveTripStatus,
-    gpsLocation,
-    gpsSpeed,
-    driverUserId,
-    updateLocationMutation,
-  ]);
+  }, [isActiveTripStatus, gpsLocation, gpsSpeed]);
 
   // ── Launch Navigation (Phase 8 turn 2) ─────────────────────────
   // The connector hook (mounted by DriverMonitorScreen) has already

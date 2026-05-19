@@ -639,12 +639,17 @@ export class NavigationSdkClient implements NavigationService {
    * shape and fan out to subscribers (deduped). SDK can fire with
    * negative `meters` / `seconds` when the destination is behind the
    * driver (rare, but possible during reroute) — coerced to 0.
+   *
+   * Predicate uses `>= 0` so an exact-zero reading (driver standing
+   * on the destination waypoint, before the arrival event fires) is
+   * preserved verbatim. Only negatives + NaN + Infinity collapse to
+   * the 0 sentinel.
    */
   private handleTimeAndDistance = (event: SdkTimeAndDistance): void => {
     const remainingMeters =
-      Number.isFinite(event.meters) && event.meters > 0 ? event.meters : 0;
+      Number.isFinite(event.meters) && event.meters >= 0 ? event.meters : 0;
     const remainingSeconds =
-      Number.isFinite(event.seconds) && event.seconds > 0 ? event.seconds : 0;
+      Number.isFinite(event.seconds) && event.seconds >= 0 ? event.seconds : 0;
     const key = `${String(remainingMeters)}:${String(remainingSeconds)}`;
     if (key === this.lastTimeDistanceKey) return;
     this.lastTimeDistanceKey = key;
