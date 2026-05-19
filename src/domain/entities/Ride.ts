@@ -123,6 +123,20 @@ export interface RideProps {
  */
 export const SCHEDULED_RIDE_MIN_LEAD_MINUTES = 15;
 
+/**
+ * Symmetric upper bound on scheduled-ride lead time. A pickup more
+ * than this many days out is almost certainly a UI mishap or a bad
+ * actor — Cloud Tasks tolerates the delay but the dispatch pipeline
+ * (driver-pull model, no offer-timeout) doesn't, and a 5-year-out
+ * trip would clutter the rider's Activity tab indefinitely.
+ *
+ * 30 days is a generous-but-finite ceiling — covers realistic
+ * "next month's flight" scheduling, rejects anything weirder.
+ * Symmetric ValidationError `ride_invalid_schedule` so the picker
+ * surface uses the same surface as the floor check.
+ */
+export const SCHEDULED_RIDE_MAX_LEAD_DAYS = 30;
+
 export class Ride {
   private constructor(private readonly props: RideProps) {}
 
@@ -221,6 +235,18 @@ export class Ride {
         new ValidationError({
           code: 'ride_invalid_schedule',
           message: `schedulePickupAt must be at least ${SCHEDULED_RIDE_MIN_LEAD_MINUTES} minutes after createdAt`,
+          field: 'schedulePickupAt',
+        }),
+      );
+    }
+    const maxMillis =
+      args.createdAt.getTime() +
+      SCHEDULED_RIDE_MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
+    if (args.schedulePickupAt.getTime() > maxMillis) {
+      return Result.err(
+        new ValidationError({
+          code: 'ride_invalid_schedule',
+          message: `schedulePickupAt must be at most ${SCHEDULED_RIDE_MAX_LEAD_DAYS} days after createdAt`,
           field: 'schedulePickupAt',
         }),
       );

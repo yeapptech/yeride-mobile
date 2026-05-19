@@ -1191,9 +1191,14 @@ describe('schedulePickupAt — scheduled-ride field', () => {
   });
 
   it('parseRideDoc accepts a Firestore Timestamp duck-type and coerces to Date', () => {
-    // Mimic the @react-native-firebase/firestore Timestamp class: an
-    // object with a `toDate()` method.
+    // Mimic the @react-native-firebase/firestore Timestamp class. Real
+    // Timestamps carry both a `toDate()` method AND numeric
+    // `seconds`/`nanoseconds` fields — the DTO preprocess requires
+    // both to qualify, keeping the duck-type from matching an
+    // unrelated `{toDate}` object.
     const timestampLike = {
+      seconds: Math.floor(SCHEDULED_AT.getTime() / 1000),
+      nanoseconds: 0,
       toDate: () => new Date(SCHEDULED_AT.getTime()),
     };
     const doc = {

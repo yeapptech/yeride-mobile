@@ -2,6 +2,7 @@ import type { DriverSnapshot } from '@domain/entities/DriverSnapshot';
 import type { Endpoint } from '@domain/entities/Endpoint';
 import type { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
 import { Ride, type RideRoutePreference } from '@domain/entities/Ride';
+import type { RideId } from '@domain/entities/RideId';
 import type { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import type { ConflictError, ValidationError } from '@domain/errors';
 import type { RideRepository } from '@domain/repositories';
@@ -69,46 +70,101 @@ export class CreateRide {
   ): Promise<Result<Ride, ConflictError | ValidationError>> {
     const id = this.repo.newId();
     // Branch at the factory level — scheduled rides need
-    // `Ride.createScheduled` (which sets `status: 'scheduled'` and
-    // `schedulePickupAt`); non-scheduled keeps the unchanged
-    // `Ride.create` path.
+    // `Ride.createScheduled` (status='scheduled' + schedulePickupAt);
+    // non-scheduled keeps the unchanged `Ride.create` path. The
+    // `buildCreateArgs` / `buildScheduledArgs` helpers exist purely to
+    // satisfy `exactOptionalPropertyTypes`: the optional
+    // `routePreference` prop must be omitted (not set to `undefined`)
+    // when absent, which is awkward to express inline.
+    const schedulePickupAt = input.scheduledPickupAt;
     const rideR =
-      input.scheduledPickupAt != null
-        ? Ride.createScheduled({
-            id,
-            passenger: input.passenger,
-            rideService: input.rideService,
-            pickup: input.pickup,
-            dropoff: input.dropoff,
-            createdAt: input.createdAt,
-            schedulePickupAt: input.scheduledPickupAt,
-            ...(input.routePreference !== undefined
-              ? { routePreference: input.routePreference }
-              : {}),
-          })
-        : (() => {
-            const args: {
-              id: typeof id;
-              passenger: PassengerSnapshot;
-              rideService: RideServiceSnapshot;
-              pickup: Endpoint;
-              dropoff: Endpoint;
-              createdAt: Date;
-              routePreference?: RideRoutePreference | null;
-            } = {
-              id,
-              passenger: input.passenger,
-              rideService: input.rideService,
-              pickup: input.pickup,
-              dropoff: input.dropoff,
-              createdAt: input.createdAt,
-            };
-            if (input.routePreference !== undefined) {
-              args.routePreference = input.routePreference;
-            }
-            return Ride.create(args);
-          })();
+      schedulePickupAt != null
+        ? Ride.createScheduled(buildScheduledArgs(id, input, schedulePickupAt))
+        : Ride.create(buildCreateArgs(id, input));
     if (!rideR.ok) return Result.err(rideR.error);
     return this.repo.create(rideR.value);
   }
+}
+
+/**
+ * Build the args object for `Ride.create` from a CreateRideInput,
+ * omitting `routePreference` when the caller didn't supply it (rather
+ * than passing `undefined` — which violates `exactOptionalPropertyTypes`).
+ */
+function buildCreateArgs(
+  id: RideId,
+  input: CreateRideInput,
+): {
+  id: RideId;
+  passenger: PassengerSnapshot;
+  rideService: RideServiceSnapshot;
+  pickup: Endpoint;
+  dropoff: Endpoint;
+  createdAt: Date;
+  routePreference?: RideRoutePreference | null;
+} {
+  const args: {
+    id: RideId;
+    passenger: PassengerSnapshot;
+    rideService: RideServiceSnapshot;
+    pickup: Endpoint;
+    dropoff: Endpoint;
+    createdAt: Date;
+    routePreference?: RideRoutePreference | null;
+  } = {
+    id,
+    passenger: input.passenger,
+    rideService: input.rideService,
+    pickup: input.pickup,
+    dropoff: input.dropoff,
+    createdAt: input.createdAt,
+  };
+  if (input.routePreference !== undefined) {
+    args.routePreference = input.routePreference;
+  }
+  return args;
+}
+
+/**
+ * Build the args object for `Ride.createScheduled`. The pickup date is
+ * passed as a non-optional Date argument so the caller's `!= null`
+ * narrowing flows through without needing intersection types.
+ * Same `exactOptionalPropertyTypes` shaping as `buildCreateArgs`.
+ */
+function buildScheduledArgs(
+  id: RideId,
+  input: CreateRideInput,
+  schedulePickupAt: Date,
+): {
+  id: RideId;
+  passenger: PassengerSnapshot;
+  rideService: RideServiceSnapshot;
+  pickup: Endpoint;
+  dropoff: Endpoint;
+  createdAt: Date;
+  schedulePickupAt: Date;
+  routePreference?: RideRoutePreference | null;
+} {
+  const args: {
+    id: RideId;
+    passenger: PassengerSnapshot;
+    rideService: RideServiceSnapshot;
+    pickup: Endpoint;
+    dropoff: Endpoint;
+    createdAt: Date;
+    schedulePickupAt: Date;
+    routePreference?: RideRoutePreference | null;
+  } = {
+    id,
+    passenger: input.passenger,
+    rideService: input.rideService,
+    pickup: input.pickup,
+    dropoff: input.dropoff,
+    createdAt: input.createdAt,
+    schedulePickupAt,
+  };
+  if (input.routePreference !== undefined) {
+    args.routePreference = input.routePreference;
+  }
+  return args;
 }

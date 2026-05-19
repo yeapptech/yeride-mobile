@@ -103,11 +103,30 @@ export interface UseRouteSelectViewModel {
    * `submitError`).
    *
    * On success the tagged return shape lets the screen pick the
-   * navigation target: `isScheduled: true` → RideScheduledConfirmation;
-   * `false` → RideMonitor (legacy parity). Phase 10 turn 7 Decision 5
-   * (a).
+   * navigation target: `isScheduled: true` →
+   * RideScheduledConfirmation; `false` → RideMonitor (legacy parity).
+   * Phase 10 turn 7 Decision 5 (a).
+   *
+   * `formattedSchedulePickupAt` and `pickupAddress` are populated on
+   * the scheduled branch (and only on the scheduled branch) so the
+   * screen can navigate to the confirmation surface using a typed
+   * return value rather than reading off the view-model after
+   * `reset()` has cleared the trip-draft store. Both are non-null
+   * on success when `isScheduled === true`.
    */
-  confirm: () => Promise<{ rideId: RideId; isScheduled: boolean } | null>;
+  confirm: () => Promise<
+    | {
+        rideId: RideId;
+        isScheduled: false;
+      }
+    | {
+        rideId: RideId;
+        isScheduled: true;
+        formattedSchedulePickupAt: string;
+        pickupAddress: string | null;
+      }
+    | null
+  >;
 }
 
 const COMPUTE_DEBOUNCE_MS = 300;
@@ -287,10 +306,19 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const confirm = useCallback(async (): Promise<{
-    rideId: RideId;
-    isScheduled: boolean;
-  } | null> => {
+  const confirm = useCallback(async (): Promise<
+    | {
+        rideId: RideId;
+        isScheduled: false;
+      }
+    | {
+        rideId: RideId;
+        isScheduled: true;
+        formattedSchedulePickupAt: string;
+        pickupAddress: string | null;
+      }
+    | null
+  > => {
     setSubmitError(null);
     if (!canConfirm) return null;
     if (!pickup || !dropoff || !selectedRoute || !selectedRideServiceId) {
@@ -387,6 +415,17 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
     // Bake the selected route's directions into the dropoff endpoint so
     // the trip carries the route the rider chose, and so the driver's UI
     // can replay it via `routeToken` at dispatch time.
+    //
+    // Capture the schedule-display strings + pickup address BEFORE the
+    // mutation completes — `reset()` clears the trip-draft store on
+    // success and the view-model's memoised formatters then resolve to
+    // null. Returning these in the result lets the screen navigate
+    // without depending on stale-closure semantics over `vm.*`.
+    const isScheduled = scheduledPickupAt !== null;
+    const formattedSchedulePickupAtSnapshot = isScheduled
+      ? formatScheduleDateTime(scheduledPickupAt)
+      : null;
+    const pickupAddressSnapshot = pickup.address;
     try {
       const ride = await createRideMutation.mutateAsync({
         passenger: passengerR.value,
@@ -409,12 +448,19 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
         scheduledPickupAt,
       });
       reset();
-      const isScheduled = scheduledPickupAt !== null;
       logger.info('confirm: ride created', {
         rideId: String(ride.id),
         isScheduled,
       });
-      return { rideId: ride.id, isScheduled };
+      if (isScheduled && formattedSchedulePickupAtSnapshot !== null) {
+        return {
+          rideId: ride.id,
+          isScheduled: true,
+          formattedSchedulePickupAt: formattedSchedulePickupAtSnapshot,
+          pickupAddress: pickupAddressSnapshot,
+        };
+      }
+      return { rideId: ride.id, isScheduled: false };
     } catch (e: unknown) {
       logger.error('confirm: createRide failed', e);
       setSubmitError(

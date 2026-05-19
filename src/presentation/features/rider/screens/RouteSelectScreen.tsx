@@ -228,20 +228,16 @@ export default function RouteSelectScreen() {
                 const result = await vm.confirm();
                 if (!result) return;
                 if (result.isScheduled) {
-                  // The formatter snapshot lives on the VM only while
-                  // `scheduledPickupAt !== null`; `vm.confirm()` calls
-                  // `reset()` immediately on success so the formatted
-                  // string is no longer available off `vm.*`. Capture
-                  // before navigating, using a fallback empty-string
-                  // for the impossible case where the formatter
-                  // returned null inside the same render. The pickup
-                  // address survives because it's read off the local
-                  // `vm.pickup` snapshot at this closure's capture
-                  // time.
+                  // `confirm()` returns the formatted datetime + pickup
+                  // address inline on the scheduled branch, snapshotted
+                  // before `reset()` clears the trip-draft store. Reads
+                  // from the typed result — no stale-closure trick over
+                  // `vm.*` that would resolve to null after the mutation
+                  // settled.
                   navigation.replace('RideScheduledConfirmation', {
                     formattedSchedulePickupAt:
-                      vm.formattedSchedulePickupAt ?? '',
-                    pickupAddress: vm.pickup?.address ?? null,
+                      result.formattedSchedulePickupAt,
+                    pickupAddress: result.pickupAddress,
                   });
                 } else {
                   navigation.replace('RideMonitor', {

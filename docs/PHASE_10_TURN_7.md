@@ -435,3 +435,87 @@ the 21 BG-geolocation test failures (Phase 7 `__DEV__` short-circuit
 collides with the test environment's `__DEV__===true` execution
 path). Either gate the short-circuit behind a test-injection seam,
 or update the assertions to reflect the actual code path.
+
+## Code-review follow-up (post-turn polish, 2026-05-19)
+
+Seven small refinements landed on top of the turn commit after a
+code-review pass. None of them changes the scheduled-rides feature
+surface — they tighten the existing implementation against
+edge-case correctness and remove a fragile stale-closure pattern.
+
+1. **`confirm()` return narrowed to a discriminated union.** Was
+   `Promise<{rideId, isScheduled: boolean} | null>` (Decision 5
+   above); now `Promise<{rideId, isScheduled: false} | {rideId,
+   isScheduled: true, formattedSchedulePickupAt: string,
+   pickupAddress: string | null} | null>`. The view-model captures
+   the formatted datetime + pickup address BEFORE `reset()` clears
+   the trip-draft store, so `RouteSelectScreen` reads from the
+   typed result instead of relying on a stale-closure trick over
+   `vm.formattedSchedulePickupAt` / `vm.pickup`. Same wire-level
+   behavior; `RouteSelectScreen` now navigates with
+   `result.formattedSchedulePickupAt` and `result.pickupAddress`.
+2. **`CreateRide.execute` flattened to a clean if/else.** The
+   ternary-IIFE that satisfied `exactOptionalPropertyTypes` for the
+   non-scheduled branch is replaced by `buildCreateArgs(id, input)`
+   / `buildScheduledArgs(id, input, schedulePickupAt)` helpers. Pure
+   code-shape refactor — no behavior change.
+3. **Picker overshoot.** `ScheduleDatetimePicker` overshoots its
+   accept-minimum by a new module-scope
+   `SCHEDULE_PICKER_GRACE_SECONDS = 30` so a value accepted at
+   picker-confirm time also survives the use case's `new Date()`
+   floor a few seconds later. Without the grace, a rider who taps
+   "Schedule" at exactly the 15-minute mark and idles ~10 s before
+   submitting could trip `Ride.createScheduled`'s validation. The
+   user-visible "at least 15 minutes from now" message stays
+   accurate.
+4. **`SCHEDULED_RIDE_MAX_LEAD_DAYS = 30` ceiling.**
+   `Ride.createScheduled` now rejects scheduling more than 30 days
+   out, symmetric with the 15-minute floor. Same
+   `ride_invalid_schedule` ValidationError code as the floor so
+   picker error surfacing is identical. Cloud-Tasks tolerates the
+   delay but the driver-pull dispatch model doesn't, and the
+   Activity tab's Scheduled section shouldn't carry years-out junk.
+5. **Tightened Timestamp duck-type in `RideDoc`.** The Firestore
+   Timestamp coercion now requires BOTH a `toDate()` method AND a
+   numeric `seconds` field — real Timestamps always carry both, so
+   this positively identifies the class without an
+   `instanceof Timestamp` import (which would have pulled the
+   `@react-native-firebase/firestore` SDK into the DTO module's
+   load path and required a new jest mock). Updated the existing
+   duck-type test to seed `seconds`/`nanoseconds`.
+6. **`ActivityScreen` Scheduled section rendered in loading +
+   error branches.** The scheduled-rides subscription is
+   independent of the recent-rides `useInfiniteQuery`, so it can
+   be ready before history loads or remain valid when history
+   errors. Lifting `scheduledHeader` above the early returns gives
+   the rider a faster perceived load when they have scheduled
+   trips.
+7. **No-ops for closure / convention.** Verified
+   `<ContainerProvider/>` memoises `useCases` via
+   `useMemo(() => container ?? buildContainer(), [container])`
+   (production never passes `container`), so the
+   `useActivityViewModel` effect's `useCases.observeScheduledRides`
+   dep doesn't re-subscribe across renders. No fix needed.
+
+Out of scope (documented but skipped):
+
+- **Server-side `schedulePickupAt > now + 15min` enforcement in
+  `firestore.rules`.** Cross-repo change to legacy
+  `yeride/firestore.rules`. The 15-min floor is still client-only;
+  legacy-parity-preserving.
+- **Dedicated `ScheduledView` for `RideMonitor`.** Tapping a
+  scheduled ride in Activity routes through
+  `useActivityViewModel.onSelectRide` → `RideMonitor` →
+  `AwaitingDriverView` (existing status-router mapping). The view
+  reads "Finding a driver…" UX for what's actually a future-pickup
+  ride. Meaningful UX scope — defer to its own turn.
+- **Android picker flicker** workaround — polish only worth doing
+  if reported.
+
+Tests: 146 passing across the 11 affected suites
+(`Ride.test`, `CreateRide.test`, `rideMapper.test`,
+`ScheduleDatetimePicker.test`, `useRouteSelectViewModel.test`,
+`useActivityViewModel.test`, `ObserveScheduledRides.test`,
+`InMemoryRideRepository.test`, `formatScheduleDateTime.test`,
+`ActivityScreen.test`, `RideScheduledConfirmationScreen.test`).
+`npm run typecheck` and `npm run lint` green.

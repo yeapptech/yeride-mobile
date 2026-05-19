@@ -38,10 +38,20 @@ const ISO_DATE = z.string().min(1);
  * shape.
  *
  * Permissive on reads:
- *   - Firestore `Timestamp` instance → `Date` (canonical).
+ *   - Firestore `Timestamp` instance → `Date` (canonical). Identified
+ *     by `toDate()` method AND the Firestore-specific numeric
+ *     `seconds` field — both must be present to qualify, which keeps
+ *     the duck-type from matching an unrelated `{toDate}` object.
  *   - ISO string → `Date` (defensive: tolerates any legacy backfill
  *     or rewrite-side miswrite that emitted an ISO string).
  *   - `null` / missing → `null`.
+ *
+ * Note: an `instanceof Timestamp` check would be slightly more direct,
+ * but requires importing the class from `@react-native-firebase/firestore`
+ * — which pulls the native SDK into module-load time for the DTO. The
+ * combined-duck-type approach below is sufficiently specific to the
+ * Timestamp shape (real Timestamps always carry `seconds`+`nanoseconds`
+ * numeric fields) without that import dependency.
  *
  * The output of this preprocess is `Date | null`, fed straight into
  * `rideMapper.toDomain` without further coercion.
@@ -60,7 +70,9 @@ const SchedulePickupAtSchema = z.preprocess((val) => {
     typeof val === 'object' &&
     val !== null &&
     'toDate' in val &&
-    typeof (val as { toDate: unknown }).toDate === 'function'
+    typeof (val as { toDate: unknown }).toDate === 'function' &&
+    'seconds' in val &&
+    typeof (val as { seconds: unknown }).seconds === 'number'
   ) {
     try {
       const d = (val as { toDate: () => Date }).toDate();

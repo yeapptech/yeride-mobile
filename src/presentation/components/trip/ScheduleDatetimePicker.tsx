@@ -10,6 +10,19 @@ import { LOG } from '@shared/logger';
 const logger = LOG.extend('SCHEDULE_PICKER');
 
 /**
+ * Picker-side grace window over the domain floor: the picker overshoots
+ * its accept-minimum by this many seconds so a value accepted at
+ * picker-confirm time also survives the use case's
+ * `Ride.createScheduled` floor check a few seconds later. Without the
+ * grace, a rider who taps "Schedule" at exactly the 15-minute mark can
+ * idle 5–15 s before submitting and trip the use-case validation.
+ *
+ * Kept under a minute so the user-visible "at least 15 minutes from
+ * now" message stays truthful — 14:59.5 still rounds-down to 15.
+ */
+const SCHEDULE_PICKER_GRACE_SECONDS = 30;
+
+/**
  * Typed port of legacy
  * `yeride/src/components/ScheduleDatetimePicker.js`. Lets the rider pick
  * a future pickup datetime with a 15-minute floor.
@@ -70,6 +83,7 @@ export function ScheduleDatetimePicker({
   const getMinimumDate = (): Date => {
     const d = new Date();
     d.setMinutes(d.getMinutes() + minimumMinutes);
+    d.setSeconds(d.getSeconds() + SCHEDULE_PICKER_GRACE_SECONDS);
     return d;
   };
 

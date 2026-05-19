@@ -258,8 +258,15 @@ in `docs/PHASE_10_TURN_7.md` §B:
   unchanged from legacy app's HEAD" gate green; per-rider scheduled
   volume is low enough that client-side sort is free.
 - **Decision 5 (a)** — `useRouteSelectViewModel.confirm()` returns
-  `Promise<{rideId, isScheduled} | null>` (vs. a VM-flag pattern).
-  Screen branches on the tag at a single switch.
+  a discriminated union (vs. a VM-flag pattern): `Promise<{rideId,
+  isScheduled: false} | {rideId, isScheduled: true,
+  formattedSchedulePickupAt, pickupAddress} | null>`. The
+  scheduled branch carries the display strings inline so
+  `RouteSelectScreen` navigates from the typed result rather than
+  reading stale-closured `vm.*` selectors after `reset()` clears
+  the trip-draft store. (The shape was narrowed in the Turn 7
+  code-review follow-up — see `PHASE_10_TURN_7.md` §Code-review
+  follow-up.) Screen branches on `isScheduled` at a single switch.
 - **Decision 6 (fix in scope)** — removed `'scheduled'` from
   `ride.queries.ts:ACTIVE_STATUSES`. A pure-scheduled ride has no
   driver yet, so the rider should NOT be auto-redirected into
@@ -274,7 +281,10 @@ in `docs/PHASE_10_TURN_7.md` §B:
 **Shipped:**
 
 - `Ride.createScheduled` factory + `schedulePickupAt: Date | null`
-  prop + 15-minute-floor validation + tests.
+  prop + 15-minute floor / 30-day ceiling validation
+  (`SCHEDULED_RIDE_MIN_LEAD_MINUTES = 15`,
+  `SCHEDULED_RIDE_MAX_LEAD_DAYS = 30`; ceiling added in the Turn 7
+  code-review follow-up) + tests.
 - `RideDoc.schedulePickupAt` accepter (Timestamp / ISO / null) +
   `rideMapper` read+write paths + tests.
 - `RideRepository.observeScheduledRidesByPassenger` interface +

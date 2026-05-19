@@ -114,6 +114,14 @@ export default function ActivityScreen() {
         className="flex-1 bg-background"
         testID="activity-screen"
       >
+        {/*
+          Scheduled section is independent of the recent-rides infinite
+          query — it runs off its own live subscription, so it can be
+          ready before the history finishes loading. Rendering it here
+          (in addition to in the ready/empty branch below) gives the
+          rider a faster perceived load when they have scheduled trips.
+        */}
+        {scheduledHeader}
         <View
           testID="activity-loading"
           className="flex-1 items-center justify-center"
@@ -132,6 +140,10 @@ export default function ActivityScreen() {
         testID="activity-screen"
       >
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+          {/* Same independence rationale as the loading branch — the
+              scheduled section is driven by a separate subscription
+              and shouldn't disappear when the history query errors. */}
+          {scheduledHeader}
           <View
             testID="activity-error"
             className="flex-1 items-center justify-center p-6"
