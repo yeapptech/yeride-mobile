@@ -315,6 +315,29 @@ describe('FirestoreRideRepository.listByPassenger — pagination', () => {
       expect(r.error.code).toBe('ride_list_failed');
     }
   });
+
+  it('surfaces a NetworkError with ride_list_cursor_malformed when the cursor cannot be decoded', async () => {
+    // A cursor that survived the brand type but is structurally invalid
+    // — simulates a corrupted client cache, a bad migration, or a hand-
+    // crafted value reaching the adapter. The decode path must fail
+    // CLOSED (NetworkError) rather than silently treating it as
+    // "first page" (which would hide a real bug). The double-cast
+    // through `unknown` bypasses the brand at the test seam.
+    const malformed = 'not-a-cursor' as unknown as RideListCursor;
+    const repo = new FirestoreRideRepository();
+    const r = await repo.listByPassenger({
+      passengerId: userId('pppppppppppppppppppppppppppp'),
+      limit: 10,
+      cursor: malformed,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('ride_list_cursor_malformed');
+    }
+    // The adapter must NOT have issued a getDocs call on the malformed
+    // input — short-circuit before any network spend.
+    expect((getDocs as jest.Mock).mock.calls.length).toBe(0);
+  });
 });
 
 describe('FirestoreRideRepository.listByDriver — pagination', () => {

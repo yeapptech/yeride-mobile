@@ -71,8 +71,9 @@ export type RiderStackParamList = {
    * terminal-status trips (`completed` / `cancelled`). Role-agnostic;
    * the same screen is also mounted on the driver stack so both sides
    * land somewhere consistent. Renders trip route, role-flipped party
-   * header, per-trip events, per-trip payments + total, and (rider +
-   * completed-tippable-trip) tip re-entry. Phase 10 Turn 6.
+   * header, per-trip events, and per-trip payments + total. Tip
+   * re-entry is intentionally NOT here in Turn 6 — the rider's
+   * `RideReceiptScreen` owns the tip UX. Phase 10 Turn 6.
    */
   TripDetail: { rideId: string };
   /**

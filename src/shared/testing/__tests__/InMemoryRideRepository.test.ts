@@ -12,6 +12,7 @@ import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
 import { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
+import { RideListCursor } from '@domain/entities/RideListCursor';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
@@ -478,6 +479,56 @@ describe('InMemoryRideRepository.listByPassenger', () => {
       'tripA12345678901234567890',
     ]);
     expect(page2.value.nextCursor).toBeNull();
+  });
+
+  it('tie-skip: cursor whose createdAt equals other rides drops every tie-mate (mirrors Firestore single-field startAfter)', async () => {
+    // Three rides, two of them sharing the exact same createdAt
+    // millisecond. Real Firestore `startAfter(<iso>)` on a desc order
+    // skips ALL rows whose `createdDateTime` equals the cursor value —
+    // not just the boundary row. The fake must mirror that or it
+    // hides a real-world divergence (see `RideListCursor` docstring
+    // for the rationale).
+    const repo = new InMemoryRideRepository();
+    const tie1 = makeRide({
+      id: 'tripTIE1234567890123ab',
+      pickup: MIAMI,
+      createdAt: new Date('2026-05-19T11:00:00.000Z'),
+    });
+    const tie2 = makeRide({
+      id: 'tripTIE2234567890123ab',
+      pickup: MIAMI,
+      createdAt: new Date('2026-05-19T11:00:00.000Z'),
+    });
+    const older = makeRide({
+      id: 'tripOLDER123456789012',
+      pickup: MIAMI,
+      createdAt: new Date('2026-05-19T10:00:00.000Z'),
+    });
+    await repo.create(tie1);
+    await repo.create(tie2);
+    await repo.create(older);
+
+    // Build a cursor pointing at one of the tie-mates. With tie-skip
+    // semantics the next page should NOT include the OTHER tie-mate —
+    // it must jump past both to the older row.
+    const cursorR = RideListCursor.create({
+      createdAtMillis: tie1.createdAt.getTime(),
+      docId: String(tie1.id),
+    });
+    expect(cursorR.ok).toBe(true);
+    if (!cursorR.ok) return;
+
+    const page = await repo.listByPassenger({
+      passengerId: PASSENGER.id,
+      limit: 5,
+      cursor: cursorR.value,
+    });
+    expect(page.ok).toBe(true);
+    if (!page.ok) return;
+    expect(page.value.rides.map((r) => String(r.id))).toEqual([
+      'tripOLDER123456789012',
+    ]);
+    expect(page.value.nextCursor).toBeNull();
   });
 });
 

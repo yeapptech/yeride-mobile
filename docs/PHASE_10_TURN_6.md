@@ -133,7 +133,15 @@ edge cases that live `onSnapshot` introduces.
   `"${createdAtMillis}:${docId}"`. `.create(props)` validates
   timestamp finite + non-negative, docId non-empty + Firestore-doc-
   safe charset + <=64 chars; `.decode(cursor)` round-trips back to
-  `{createdAtMillis, docId}`. Exports `RidePage = { rides, nextCursor }`
+  `{createdAtMillis, docId}`. The data adapter uses ONLY the
+  `createdAtMillis` segment for single-field `startAfter(<iso>)` —
+  `docId` is encoded for forward compatibility if we ever migrate
+  to composite ordering. The file-level docstring describes the
+  tie-skip semantics honestly: Firestore's single-field `startAfter`
+  on desc skips every doc whose `createdDateTime` equals the
+  cursor's millisecond. Per-user ties are functionally impossible
+  in production so the rewrite accepts that as the tradeoff for
+  no composite index. Exports `RidePage = { rides, nextCursor }`
   too — coupled pair lives in one file.
 - **`repositories/RideRepository.ts`** (extended).
   `listByPassenger` + `listByDriver` gained an optional
@@ -204,12 +212,15 @@ limit`.
 cursor)` helper — mirrors the Firestore adapter's behavior:
   applies cursor → slices to `limit` raw rows → tracks boundary
   before status filter → emits `nextCursor: null` when the raw
-  page is shorter than `limit`. The cursor lookup uses
-  `findIndex(r => r.createdAt.getTime() === ms && r.id === docId)`
-  with a fallback to "skip past anything with createdAt >= cursorMs"
-  for tests that synthesize cursors out of band.
-- Tests: existing arms migrated to `.rides`. One new "paginate: page
-  1 cursor resumes page 2" arm.
+  page is shorter than `limit`. The cursor lookup matches
+  Firestore's single-field tie-skip exactly:
+  `findIndex(r => r.createdAt.getTime() < cursorMillis)` — drops
+  every tie-mate that shares the boundary's `createdAt`, so the
+  fake never hides a real-adapter divergence.
+- Tests: existing arms migrated to `.rides`. Two new arms:
+  "paginate: page 1 cursor resumes page 2" and the
+  tie-skip regression ("cursor whose createdAt equals other rides
+  drops every tie-mate").
 
 ### E. Presentation callsite migration (`src/presentation/queries/ride.queries.ts`)
 
@@ -228,8 +239,16 @@ returned only the DI container wiring + tests.
 
 - **`TripCard.tsx`** (new). Per-row card: status pill, "Trip with
   {OtherParty}" header (role-derived), pickup → dropoff endpoints,
-  formatted createdAt, fare preview (`baseFare.format()`). Wraps
-  in a `Pressable`; emits `testID="trip-card-{rideId}"` for E2E.
+  formatted createdAt, fare preview. Fare display: prefixed with
+  `Est. ` (the Ride entity carries no final-charge field — the
+  authoritative total lives in the `payments` subcollection rendered
+  on `TripDetailScreen`); hidden entirely for `cancelled` trips
+  because the base fare doesn't reflect what (if anything) the rider
+  was charged. The status pill splits into `statusPillBgClass` +
+  `statusPillTextClass` so the wrapper `<View>` and inner `<Text>`
+  get only the class they can apply (NativeWind drops `bg-*` on
+  Text and `text-*` on View). Wraps in a `Pressable`; emits
+  `testID="trip-card-{rideId}"` for E2E.
 - **`TripList.tsx`** (new). Thin `FlatList` wrapper. Props: rides,
   viewerRole, onSelectRide, ListEmptyComponent, ListFooterComponent,
   refreshing, onRefresh, testID. Stable `keyExtractor` from
@@ -243,9 +262,10 @@ returned only the DI container wiring + tests.
   math runs in minor units via `Money.add` / `Money.subtract` —
   no floats, no currency mixing.
 - Tests:
-  - `TripCard.test.tsx` (7 tests — rider/driver party label, no-
-    driver fallback, status pill copy, fare rendering, address
-    rendering, press dispatch).
+  - `TripCard.test.tsx` (8 tests — rider/driver party label, no-
+    driver fallback, status pill copy, fare rendering with `Est.`
+    prefix, address rendering, press dispatch, cancelled hides
+    the fare line).
   - `TripList.test.tsx` (5 tests — renders one card per ride,
     empty slot, footer slot, press dispatch, stable keying).
   - `TripPaymentsList.test.tsx` (6 tests — empty state, multi-row
@@ -276,7 +296,10 @@ isLoadingMore, isRefreshing, onLoadMore, onRefresh, onSelectRide}`.
   - `useFirestoreSubscription(ObserveTripPayments)`. Maps `NotFoundError`
     to a `'not-found'` discriminator so the screen can render a
     dedicated "trip not found" message. Output: `{status, ride,
-events, payments, errorMessage, refresh}`.
+events, payments, errorMessage, refresh}`. `viewerRole` is
+    intentionally NOT computed here — `TripDetailScreen` derives it
+    from `useCurrentUserId()` against the loaded ride. Keeps the VM
+    independent of the session store and trivially testable.
 - Tests:
   - `useActivityViewModel.test.tsx` (5 tests — loading→empty
     transition, ride list newest-first, terminal vs active nav
@@ -303,26 +326,34 @@ events, payments, errorMessage, refresh}`.
   Mirror of `ActivityScreen` with the driver VM. Empty copy: "Rides
   you accept will show up here." Footer testID
   `driver-activity-load-more`.
-- **`features/shared/screens/TripDetailScreen.tsx`** (new). Loading
-  / not-found / error / ready branches. Ready renders four sections:
-  party header + status + timestamp + service, route (pickup /
-  dropoff), payments (`TripPaymentsList`), and a per-trip events
-  timeline. Viewer role is derived from `useCurrentUserId()`
-  matching `ride.driver?.id` — driver match → driver view (party
-  header names passenger); else rider view (party header names
-  driver). The screen's props type is `RiderStackScreenProps<'TripDetail'>`
-  for brevity; the driver stack works because both stacks register
-  the same `TripDetail: { rideId: string }` route shape (verified
-  by typecheck).
+- **`features/shared/screens/TripDetailScreen.tsx`** (new). The
+  exported component validates `route.params.rideId` via
+  `RideId.create()` — invalid ids render the not-found state
+  short-circuit and never mount the VM (defends against unvetted
+  deep-link / push-notification params). On a valid id the
+  component delegates to an inner `TripDetailScreenBody` so the
+  conditional early return doesn't violate the Rules of Hooks.
+  Body has loading / not-found / error / ready branches. Ready
+  renders four sections: party header + status + timestamp +
+  service, route (pickup / dropoff), payments (`TripPaymentsList`),
+  and a per-trip events timeline. Viewer role is derived from
+  `useCurrentUserId()` matching `ride.driver?.id` — driver match →
+  driver view (party header names passenger); else rider view
+  (party header names driver). The screen's props type is
+  `RiderStackScreenProps<'TripDetail'>` for brevity; the driver
+  stack works because both stacks register the same
+  `TripDetail: { rideId: string }` route shape (verified by
+  typecheck).
 - Tests:
   - `ActivityScreen.test.tsx` (6 tests — empty state, ride rows,
     DevToolsSection footer, completed-ride routes to TripDetail,
     active-ride routes to RideMonitor, Load more button visibility).
   - `DriverActivityScreen.test.tsx` (5 tests — same arms, driver-
     side).
-  - `TripDetailScreen.test.tsx` (3 tests — rider-view ready state
+  - `TripDetailScreen.test.tsx` (4 tests — rider-view ready state
     with payments + events, not-found state, driver-view party
-    header).
+    header, invalid-rideId short-circuit renders not-found
+    without calling the repository).
 
 ### I. Navigation (`src/presentation/navigation/`)
 
@@ -356,12 +387,12 @@ New / extended test files:
 | Layer     | File                                                                        | Tests added                               |
 | --------- | --------------------------------------------------------------------------- | ----------------------------------------- |
 | Domain    | `entities/__tests__/RideListCursor.test.ts`                                 | **11** (all new)                          |
-| Data      | `data/repositories/__tests__/FirestoreRideRepository.pagination.test.ts`    | **9** (all new)                           |
+| Data      | `data/repositories/__tests__/FirestoreRideRepository.pagination.test.ts`    | **10** (all new)                          |
 | Data      | `data/repositories/__tests__/FirestoreRideRepository.test.ts`               | unchanged (telemetry-only)                |
-| Fake      | `shared/testing/__tests__/InMemoryRideRepository.test.ts`                   | +1 (pagination round-trip)                |
+| Fake      | `shared/testing/__tests__/InMemoryRideRepository.test.ts`                   | +2 (pagination round-trip; tie-skip)      |
 | App       | `app/usecases/ride/__tests__/ListRidesByPassenger.test.ts`                  | +1 (pagination round-trip); 4 migrated    |
 | App       | `app/usecases/ride/__tests__/ListRidesByDriver.test.ts`                     | +1 (pagination round-trip); 5 migrated    |
-| Component | `components/trip/__tests__/TripCard.test.tsx`                               | **7** (all new)                           |
+| Component | `components/trip/__tests__/TripCard.test.tsx`                               | **8** (all new)                           |
 | Component | `components/trip/__tests__/TripList.test.tsx`                               | **5** (all new)                           |
 | Component | `components/trip/__tests__/TripPaymentsList.test.tsx`                       | **6** (all new)                           |
 | VM        | `features/rider/view-models/__tests__/useActivityViewModel.test.tsx`        | **5** (all new)                           |
@@ -369,10 +400,10 @@ New / extended test files:
 | VM        | `features/shared/view-models/__tests__/useTripDetailViewModel.test.tsx`     | **2** (all new)                           |
 | Screen    | `features/rider/screens/__tests__/ActivityScreen.test.tsx`                  | **6** (all new)                           |
 | Screen    | `features/driver/screens/__tests__/DriverActivityScreen.test.tsx`           | **5** (all new)                           |
-| Screen    | `features/shared/screens/__tests__/TripDetailScreen.test.tsx`               | **3** (all new)                           |
+| Screen    | `features/shared/screens/__tests__/TripDetailScreen.test.tsx`               | **4** (all new)                           |
 | Cleanup   | `*PlaceholderScreen.test.tsx` (both)                                        | reduced to 1 no-op each (deletion staged) |
 
-**Net new tests: ~66 across all four layers.** Jest run:
+**Net new tests: ~70 across all four layers.** Jest run:
 
 ```
 Test Suites: 199 passed across 3 shards (modulo the carry-over
@@ -416,7 +447,7 @@ circuit + assertion mismatch — audit §10.1).
       `ActivityScreen` + `DriverActivityScreen` via
       `ListFooterComponent`.
 - [x] New / updated tests for each touched layer per the §F table.
-      ~66 new tests, no regressions outside Turn 9's 21
+      ~70 new tests, no regressions outside Turn 9's 21
       carry-overs.
 - [x] Audit §3.3 row flipped ❌ → ✅ with Turn 6 annotation.
 - [x] Audit §3.6 row flipped 🟡 → ✅ with the `TripPaymentsList`

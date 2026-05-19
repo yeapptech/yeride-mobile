@@ -32,11 +32,12 @@ import { queryKeys } from '@presentation/queries/keys';
  * with a discriminated union over `status` ('loading' | 'not-found' |
  * 'error' | 'ready'). The screen body stays dumb.
  *
- * `viewerRole` is computed by the consumer (the navigator already
- * routes from the rider Activity tab vs the driver Activity tab,
- * giving us role context) and passed through as a render-prop. We
- * don't infer it from the ride — a driver scrolling old trips that
- * pre-date their current role still gets the driver-side view.
+ * `viewerRole` is intentionally NOT computed here. `TripDetailScreen`
+ * derives it from `useCurrentUserId()` against the ride's
+ * `driver.id` / `passenger.id` after the ride loads. That keeps this
+ * VM independent of the session store and trivially testable — its
+ * output shape is "what the trip looks like", not "what this user
+ * sees".
  */
 
 export type TripDetailVmStatus = 'loading' | 'not-found' | 'error' | 'ready';

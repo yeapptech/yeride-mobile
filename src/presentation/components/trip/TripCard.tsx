@@ -14,11 +14,15 @@ import type { Ride } from '@domain/entities/Ride';
  * legacy yeride app rendered different sub-views per role; we collapse
  * that to one component since the diff is one line.)
  *
- * Fare display rule (matches legacy `TripView` line 44-49):
- *   - For terminal trips with no driver yet (cancelled before dispatch)
- *     or no payment recorded, fall back to the snapshot fare range.
- *   - Otherwise, render the ride-service `baseFare` as the trip's
- *     headline fare. The actual charged total is shown on
+ * Fare display rule:
+ *   - `cancelled` trips: no fare shown. The base fare doesn't reflect
+ *     what (if anything) the rider was charged — cancellation may
+ *     incur a fee, not the full fare — so it would mislead. Users
+ *     tap through to TripDetail for the actual payment breakdown.
+ *   - Every other status: render the ride-service `baseFare` prefixed
+ *     with "Est. " to mark it as the estimate, not the final charge.
+ *     The Ride entity carries no `finalFare`; the authoritative total
+ *     lives in the `payments` subcollection and is rendered on
  *     `TripDetailScreen` via `TripPaymentsList`.
  *
  * Wraps in a `Pressable` so the FlatList's onSelect can fire without
@@ -66,27 +70,47 @@ function statusLabel(status: Ride['status']): string {
 }
 
 /**
- * Tailwind class for the status pill. Uses semantic tokens (per
- * docs/DESIGN_SYSTEM.md — "Honey and the Bee" palette). No raw hex.
+ * Tailwind classes for the status pill, split into the wrapper-View
+ * background and the inner-Text color. NativeWind ignores `bg-*` on
+ * Text and `text-*` on View, so applying a combined class to both
+ * works but is wasteful — splitting makes the intent explicit. Uses
+ * semantic tokens (per docs/DESIGN_SYSTEM.md). No raw hex.
  */
-function statusPillClass(status: Ride['status']): string {
+function statusPillBgClass(status: Ride['status']): string {
   switch (status) {
     case 'completed':
-      return 'bg-success/10 text-success';
+      return 'bg-success/10';
     case 'cancelled':
-      return 'bg-destructive/10 text-destructive';
     case 'payment_failed':
-      return 'bg-destructive/10 text-destructive';
+      return 'bg-destructive/10';
     case 'payment_requested':
-      return 'bg-muted text-muted-foreground';
+    case 'awaiting_driver':
+      return 'bg-muted';
     case 'dispatched':
     case 'started':
-      return 'bg-primary/15 text-primary';
+      return 'bg-primary/15';
     case 'scheduled':
     case 'scheduled_driver_accepted':
-      return 'bg-secondary/15 text-secondary';
+      return 'bg-secondary/15';
+  }
+}
+
+function statusPillTextClass(status: Ride['status']): string {
+  switch (status) {
+    case 'completed':
+      return 'text-success';
+    case 'cancelled':
+    case 'payment_failed':
+      return 'text-destructive';
+    case 'payment_requested':
     case 'awaiting_driver':
-      return 'bg-muted text-muted-foreground';
+      return 'text-muted-foreground';
+    case 'dispatched':
+    case 'started':
+      return 'text-primary';
+    case 'scheduled':
+    case 'scheduled_driver_accepted':
+      return 'text-secondary';
   }
 }
 
@@ -104,12 +128,23 @@ export const TripCard = memo(function TripCard({
   viewerRole,
   onPress,
 }: TripCardProps) {
-  const fareText = ride.rideService.baseFare.format();
+  // See "Fare display rule" in the file-level docstring. `null` => no
+  // price chip rendered (cancelled trips).
+  const fareText: string | null =
+    ride.status === 'cancelled'
+      ? null
+      : `Est. ${ride.rideService.baseFare.format()}`;
   return (
     <Pressable
       testID={`trip-card-${String(ride.id)}`}
       accessibilityRole="button"
-      accessibilityLabel={`${otherPartyLabel(ride, viewerRole)}, ${statusLabel(ride.status)}, ${fareText}`}
+      accessibilityLabel={[
+        otherPartyLabel(ride, viewerRole),
+        statusLabel(ride.status),
+        fareText,
+      ]
+        .filter((s): s is string => s !== null)
+        .join(', ')}
       onPress={() => onPress(ride)}
       className="mb-2 rounded-lg border border-border bg-card p-3 active:opacity-70"
     >
@@ -123,10 +158,10 @@ export const TripCard = memo(function TripCard({
           </Text>
         </View>
         <View
-          className={`rounded-full px-2 py-0.5 ${statusPillClass(ride.status)}`}
+          className={`rounded-full px-2 py-0.5 ${statusPillBgClass(ride.status)}`}
         >
           <Text
-            className={`text-xs font-medium ${statusPillClass(ride.status)}`}
+            className={`text-xs font-medium ${statusPillTextClass(ride.status)}`}
           >
             {statusLabel(ride.status)}
           </Text>
@@ -155,9 +190,11 @@ export const TripCard = memo(function TripCard({
           {ride.rideService.name} · {String(ride.rideService.seatCapacity)}{' '}
           seats
         </Text>
-        <Text className="text-sm font-semibold text-foreground">
-          {fareText}
-        </Text>
+        {fareText !== null && (
+          <Text className="text-sm font-semibold text-foreground">
+            {fareText}
+          </Text>
+        )}
       </View>
     </Pressable>
   );

@@ -142,6 +142,27 @@ describe('TripDetailScreen', () => {
     });
   });
 
+  it('renders not-found short-circuit on a structurally invalid rideId param (no repo call)', async () => {
+    // `RideId.create()` rejects an empty string with a ValidationError;
+    // the screen must surface the not-found UI immediately, without
+    // mounting the VM (which would otherwise try to query the repo
+    // with a malformed id). Simulates an unvetted deep-link param.
+    const rides = new InMemoryRideRepository();
+    const getByIdSpy = jest.spyOn(rides, 'getById');
+    const { getByTestId } = render(
+      withProvider(
+        <TripDetailScreen
+          route={makeRouteProp('')}
+          navigation={makeNavigationProp()}
+        />,
+        rides,
+      ),
+    );
+    expect(getByTestId('trip-detail-not-found')).toBeTruthy();
+    // No VM means no repository call.
+    expect(getByIdSpy).not.toHaveBeenCalled();
+  });
+
   it('uses driver-view party header when viewer is the trip driver', async () => {
     useSessionStore.setState({
       status: 'authenticated',

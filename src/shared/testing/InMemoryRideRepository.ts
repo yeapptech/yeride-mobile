@@ -413,8 +413,14 @@ const DEFAULT_AVAILABLE_RADIUS_METERS = 80_467; // 50 mi (matches legacy)
  * over an already-sorted-desc-by-createdAt list of candidate rides.
  *
  * Mirrors the Firestore adapter:
- *   1. Apply the cursor: drop rides up to and including the boundary
- *      identity (`createdAtMillis` + `docId` composite).
+ *   1. Apply the cursor by SKIPPING every ride whose `createdAt >=
+ *      cursorMillis`. This matches the real adapter's single-field
+ *      `startAfter(<iso>)` semantics — Firestore drops the boundary
+ *      row AND any tie-mates that share its `createdDateTime`. The
+ *      `docId` segment of the cursor is intentionally ignored here
+ *      so the fake doesn't mask the real adapter's tie-skip behavior.
+ *      (See `RideListCursor`'s file-level docstring for the rationale
+ *      — per-user ties are functionally impossible in production.)
  *   2. Slice to `limit` raw rows.
  *   3. Track the boundary doc id BEFORE applying the status filter, so
  *      `nextCursor` advances by the raw last row (matches the Firestore
@@ -433,23 +439,16 @@ function paginateInMemory(
   if (cursor) {
     const decoded = RideListCursor.decode(cursor);
     if (decoded.ok) {
-      const { createdAtMillis, docId } = decoded.value;
+      const { createdAtMillis } = decoded.value;
+      // Single-field tie-skip: drop every row whose createdAt >= the
+      // cursor's millis. Since the list is sorted desc by createdAt,
+      // that's equivalent to "advance to the first row strictly less
+      // than the cursor". `findIndex` returns -1 when no such row
+      // exists — interpret that as "end of list".
       const i = sortedDesc.findIndex(
-        (r) =>
-          r.createdAt.getTime() === createdAtMillis && String(r.id) === docId,
+        (r) => r.createdAt.getTime() < createdAtMillis,
       );
-      // If we can't locate the boundary, fall back to "skip past anything
-      // with createdAt >= cursorMillis". This matches Firestore's
-      // startAfter semantics for the single-field createdDateTime cursor.
-      startIndex =
-        i >= 0
-          ? i + 1
-          : sortedDesc.findIndex(
-              (r) => r.createdAt.getTime() < createdAtMillis,
-            );
-      if (startIndex < 0) {
-        startIndex = sortedDesc.length;
-      }
+      startIndex = i >= 0 ? i : sortedDesc.length;
     }
   }
 

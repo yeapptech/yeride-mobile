@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Ride } from '@domain/entities/Ride';
+import { RideId } from '@domain/entities/RideId';
 import { TripPaymentsList } from '@presentation/components/trip/TripPaymentsList';
 import type { RiderStackScreenProps } from '@presentation/navigation/types';
 import { useCurrentUserId } from '@presentation/stores/useSessionStore';
@@ -42,18 +43,50 @@ type Props = RiderStackScreenProps<'TripDetail'>;
  */
 export default function TripDetailScreen({ route }: Props) {
   // `route.params.rideId` is the wire-string form (matching navigation
-  // types.ts). The VM accepts a branded RideId — cast at the boundary.
-  // No `RideId.create` here because the navigator already vetted the
-  // string when it built the navigate({rideId}) call.
-  const rideIdBrand = useMemo(
-    () =>
-      route.params.rideId as unknown as Parameters<
-        typeof useTripDetailViewModel
-      >[0]['rideId'],
+  // types.ts). The Activity-tab navigator hands us a vetted string from
+  // an existing `ride.id`, but other entry points (deep links, push-
+  // notification responses via `useNotificationResponseHandler`) can
+  // route here with any string. Run it through `RideId.create()` and
+  // render the not-found state on validation failure rather than
+  // letting a malformed id reach the repository. The VM is only
+  // mounted on the valid path.
+  const rideIdResult = useMemo(
+    () => RideId.create(route.params.rideId),
     [route.params.rideId],
   );
 
-  const vm = useTripDetailViewModel({ rideId: rideIdBrand });
+  if (!rideIdResult.ok) {
+    return (
+      <SafeAreaView
+        edges={['top']}
+        className="flex-1 bg-background"
+        testID="trip-detail-screen"
+      >
+        <View
+          testID="trip-detail-not-found"
+          className="flex-1 items-center justify-center p-6"
+        >
+          <Text className="text-base font-semibold text-foreground">
+            Trip not found
+          </Text>
+          <Text className="mt-2 text-center text-sm text-muted-foreground">
+            This link refers to a trip we couldn&rsquo;t recognize.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return <TripDetailScreenBody rideId={rideIdResult.value} />;
+}
+
+/**
+ * Inner body that runs the view-model. Split out so the conditional
+ * `RideId.create()` fallback above doesn't violate the Rules of Hooks
+ * (the VM would otherwise sit behind an early return).
+ */
+function TripDetailScreenBody({ rideId }: { rideId: RideId }) {
+  const vm = useTripDetailViewModel({ rideId });
   const currentUserId = useCurrentUserId();
 
   if (vm.status === 'loading') {

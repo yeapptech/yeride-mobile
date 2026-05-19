@@ -51,13 +51,28 @@ describe('TripCard', () => {
     expect(r2.getAllByText('Cancelled').length).toBeGreaterThan(0);
   });
 
-  it('renders the formatted base fare', () => {
+  it('renders the formatted base fare with an "Est." prefix to mark it as not-final', () => {
     const ride = makeRideAt('completed');
     const { getByText } = render(
       <TripCard ride={ride} viewerRole="rider" onPress={() => undefined} />,
     );
-    // baseFare in the fixture is $2.50.
-    expect(getByText('$2.50')).toBeTruthy();
+    // baseFare in the fixture is $2.50. The headline fare is the
+    // ride-service base, prefixed with "Est." — the Ride entity carries
+    // no final-charge field; users tap through to TripDetail for the
+    // authoritative payment breakdown.
+    expect(getByText('Est. $2.50')).toBeTruthy();
+  });
+
+  it('hides the fare entirely on cancelled trips', () => {
+    const ride = makeRideAt('cancelled', 'rideX1234567890123ab');
+    const { queryByText } = render(
+      <TripCard ride={ride} viewerRole="rider" onPress={() => undefined} />,
+    );
+    // Cancellation may incur a fee that's NOT the base fare, so showing
+    // "Est. $2.50" would mislead. Nothing rendered — users tap through
+    // to TripDetail for the actual payment breakdown.
+    expect(queryByText(/^\$2\.50$/)).toBeNull();
+    expect(queryByText(/^Est\. \$2\.50$/)).toBeNull();
   });
 
   it('renders pickup + dropoff addresses', () => {

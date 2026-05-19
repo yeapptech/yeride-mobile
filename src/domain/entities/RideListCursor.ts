@@ -10,18 +10,28 @@ import type { Ride } from './Ride';
  * `startAfter` clauses (last page's last row).
  *
  * Encoded as `"${createdDateTimeMillis}:${docId}"`. The data adapter
- * deconstructs into a Firestore `startAfter(createdDateTime,
- * documentId)` composite tiebreaker, matching the query's
- * `orderBy('createdDateTime', 'desc')` + implicit `__name__ desc`
- * ordering. The composite is deterministic so two pages requested with
- * the same cursor return the same slice — no relying on Firestore
- * snapshot identity, which the cursor would otherwise need to round-
- * trip via `getDoc`.
+ * uses ONLY the `createdDateTimeMillis` segment — single-field
+ * `startAfter(<iso>)` against the query's `orderBy('createdDateTime',
+ * 'desc')`. This matches the legacy yeride query shape (no composite
+ * index required) and keeps Firestore's read cost minimal.
+ *
+ * Tie semantics: with single-field `startAfter(<iso>)` on a desc
+ * order, Firestore skips ALL docs whose `createdDateTime` equals the
+ * cursor's millisecond. If two rides on the same per-user timeline
+ * shared the same `createdDateTime` to the millisecond, the
+ * tie-mate(s) after the boundary would not appear on subsequent
+ * pages. In practice this is functionally impossible — a single
+ * passenger or driver can't create two ride docs in the same
+ * millisecond — so the rewrite accepts the simpler single-field
+ * shape. `docId` is still encoded in the cursor for forward
+ * compatibility: if a future migration ever moves to composite
+ * `orderBy + startAfter(iso, docId)` we can wire it on without a
+ * cursor format change.
  *
  * The cursor is opaque to callers — only the Firestore adapter knows
- * how to interpret it. The in-memory fake also reads the same format
- * for test parity. Branded so a cursor cannot be passed where another
- * string-shaped id is expected.
+ * how to interpret it. The in-memory fake matches the real adapter's
+ * tie-skip semantics for test parity. Branded so a cursor cannot be
+ * passed where another string-shaped id is expected.
  */
 export type RideListCursor = Brand<string, 'RideListCursor'>;
 
