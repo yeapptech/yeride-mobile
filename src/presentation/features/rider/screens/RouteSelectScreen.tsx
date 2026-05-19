@@ -1,4 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -19,6 +20,7 @@ import {
   RideServicesList,
   RouteSelector,
 } from '@presentation/components/route';
+import { ScheduleDatetimePicker } from '@presentation/components/trip/ScheduleDatetimePicker';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 
 import { useRouteSelectViewModel } from '../view-models/useRouteSelectViewModel';
@@ -38,6 +40,7 @@ import { useRouteSelectViewModel } from '../view-models/useRouteSelectViewModel'
 export default function RouteSelectScreen() {
   const vm = useRouteSelectViewModel();
   const navigation = useNavigation<RiderStackNavigation>();
+  const [pickerVisible, setPickerVisible] = useState<boolean>(false);
 
   const initialRegion = vm.pickup
     ? {
@@ -169,6 +172,45 @@ export default function RouteSelectScreen() {
               onSelect={vm.selectRideService}
             />
           </View>
+
+          {/*
+            Schedule-pickup row (Phase 10 turn 7). When no schedule is
+            set the row prompts the rider to pick a future time; when set
+            it shows the formatted datetime + a Clear control. Tap opens
+            ScheduleDatetimePicker.
+          */}
+          <View className="border-t border-border px-4 pt-4">
+            <Pressable
+              testID="route-select-schedule-row"
+              accessibilityRole="button"
+              accessibilityLabel={
+                vm.scheduledPickupAt
+                  ? `Scheduled for ${vm.formattedSchedulePickupAt ?? ''}`
+                  : 'Schedule pickup for later'
+              }
+              onPress={() => setPickerVisible(true)}
+              className="flex-row items-center justify-between rounded-lg bg-muted/40 p-3"
+            >
+              <Text className="text-base font-medium text-foreground">
+                {vm.scheduledPickupAt
+                  ? vm.formattedSchedulePickupAt
+                  : 'Schedule pickup for later'}
+              </Text>
+              {vm.scheduledPickupAt && (
+                <Pressable
+                  testID="route-select-schedule-clear"
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear scheduled pickup"
+                  onPress={() => vm.setScheduledPickupAt(null)}
+                  hitSlop={12}
+                >
+                  <Text className="text-sm font-medium text-muted-foreground">
+                    Clear
+                  </Text>
+                </Pressable>
+              )}
+            </Pressable>
+          </View>
         </ScrollView>
 
         <View className="border-t border-border px-4 py-3">
@@ -183,9 +225,28 @@ export default function RouteSelectScreen() {
           <Pressable
             onPress={() => {
               void (async () => {
-                const rideId = await vm.confirm();
-                if (rideId) {
-                  navigation.replace('RideMonitor', { rideId: String(rideId) });
+                const result = await vm.confirm();
+                if (!result) return;
+                if (result.isScheduled) {
+                  // The formatter snapshot lives on the VM only while
+                  // `scheduledPickupAt !== null`; `vm.confirm()` calls
+                  // `reset()` immediately on success so the formatted
+                  // string is no longer available off `vm.*`. Capture
+                  // before navigating, using a fallback empty-string
+                  // for the impossible case where the formatter
+                  // returned null inside the same render. The pickup
+                  // address survives because it's read off the local
+                  // `vm.pickup` snapshot at this closure's capture
+                  // time.
+                  navigation.replace('RideScheduledConfirmation', {
+                    formattedSchedulePickupAt:
+                      vm.formattedSchedulePickupAt ?? '',
+                    pickupAddress: vm.pickup?.address ?? null,
+                  });
+                } else {
+                  navigation.replace('RideMonitor', {
+                    rideId: String(result.rideId),
+                  });
                 }
               })();
             }}
@@ -210,11 +271,20 @@ export default function RouteSelectScreen() {
                     : 'text-muted-foreground'
                 }`}
               >
-                Confirm ride
+                {vm.scheduledPickupAt ? 'Schedule ride' : 'Confirm ride'}
               </Text>
             )}
           </Pressable>
         </View>
+
+        <ScheduleDatetimePicker
+          visible={pickerVisible}
+          initialDate={vm.scheduledPickupAt ?? new Date()}
+          onClose={() => setPickerVisible(false)}
+          onSchedule={(date) => {
+            vm.setScheduledPickupAt(date);
+          }}
+        />
       </View>
     </SafeAreaView>
   );

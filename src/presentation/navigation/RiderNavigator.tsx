@@ -4,6 +4,7 @@ import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfi
 import AddPaymentMethodScreen from '@presentation/features/rider/screens/AddPaymentMethodScreen';
 import RideMonitorScreen from '@presentation/features/rider/screens/RideMonitorScreen';
 import RideReceiptScreen from '@presentation/features/rider/screens/RideReceiptScreen';
+import RideScheduledConfirmationScreen from '@presentation/features/rider/screens/RideScheduledConfirmationScreen';
 import RouteSearchScreen from '@presentation/features/rider/screens/RouteSearchScreen';
 import RouteSelectScreen from '@presentation/features/rider/screens/RouteSelectScreen';
 import TripDetailScreen from '@presentation/features/shared/screens/TripDetailScreen';
@@ -55,6 +56,11 @@ export function RiderNavigator() {
         name="RideReceipt"
         component={RideReceiptScreen}
         options={{ title: 'Receipt' }}
+      />
+      <Stack.Screen
+        name="RideScheduledConfirmation"
+        component={RideScheduledConfirmationScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
       />
       <Stack.Screen
         name="TripDetail"

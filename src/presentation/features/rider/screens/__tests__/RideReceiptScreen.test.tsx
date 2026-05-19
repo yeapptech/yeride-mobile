@@ -136,6 +136,7 @@ function makeCompletedRide(): Ride {
       },
       cancellation: null,
       routePreference: null,
+      schedulePickupAt: null,
     }),
   );
 }
@@ -574,6 +575,7 @@ describe('RideReceiptScreen — Phase 9 Turn 16 share-receipt CTA', () => {
         },
         cancellation: null,
         routePreference: null,
+        schedulePickupAt: null,
       }),
     );
     mockUseRideReceiptViewModel.mockReturnValue({

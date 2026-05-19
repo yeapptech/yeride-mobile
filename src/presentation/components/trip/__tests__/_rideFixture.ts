@@ -208,6 +208,7 @@ export function makeRideAt(
         dropoffTiming: requested.dropoffTiming,
         cancellation: requested.cancellation,
         routePreference: requested.routePreference,
+        schedulePickupAt: requested.schedulePickupAt,
       }),
     );
   }

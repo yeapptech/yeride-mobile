@@ -97,6 +97,7 @@ function makeCompletedRide(): Ride {
       },
       cancellation: null,
       routePreference: null,
+      schedulePickupAt: null,
     }),
   );
 }

@@ -1,6 +1,6 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19 · Turn 7 closed 2026-05-19
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
 **Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
@@ -27,7 +27,7 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 closures:** **3 ❌ rows, 0 🟡 rows, 0 ⚠️ rows**
+**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 + Turn 7 closures:** **2 ❌ rows, 0 🟡 rows, 0 ⚠️ rows**
 block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
 highest-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js`
 to inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next
@@ -171,20 +171,20 @@ selected.
 
 ### 2.2 Rider stack & tabs
 
-| Legacy screen                  | Rewrite screen                  | Status | Notes                                                                               |
-| ------------------------------ | ------------------------------- | ------ | ----------------------------------------------------------------------------------- |
-| `RiderHome.js`                 | `RiderHomeScreen.tsx`           | ✅     |                                                                                     |
-| `RideRouteSearch.js`           | `RouteSearchScreen.tsx`         | ✅     |                                                                                     |
-| `RideSelect.js`                | `RouteSelectScreen.tsx`         | ✅     |                                                                                     |
-| `RideMonitor.js`               | `RideMonitorScreen.tsx`         | ✅     |                                                                                     |
-| `RideScheduledConfirmation.js` | —                               | ❌     | Post-schedule confirmation screen missing. See §3.2.                                |
-| `Wallet.js`                    | `WalletScreen.tsx`              | 🟡     | Wallet screen ported, but rewrite has no `TransactionHistory` equivalent. See §3.6. |
-| `PaymentMethod.js`             | `AddPaymentMethodScreen.tsx`    | ✅     | Renamed; same purpose.                                                              |
-| `PaymentMethodItem.js`         | —                               | ✅     | Legacy file is a sub-component, not a routed screen.                                |
-| `TripHistory` (Activity tab)   | `ActivityPlaceholderScreen.tsx` | ❌     | Placeholder only — see §3.3.                                                        |
-| `DeliverService.js`            | —                               | ✅     | Legacy is a `<Text>RequestDeliver</Text>` stub. Not a real feature.                 |
-| `DeliverSelect.js`             | —                               | ✅     | Same — stub.                                                                        |
-| `DeliverMonitor.js`            | —                               | ✅     | Same — stub.                                                                        |
+| Legacy screen                  | Rewrite screen                        | Status | Notes                                                                               |
+| ------------------------------ | ------------------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| `RiderHome.js`                 | `RiderHomeScreen.tsx`                 | ✅     |                                                                                     |
+| `RideRouteSearch.js`           | `RouteSearchScreen.tsx`               | ✅     |                                                                                     |
+| `RideSelect.js`                | `RouteSelectScreen.tsx`               | ✅     |                                                                                     |
+| `RideMonitor.js`               | `RideMonitorScreen.tsx`               | ✅     |                                                                                     |
+| `RideScheduledConfirmation.js` | `RideScheduledConfirmationScreen.tsx` | ✅     | Phase 10 Turn 7 — port + nav wiring + tests. See §3.2.                              |
+| `Wallet.js`                    | `WalletScreen.tsx`                    | 🟡     | Wallet screen ported, but rewrite has no `TransactionHistory` equivalent. See §3.6. |
+| `PaymentMethod.js`             | `AddPaymentMethodScreen.tsx`          | ✅     | Renamed; same purpose.                                                              |
+| `PaymentMethodItem.js`         | —                                     | ✅     | Legacy file is a sub-component, not a routed screen.                                |
+| `TripHistory` (Activity tab)   | `ActivityPlaceholderScreen.tsx`       | ❌     | Placeholder only — see §3.3.                                                        |
+| `DeliverService.js`            | —                                     | ✅     | Legacy is a `<Text>RequestDeliver</Text>` stub. Not a real feature.                 |
+| `DeliverSelect.js`             | —                                     | ✅     | Same — stub.                                                                        |
+| `DeliverMonitor.js`            | —                                     | ✅     | Same — stub.                                                                        |
 
 ### 2.3 Driver stack & tabs
 
@@ -226,7 +226,7 @@ to Google Navigation SDK integration and the delivery flow was
 silently dropped because it was never real in legacy. No action
 needed for cutover.
 
-### 3.2 Scheduled rides — ❌ partial, rider-side UI missing
+### 3.2 Scheduled rides — ✅ closed in Turn 7 (2026-05-19)
 
 **Legacy:**
 
@@ -237,37 +237,64 @@ needed for cutover.
 - Cloud Function `onScheduledNotification` — pickup reminders via Cloud Tasks
 - `scheduled_driver_accepted` status writes from RideSelect
 
-**Rewrite:**
+**Turn 7 (2026-05-19):** Closed the gap end-to-end. Decisions captured
+in `docs/PHASE_10_TURN_7.md` §B:
 
-- ✅ `RideStatus` domain entity has `scheduled` + `scheduled_driver_accepted`
-- ✅ `RideMonitorScreen` has a status-router branch for the scheduled variant
-- ✅ Push-notification deep-link handler routes `scheduled_driver_accepted` → rider monitor
-- ✅ `useTripDraftStore` has `scheduledPickupAt` field + setter (with a comment
-  "Set by `ScheduleDatetimePicker` for a..." — referencing a component that
-  doesn't exist yet)
-- ❌ **No `ScheduleDatetimePicker` component**
-- ❌ **No `RideScheduledConfirmation` screen**
-- ❌ **No scheduled-rides listing on rider or driver Activity tab**
+- **Decision 1 (b)** — new `Ride.createScheduled` static factory (vs.
+  extending `Ride.create` with an optional arg). Mirrors the
+  "transitions return new entities" pattern; keeps `Ride.create()`
+  semantics unchanged.
+- **Decision 2 (a)** — subscription-shaped repository method
+  `observeScheduledRidesByPassenger` (vs. one-shot list). Scheduled
+  rides DO mutate while the rider watches them (`scheduled` →
+  `scheduled_driver_accepted` on driver accept, then dispatched at
+  the pickup window), so live updates are user-visible.
+- **Decision 3 (a)** — `RideScheduledConfirmation` route params carry
+  pre-formatted display strings (legacy parity) rather than a
+  `tripId`. Confirmation is a transient one-way screen the rider
+  sees once; smaller diff.
+- **Decision 4 (b)** — client-side sort by `schedulePickupAt asc` (vs.
+  composite Firestore index). Keeps the cutover-plan §3.4 "indexes
+  unchanged from legacy app's HEAD" gate green; per-rider scheduled
+  volume is low enough that client-side sort is free.
+- **Decision 5 (a)** — `useRouteSelectViewModel.confirm()` returns
+  `Promise<{rideId, isScheduled} | null>` (vs. a VM-flag pattern).
+  Screen branches on the tag at a single switch.
+- **Decision 6 (fix in scope)** — removed `'scheduled'` from
+  `ride.queries.ts:ACTIVE_STATUSES`. A pure-scheduled ride has no
+  driver yet, so the rider should NOT be auto-redirected into
+  RideMonitor. Verified at pre-checklist that line 47 of the
+  rewrite's `ride.queries.ts` included `'scheduled'`; that's a
+  pre-existing bug we inherited from earlier Phase work. Fixed
+  here; tests pass.
+- **Decision 7 (a)** — picker entry on `RouteSelectScreen` (legacy
+  parity). The row sits between `RideServicesList` and the
+  Confirm button.
 
-**Verdict:** ❌ — rider cannot CREATE a scheduled ride in the rewrite.
-A user who has scheduled rides today (running on legacy) can still
-see them via push notifications, but they can't create new ones.
-Phase 10.x turn required. Size: medium (~2-3 days).
+**Shipped:**
 
-**Phase 10 turn scope:**
+- `Ride.createScheduled` factory + `schedulePickupAt: Date | null`
+  prop + 15-minute-floor validation + tests.
+- `RideDoc.schedulePickupAt` accepter (Timestamp / ISO / null) +
+  `rideMapper` read+write paths + tests.
+- `RideRepository.observeScheduledRidesByPassenger` interface +
+  `FirestoreRideRepository` impl + `InMemoryRideRepository`
+  mirror + tests.
+- `CreateRide.scheduledPickupAt` extension + new
+  `ObserveScheduledRides` use case + DI wiring + tests.
+- `ScheduleDatetimePicker.tsx` typed port + `formatScheduleDateTime`
+  helper + `__mocks__/@react-native-community/datetimepicker.tsx`
+  Jest mock + tests.
+- `RideScheduledConfirmationScreen.tsx` + nav wiring + tests.
+- `useRouteSelectViewModel` extended with the scheduled selector +
+  formatter + tagged confirm() shape; `RouteSelectScreen` schedule
+  row + clear control + post-confirm branch.
+- `useActivityViewModel` + `ActivityScreen` rider-side Scheduled
+  section.
+- `@react-native-community/datetimepicker@8.4.4` added to
+  `package.json` + `app.config.ts` plugins.
 
-- Port `ScheduleDatetimePicker` as a domain-shaped component
-  (`@react-native-community/datetimepicker` is in legacy's plugin
-  block but absent from rewrite's `app.config.ts` — need to add the
-  plugin too).
-- Port `RideScheduledConfirmation` to `RideScheduledConfirmationScreen.tsx`
-  in `features/rider/screens/`.
-- Wire scheduling into `useRouteSelectViewModel` (or wherever
-  `CreateRide` is called) — branch on `scheduledPickupAt != null`
-  to call the scheduled path.
-- Add scheduled-rides view in Activity tab (also blocked on §3.3).
-- Add new use case `ObserveScheduledRides` mirroring legacy's
-  `subscribeToRiderScheduledRides`.
+**Verdict:** ✅ — rider can again create + view scheduled rides.
 
 ### 3.3 Activity / trip history — ✅ closed in Turn 6 (2026-05-19)
 
@@ -552,7 +579,7 @@ and the two are NOT competing surfaces.
 | `expo-notifications` plugin                     | Present                                                               | Present (Phase 9 Turn 2)                                                                                 | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `react-native-background-geolocation` plugin    | Present                                                               | Present (Phase 7 + v5 upgrade)                                                                           | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `@stripe/stripe-react-native` plugin            | Present                                                               | Present (Phase 6)                                                                                        | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `@react-native-community/datetimepicker` plugin | Present                                                               | ❌ **missing**                                                                                           | ❌ Required for §3.2 scheduled rides UI.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `@react-native-community/datetimepicker` plugin | Present                                                               | ✅ added in Turn 7 (2026-05-19)                                                                          | ✅ **closed Turn 7 (2026-05-19)**. Plugin appended to `app.config.ts` plugins array; `@react-native-community/datetimepicker@8.4.4` added to `package.json` dependencies. Used by `ScheduleDatetimePicker.tsx` (Turn 7). Native rebuild (`npm run prebuild`) required on next build; jest tests use the manual mock at `__mocks__/@react-native-community/datetimepicker.tsx`.                                                                                                                                                                                                                                                                                                          |
 | `@react-native-firebase/crashlytics` plugin     | Present                                                               | Present (Phase 9 Turn 3)                                                                                 | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `withCrashlyticsUploadSymbols` custom plugin    | Present                                                               | Present                                                                                                  | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `withMaterialTheme` custom plugin               | Present                                                               | ✅ ported as `plugins/withMaterialTheme.js` (Turn 3)                                                     | ✅ **closed Turn 3 (2026-05-18)**. Ported the legacy plugin to `plugins/withMaterialTheme.js:67-101` with two patches: `withAndroidStyles` flips `AppTheme`'s parent to `Theme.MaterialComponents.DayNight.NoActionBar` (NOT legacy's `Light` variant — preserves the rewrite's dark-mode support); `withAppBuildGradle` injects `implementation 'com.google.android.material:material:1.11.0'` into the app dependencies block. Both patches are idempotent (verified by fixture smoke test, 11/11 assertions). Remove this plugin once `@stripe/stripe-react-native` ships a release whose own Expo plugin applies the Material theme, or once the rewrite stops using `<CardForm/>`. |
@@ -568,7 +595,7 @@ and the two are NOT competing surfaces.
 
 **Action items (v2):**
 
-- ❌ Add `@react-native-community/datetimepicker` plugin (gated on §3.2 work).
+- ✅ `@react-native-community/datetimepicker` plugin added in Turn 7 (2026-05-19) alongside the §3.2 scheduled-rides UI port.
 - ✅ `audio` UIBackgroundMode restored in Turn 1 (`app.config.ts:184`).
 - ✅ `processing` UIBackgroundMode vs `BGTaskSchedulerPermittedIdentifiers`
   reconciled in Turn 4 (2026-05-18) via Path B — both transistorsoft
@@ -674,7 +701,7 @@ one-line `audio` UIBackgroundMode restoration). Remaining turns:
 | ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)                                                                        |
 | ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                        | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
 | ~~6~~ | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                           | ~~Largest user-facing gap~~           | ~~large (3-5d)~~        | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
-| 7     | **Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.                                                                                                                                       | Existing feature regression risk      | medium (2-3d)           | partly (6) for the listing                                                                                                                   |
+| ~~7~~ | ~~**Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.~~                                                                                                                                   | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (creation UI + listing + nav + native config; see `docs/PHASE_10_TURN_7.md`)                                        |
 | 8     | **Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.                                                                                                                                                                                                      | Existing feature regression risk      | medium (2-3d)           | —                                                                                                                                            |
 | 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate       | small (1d)              | —                                                                                                                                            |
 | 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                                                                                      |

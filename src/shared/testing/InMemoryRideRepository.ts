@@ -46,6 +46,10 @@ export class InMemoryRideRepository implements RideRepository {
     radiusMeters: number;
     callback: (rides: readonly Ride[]) => void;
   }>();
+  private scheduledObservers = new Set<{
+    passengerId: string;
+    callback: (rides: readonly Ride[]) => void;
+  }>();
   private eventObservers = new Map<
     string,
     Set<(events: readonly TripEvent[]) => void>
@@ -111,6 +115,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.rides.set(key, ride);
     this.notifyRide(ride);
     this.notifyAvailable();
+    this.notifyScheduled();
     return Result.ok(ride);
   }
 
@@ -150,6 +155,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.rides.set(key, ride);
     this.notifyRide(ride);
     this.notifyAvailable();
+    this.notifyScheduled();
     return Result.ok(ride);
   }
 
@@ -212,6 +218,23 @@ export class InMemoryRideRepository implements RideRepository {
     };
   }
 
+  observeScheduledRidesByPassenger(args: {
+    passengerId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const entry = {
+      passengerId: String(args.passengerId),
+      callback: args.callback,
+    };
+    this.scheduledObservers.add(entry);
+    // Emit current state synchronously so subscribers reflect initial
+    // contents the same way the Firestore `onSnapshot` does on attach.
+    args.callback(this.computeScheduled(entry.passengerId));
+    return () => {
+      this.scheduledObservers.delete(entry);
+    };
+  }
+
   subscribeEvents(args: {
     rideId: RideId;
     callback: (events: readonly TripEvent[]) => void;
@@ -270,6 +293,7 @@ export class InMemoryRideRepository implements RideRepository {
     if (!next.ok) return next;
     this.rides.set(String(args.rideId), next.value);
     this.notifyRide(next.value);
+    this.notifyScheduled();
     return Result.ok(next.value);
   }
 
@@ -309,6 +333,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.rides.set(String(args.rideId), next.value);
     this.notifyRide(next.value);
     this.notifyAvailable();
+    this.notifyScheduled();
     return Result.ok(next.value);
   }
 
@@ -347,6 +372,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.payments.clear();
     this.rideObservers.clear();
     this.availableObservers.clear();
+    this.scheduledObservers.clear();
     this.eventObservers.clear();
     this.paymentObservers.clear();
     this.nextCancelResult = null;
@@ -380,6 +406,27 @@ export class InMemoryRideRepository implements RideRepository {
     for (const obs of this.availableObservers) {
       obs.callback(this.computeAvailable(obs));
     }
+  }
+
+  private notifyScheduled(): void {
+    for (const obs of this.scheduledObservers) {
+      obs.callback(this.computeScheduled(obs.passengerId));
+    }
+  }
+
+  private computeScheduled(passengerId: string): readonly Ride[] {
+    const matching: Ride[] = [];
+    for (const r of this.rides.values()) {
+      if (String(r.passenger.id) !== passengerId) continue;
+      if (
+        r.status !== 'scheduled' &&
+        r.status !== 'scheduled_driver_accepted'
+      ) {
+        continue;
+      }
+      matching.push(r);
+    }
+    return matching;
   }
 
   private computeAvailable(obs: {

@@ -392,3 +392,67 @@ describe('Ride.cancel', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe('Ride.createScheduled', () => {
+  const SCHEDULED_AT = new Date(T0.getTime() + 30 * 60_000); // 30 min after T0
+
+  function scheduledArgs(overrides: { schedulePickupAt?: Date } = {}) {
+    return {
+      id: unwrap(RideId.create('aBcDeFgHiJkLmNoPqRsT')),
+      passenger: PASSENGER,
+      rideService: RIDE_SERVICE,
+      pickup: PICKUP,
+      dropoff: DROPOFF,
+      createdAt: T0,
+      schedulePickupAt: overrides.schedulePickupAt ?? SCHEDULED_AT,
+    };
+  }
+
+  it('creates a scheduled ride with status="scheduled" and schedulePickupAt populated', () => {
+    const r = Ride.createScheduled(scheduledArgs());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.status).toBe('scheduled');
+      expect(r.value.driver).toBeNull();
+      expect(r.value.schedulePickupAt).toEqual(SCHEDULED_AT);
+      expect(r.value.cancellation).toBeNull();
+      expect(r.value.pickupTiming.startedAt).toBeNull();
+    }
+  });
+
+  it('rejects schedulePickupAt earlier than createdAt', () => {
+    const past = new Date(T0.getTime() - 60_000);
+    const r = Ride.createScheduled(scheduledArgs({ schedulePickupAt: past }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('ride_invalid_schedule');
+    }
+  });
+
+  it('rejects schedulePickupAt less than 15 minutes after createdAt', () => {
+    const tooSoon = new Date(T0.getTime() + 14 * 60_000);
+    const r = Ride.createScheduled(
+      scheduledArgs({ schedulePickupAt: tooSoon }),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('ride_invalid_schedule');
+      expect(r.error.field).toBe('schedulePickupAt');
+    }
+  });
+
+  it('accepts schedulePickupAt exactly 15 minutes after createdAt (boundary)', () => {
+    const boundary = new Date(T0.getTime() + 15 * 60_000);
+    const r = Ride.createScheduled(
+      scheduledArgs({ schedulePickupAt: boundary }),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('rejects an invalid Date (NaN time)', () => {
+    const bad = new Date('not-a-date');
+    const r = Ride.createScheduled(scheduledArgs({ schedulePickupAt: bad }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('ride_invalid_schedule');
+  });
+});

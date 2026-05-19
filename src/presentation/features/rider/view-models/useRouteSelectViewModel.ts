@@ -17,6 +17,7 @@ import {
   useCreateRideMutation,
 } from '@presentation/queries';
 import { useActiveServiceArea, useTripDraftStore } from '@presentation/stores';
+import { formatScheduleDateTime } from '@shared/datetime/formatScheduleDateTime';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RouteSelectVM');
@@ -78,13 +79,35 @@ export interface UseRouteSelectViewModel {
   /** Last submission error, surfaced as a friendly string. */
   readonly submitError: string | null;
   /**
-   * Build a Ride from the trip-draft state, mint an id via the repo, and
-   * persist via `useCreateRideMutation`. Resolves to the new RideId on
-   * success or `null` if the draft was incomplete / submission failed
-   * (the error is exposed via `submitError`). The screen navigates to
-   * RideMonitor on success.
+   * Scheduled-pickup state — when set, the next `confirm()` produces a
+   * `'scheduled'` ride and the screen navigates to
+   * RideScheduledConfirmation instead of RideMonitor.
+   *
+   *   - `scheduledPickupAt`: the rider-picked future pickup datetime, or
+   *     `null` when no schedule (default "now" ride).
+   *   - `setScheduledPickupAt`: pass `null` to clear, a `Date` to set
+   *     (the picker invokes this on schedule).
+   *   - `formattedSchedulePickupAt`: pre-rendered display string for the
+   *     RouteSelect schedule row + RideScheduledConfirmation; `null`
+   *     mirrors `scheduledPickupAt === null`.
+   *
+   * Phase 10 turn 7.
    */
-  confirm: () => Promise<RideId | null>;
+  readonly scheduledPickupAt: Date | null;
+  readonly formattedSchedulePickupAt: string | null;
+  setScheduledPickupAt: (at: Date | null) => void;
+  /**
+   * Build a Ride from the trip-draft state, mint an id via the repo, and
+   * persist via `useCreateRideMutation`. Resolves to `null` if the
+   * draft was incomplete / submission failed (error via
+   * `submitError`).
+   *
+   * On success the tagged return shape lets the screen pick the
+   * navigation target: `isScheduled: true` → RideScheduledConfirmation;
+   * `false` → RideMonitor (legacy parity). Phase 10 turn 7 Decision 5
+   * (a).
+   */
+  confirm: () => Promise<{ rideId: RideId; isScheduled: boolean } | null>;
 }
 
 const COMPUTE_DEBOUNCE_MS = 300;
@@ -109,6 +132,10 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
     (s) => s.setSelectedRideServiceId,
   );
   const setAvoidTollsStore = useTripDraftStore((s) => s.setAvoidTolls);
+  const scheduledPickupAt = useTripDraftStore((s) => s.scheduledPickupAt);
+  const setScheduledPickupAtStore = useTripDraftStore(
+    (s) => s.setScheduledPickupAt,
+  );
 
   const activeArea = useActiveServiceArea();
 
@@ -260,7 +287,10 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const confirm = useCallback(async (): Promise<RideId | null> => {
+  const confirm = useCallback(async (): Promise<{
+    rideId: RideId;
+    isScheduled: boolean;
+  } | null> => {
     setSubmitError(null);
     if (!canConfirm) return null;
     if (!pickup || !dropoff || !selectedRoute || !selectedRideServiceId) {
@@ -372,10 +402,19 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
           selectedRouteSummary: selectedRoute.description || null,
           routeToken: selectedRoute.routeToken,
         },
+        // When the rider picked a future pickup time, the CreateRide
+        // use case routes through `Ride.createScheduled` (status =
+        // 'scheduled', schedulePickupAt populated). When null the
+        // legacy default path produces an `awaiting_driver` ride.
+        scheduledPickupAt,
       });
       reset();
-      logger.info('confirm: ride created', { rideId: String(ride.id) });
-      return ride.id;
+      const isScheduled = scheduledPickupAt !== null;
+      logger.info('confirm: ride created', {
+        rideId: String(ride.id),
+        isScheduled,
+      });
+      return { rideId: ride.id, isScheduled };
     } catch (e: unknown) {
       logger.error('confirm: createRide failed', e);
       setSubmitError(
@@ -396,7 +435,21 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
     currentUserQuery.data,
     createRideMutation,
     reset,
+    scheduledPickupAt,
   ]);
+
+  const setScheduledPickupAt = useCallback(
+    (at: Date | null) => setScheduledPickupAtStore(at),
+    [setScheduledPickupAtStore],
+  );
+
+  const formattedSchedulePickupAt = useMemo<string | null>(
+    () =>
+      scheduledPickupAt !== null
+        ? formatScheduleDateTime(scheduledPickupAt)
+        : null,
+    [scheduledPickupAt],
+  );
 
   return {
     status,
@@ -417,6 +470,9 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
     retry,
     isSubmitting: createRideMutation.isPending,
     submitError,
+    scheduledPickupAt,
+    formattedSchedulePickupAt,
+    setScheduledPickupAt,
     confirm,
   };
 }

@@ -3,7 +3,7 @@ import {
   useQueryClient,
   type InfiniteData,
 } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Ride } from '@domain/entities/Ride';
 import type { RideListCursor, RidePage } from '@domain/entities/RideListCursor';
@@ -53,6 +53,17 @@ export interface UseActivityViewModel {
   readonly onLoadMore: () => void;
   readonly onRefresh: () => Promise<void>;
   readonly onSelectRide: (ride: Ride) => void;
+  /**
+   * Live list of the rider's scheduled rides — pending dispatch and
+   * post-acceptance-pre-pickup. Phase 10 turn 7. Driven by
+   * `ObserveScheduledRides` (rider-side only; the driver Activity tab
+   * doesn't surface scheduled rides — legacy parity).
+   *
+   * Empty array when the rider has no scheduled rides or while the
+   * subscription is initializing. Client-side sorted by
+   * `schedulePickupAt asc` so "next-soonest" sits on top.
+   */
+  readonly scheduledRides: readonly Ride[];
 }
 
 export interface ActivityNavigator {
@@ -146,6 +157,34 @@ export function useActivityViewModel(args: {
     [navigator],
   );
 
+  // Phase 10 turn 7 — live scheduled-rides subscription. Subscription-
+  // shaped (returns synchronous unsubscribe) per the repository
+  // contract; the effect cleanup runs the unsubscribe on unmount or
+  // when the passenger id changes. Result lands in a `useState` so
+  // re-emits trigger re-renders.
+  const [scheduledRides, setScheduledRides] = useState<readonly Ride[]>([]);
+  useEffect(() => {
+    if (!passengerId) {
+      setScheduledRides([]);
+      return;
+    }
+    const unsubscribe = useCases.observeScheduledRides.execute({
+      passengerId,
+      callback: (rs) => {
+        // Sort client-side: next-soonest first. Rides with no
+        // schedulePickupAt (defensive — shouldn't happen) sink to the
+        // bottom.
+        const sorted = [...rs].sort((a, b) => {
+          const aT = a.schedulePickupAt?.getTime() ?? Number.POSITIVE_INFINITY;
+          const bT = b.schedulePickupAt?.getTime() ?? Number.POSITIVE_INFINITY;
+          return aT - bT;
+        });
+        setScheduledRides(sorted);
+      },
+    });
+    return () => unsubscribe();
+  }, [passengerId, useCases.observeScheduledRides]);
+
   return {
     status,
     rides,
@@ -156,5 +195,6 @@ export function useActivityViewModel(args: {
     onLoadMore,
     onRefresh,
     onSelectRide,
+    scheduledRides,
   };
 }

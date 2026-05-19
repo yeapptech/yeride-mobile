@@ -47,6 +47,18 @@ export interface CreateRideInput {
    * rides.
    */
   readonly driver?: DriverSnapshot | null;
+  /**
+   * Future pickup datetime. When provided (and non-null) the use case
+   * routes through `Ride.createScheduled` instead of `Ride.create`,
+   * producing a `'scheduled'` ride that the rider sees on the
+   * Activity tab's Scheduled section. Missing/null = the default
+   * "right now" ride.
+   *
+   * The 15-minute-from-`createdAt` floor is enforced by
+   * `Ride.createScheduled` (legacy parity); a too-soon value surfaces
+   * as `ValidationError({code: 'ride_invalid_schedule'})`.
+   */
+  readonly scheduledPickupAt?: Date | null;
 }
 
 export class CreateRide {
@@ -56,26 +68,46 @@ export class CreateRide {
     input: CreateRideInput,
   ): Promise<Result<Ride, ConflictError | ValidationError>> {
     const id = this.repo.newId();
-    const args: {
-      id: typeof id;
-      passenger: PassengerSnapshot;
-      rideService: RideServiceSnapshot;
-      pickup: Endpoint;
-      dropoff: Endpoint;
-      createdAt: Date;
-      routePreference?: RideRoutePreference | null;
-    } = {
-      id,
-      passenger: input.passenger,
-      rideService: input.rideService,
-      pickup: input.pickup,
-      dropoff: input.dropoff,
-      createdAt: input.createdAt,
-    };
-    if (input.routePreference !== undefined) {
-      args.routePreference = input.routePreference;
-    }
-    const rideR = Ride.create(args);
+    // Branch at the factory level — scheduled rides need
+    // `Ride.createScheduled` (which sets `status: 'scheduled'` and
+    // `schedulePickupAt`); non-scheduled keeps the unchanged
+    // `Ride.create` path.
+    const rideR =
+      input.scheduledPickupAt != null
+        ? Ride.createScheduled({
+            id,
+            passenger: input.passenger,
+            rideService: input.rideService,
+            pickup: input.pickup,
+            dropoff: input.dropoff,
+            createdAt: input.createdAt,
+            schedulePickupAt: input.scheduledPickupAt,
+            ...(input.routePreference !== undefined
+              ? { routePreference: input.routePreference }
+              : {}),
+          })
+        : (() => {
+            const args: {
+              id: typeof id;
+              passenger: PassengerSnapshot;
+              rideService: RideServiceSnapshot;
+              pickup: Endpoint;
+              dropoff: Endpoint;
+              createdAt: Date;
+              routePreference?: RideRoutePreference | null;
+            } = {
+              id,
+              passenger: input.passenger,
+              rideService: input.rideService,
+              pickup: input.pickup,
+              dropoff: input.dropoff,
+              createdAt: input.createdAt,
+            };
+            if (input.routePreference !== undefined) {
+              args.routePreference = input.routePreference;
+            }
+            return Ride.create(args);
+          })();
     if (!rideR.ok) return Result.err(rideR.error);
     return this.repo.create(rideR.value);
   }

@@ -41,10 +41,17 @@ import { queryKeys } from './keys';
  * `payment_failed` is included intentionally: the rider needs to land back
  * on RideMonitor's PaymentFailedView to retry the charge (Phase 6 wires
  * the retry; Phase 3 just shows the screen).
+ *
+ * `'scheduled'` is intentionally EXCLUDED. A pure-scheduled ride (the
+ * driver hasn't accepted yet) has no live surface — the rider sees it
+ * only on the Activity tab's Scheduled section, not on RideMonitor. Once
+ * a driver accepts, the status flips to `'scheduled_driver_accepted'`
+ * (which IS in the set) and the redirect fires. Phase 10 turn 7
+ * Decision 6 — removing the legacy false-positive that would have
+ * pushed riders into an empty RideMonitor immediately after scheduling.
  */
 const ACTIVE_STATUSES: readonly RideStatus[] = [
   'awaiting_driver',
-  'scheduled',
   'scheduled_driver_accepted',
   'dispatched',
   'started',

@@ -24,6 +24,54 @@ import { z } from 'zod';
 
 const ISO_DATE = z.string().min(1);
 
+/**
+ * `schedulePickupAt` accepter for scheduled rides.
+ *
+ * The on-disk shape is a Firestore `Timestamp`: the deployed Cloud
+ * Function `yeride-functions/handlers/trip-created.js:121` reads
+ * `tripData.schedulePickupAt.toDate()`, so this field MUST persist
+ * as a Timestamp (not the ISO-string convention the rest of
+ * `RideDoc`'s date fields use). When the modular Firestore SDK
+ * serializes the document for read, `Timestamp` lands as a class
+ * instance with `.toDate()` / `.toMillis()` methods on it. We
+ * duck-type and coerce to a JS Date so the mapper sees a uniform
+ * shape.
+ *
+ * Permissive on reads:
+ *   - Firestore `Timestamp` instance → `Date` (canonical).
+ *   - ISO string → `Date` (defensive: tolerates any legacy backfill
+ *     or rewrite-side miswrite that emitted an ISO string).
+ *   - `null` / missing → `null`.
+ *
+ * The output of this preprocess is `Date | null`, fed straight into
+ * `rideMapper.toDomain` without further coercion.
+ */
+const SchedulePickupAtSchema = z.preprocess((val) => {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    return Number.isNaN(val.getTime()) ? null : val;
+  }
+  if (typeof val === 'string') {
+    if (val.length === 0) return null;
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (
+    typeof val === 'object' &&
+    val !== null &&
+    'toDate' in val &&
+    typeof (val as { toDate: unknown }).toDate === 'function'
+  ) {
+    try {
+      const d = (val as { toDate: () => Date }).toDate();
+      return Number.isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}, z.date().nullable());
+
 const VehicleSnapshotDocSchema = z.object({
   make: z.string().min(1).max(80),
   model: z.string().min(1).max(80),
@@ -404,6 +452,12 @@ export const RideDocSchema = z.object({
   // the canonical pickup→dropoff completion timestamp.
   closedAt: ISO_DATE.nullish(),
   routePreference: RoutePreferenceDocSchema.nullish(),
+  // Scheduled-ride future pickup datetime. See SchedulePickupAtSchema's
+  // JSDoc for the on-disk Firestore Timestamp expectation and the
+  // permissive-read coercion. `.optional()` (not `.nullish()`) so the
+  // post-parse type is `Date | null | undefined`; the mapper treats
+  // undefined the same as null.
+  schedulePickupAt: SchedulePickupAtSchema.optional(),
 });
 
 export type RideDoc = z.infer<typeof RideDocSchema>;

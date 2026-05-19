@@ -1143,3 +1143,184 @@ describe('telemetry — recordError fan-out via rawMeta channel (Phase 9 turn 11
     }
   });
 });
+
+/* ─────────────────────────── schedulePickupAt ───────────────── */
+
+// Phase 10 turn 7 — scheduled-rides field. Cloud Function
+// `yeride-functions/handlers/trip-created.js:121` reads
+// `tripData.schedulePickupAt.toDate()`, so the wire-format
+// expectation is a Firestore Timestamp. The rewrite's DTO
+// preprocesses Timestamp / ISO-string / null/missing into a
+// `Date | null` for the domain mapper.
+describe('schedulePickupAt — scheduled-ride field', () => {
+  const SCHEDULED_AT = new Date('2026-04-27T13:00:00Z');
+
+  function scheduledRide(): Ride {
+    return unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create('aBcDeFgHiJkLmNoPqRsT')),
+        passenger: PASSENGER,
+        rideService: RIDE_SERVICE,
+        pickup: PICKUP,
+        dropoff: DROPOFF,
+        createdAt: T_CREATED,
+        schedulePickupAt: SCHEDULED_AT,
+      }),
+    );
+  }
+
+  it('round-trips a scheduled ride: toDoc emits a Date, parseRideDoc accepts it, toDomain restores the Date', () => {
+    const ride = scheduledRide();
+    const doc = toDoc(ride);
+    expect(doc.schedulePickupAt).toBeInstanceOf(Date);
+    expect((doc.schedulePickupAt as Date).toISOString()).toBe(
+      SCHEDULED_AT.toISOString(),
+    );
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.status).toBe('scheduled');
+    expect(round.schedulePickupAt?.toISOString()).toBe(
+      SCHEDULED_AT.toISOString(),
+    );
+  });
+
+  it('toDoc OMITS schedulePickupAt for a non-scheduled (default null) ride', () => {
+    const ride = freshRide();
+    const doc = toDoc(ride);
+    expect('schedulePickupAt' in doc).toBe(false);
+  });
+
+  it('parseRideDoc accepts a Firestore Timestamp duck-type and coerces to Date', () => {
+    // Mimic the @react-native-firebase/firestore Timestamp class: an
+    // object with a `toDate()` method.
+    const timestampLike = {
+      toDate: () => new Date(SCHEDULED_AT.getTime()),
+    };
+    const doc = {
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+      },
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      status: 'scheduled',
+      createdDateTime: T_CREATED.toISOString(),
+      pickup: { latitude: 25.7617, longitude: -80.1918, address: 'A' },
+      dropoff: { latitude: 26.1224, longitude: -80.1373, address: 'B' },
+      schedulePickupAt: timestampLike,
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    expect(parsed.schedulePickupAt).toBeInstanceOf(Date);
+    expect(parsed.schedulePickupAt?.toISOString()).toBe(
+      SCHEDULED_AT.toISOString(),
+    );
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.schedulePickupAt?.toISOString()).toBe(
+      SCHEDULED_AT.toISOString(),
+    );
+  });
+
+  it('parseRideDoc tolerates an ISO-string schedulePickupAt (defensive against backfills)', () => {
+    const doc = {
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+      },
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      status: 'scheduled',
+      createdDateTime: T_CREATED.toISOString(),
+      pickup: { latitude: 25.7617, longitude: -80.1918, address: 'A' },
+      dropoff: { latitude: 26.1224, longitude: -80.1373, address: 'B' },
+      schedulePickupAt: SCHEDULED_AT.toISOString(),
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    expect(parsed.schedulePickupAt?.toISOString()).toBe(
+      SCHEDULED_AT.toISOString(),
+    );
+  });
+
+  it('parseRideDoc treats missing schedulePickupAt as null at the domain boundary', () => {
+    const doc = {
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+      },
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      status: 'awaiting_driver',
+      createdDateTime: T_CREATED.toISOString(),
+      pickup: { latitude: 25.7617, longitude: -80.1918, address: 'A' },
+      dropoff: { latitude: 26.1224, longitude: -80.1373, address: 'B' },
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.schedulePickupAt).toBeNull();
+  });
+
+  it('parseRideDoc accepts explicit null schedulePickupAt (legacy field-present-but-null)', () => {
+    // The legacy yeride app initializes `schedulePickupAt: null` in
+    // TripContext and persists that null on awaiting_driver trips. The
+    // rewrite must read those docs without rejecting.
+    const doc = {
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+      },
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      status: 'awaiting_driver',
+      createdDateTime: T_CREATED.toISOString(),
+      pickup: { latitude: 25.7617, longitude: -80.1918, address: 'A' },
+      dropoff: { latitude: 26.1224, longitude: -80.1373, address: 'B' },
+      schedulePickupAt: null,
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain('test-id', parsed));
+    expect(round.schedulePickupAt).toBeNull();
+  });
+});

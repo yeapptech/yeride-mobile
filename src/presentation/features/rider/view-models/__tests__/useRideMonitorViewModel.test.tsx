@@ -158,6 +158,7 @@ function makeDispatchedRide(): Ride {
       dropoffTiming: awaiting.dropoffTiming,
       cancellation: null,
       routePreference: null,
+      schedulePickupAt: null,
     }),
   );
 }
@@ -390,6 +391,7 @@ describe('useRideMonitorViewModel', () => {
         dropoffTiming: initial.dropoffTiming,
         cancellation: null,
         routePreference: null,
+        schedulePickupAt: null,
       }),
     );
     await ridesRepo.update(completed);
@@ -424,6 +426,7 @@ describe('useRideMonitorViewModel', () => {
         dropoffTiming: initial.dropoffTiming,
         cancellation: null,
         routePreference: null,
+        schedulePickupAt: null,
       }),
     );
     await ridesRepo.update(failed);
@@ -575,6 +578,7 @@ describe('useRideMonitorViewModel', () => {
           dropoffTiming: dispatched.dropoffTiming,
           cancellation: null,
           routePreference: null,
+          schedulePickupAt: null,
         }),
       );
       await ridesRepo.update(started);
@@ -752,6 +756,7 @@ describe('useRideMonitorViewModel', () => {
           dropoffTiming: awaiting.dropoffTiming,
           cancellation: null,
           routePreference: null,
+          schedulePickupAt: null,
         }),
       );
     }

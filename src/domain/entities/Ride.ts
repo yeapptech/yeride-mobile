@@ -98,7 +98,30 @@ export interface RideProps {
   readonly dropoffTiming: RideDropoffTiming;
   readonly cancellation: RideCancellation | null;
   readonly routePreference: RideRoutePreference | null;
+  /**
+   * Future pickup datetime for a `'scheduled'` ride. `null` for the
+   * default "now" rides created by `Ride.create`. Set by
+   * `Ride.createScheduled` and read by the rider's Scheduled section on
+   * the Activity tab. The Cloud Function reads this as a Firestore
+   * Timestamp via `.toDate()` for the pickup-reminder Cloud Task (see
+   * `yeride-functions/handlers/trip-created.js:121`), so the mapper
+   * write path must persist it as a Timestamp, not an ISO string.
+   *
+   * Immutable after construction — the rewrite doesn't support
+   * re-scheduling an existing ride (matches legacy parity). To
+   * re-schedule, the rider cancels and creates a new ride.
+   */
+  readonly schedulePickupAt: Date | null;
 }
+
+/**
+ * Domain rule for scheduled-ride construction: the requested pickup
+ * datetime must be at least this many minutes in the future relative to
+ * `createdAt`. Mirrors legacy `ScheduleDatetimePicker`'s
+ * `minimumMinutes = 15` (see
+ * `yeride/src/components/ScheduleDatetimePicker.js`).
+ */
+export const SCHEDULED_RIDE_MIN_LEAD_MINUTES = 15;
 
 export class Ride {
   private constructor(private readonly props: RideProps) {}
@@ -143,6 +166,89 @@ export class Ride {
         },
         cancellation: null,
         routePreference: args.routePreference ?? null,
+        schedulePickupAt: null,
+      }),
+    );
+  }
+
+  /**
+   * Construct a brand-new SCHEDULED ride — the rider picked a future
+   * pickup time, the trip is persisted in `'scheduled'` status, and the
+   * RiderHome auto-redirect deliberately ignores this status (the rider
+   * hasn't been matched yet; see
+   * `useInProgressRideQuery.ACTIVE_STATUSES`). Once a driver accepts the
+   * scheduled trip the Cloud Function flips the status to
+   * `'scheduled_driver_accepted'`, at which point the active-redirect
+   * fires and the rider lands on RideMonitor.
+   *
+   * Validation rule: `schedulePickupAt` must be at least
+   * `SCHEDULED_RIDE_MIN_LEAD_MINUTES` (=15) minutes after `createdAt`.
+   * Mirrors legacy `ScheduleDatetimePicker.minimumMinutes`. Rejected
+   * with `ValidationError({code: 'ride_invalid_schedule', …})` —
+   * surfaced at the picker UI as "Pickup must be at least 15 minutes
+   * from now" rather than crashing the screen.
+   *
+   * Intentionally NOT a transition from an existing `awaiting_driver`
+   * ride — scheduling is a creation-time decision. Re-scheduling isn't
+   * supported (legacy parity); the rider cancels and re-creates.
+   */
+  static createScheduled(args: {
+    id: RideId;
+    passenger: PassengerSnapshot;
+    rideService: RideServiceSnapshot;
+    pickup: Endpoint;
+    dropoff: Endpoint;
+    createdAt: Date;
+    schedulePickupAt: Date;
+    routePreference?: RideRoutePreference | null;
+  }): Result<Ride, ValidationError> {
+    if (
+      !(args.schedulePickupAt instanceof Date) ||
+      Number.isNaN(args.schedulePickupAt.getTime())
+    ) {
+      return Result.err(
+        new ValidationError({
+          code: 'ride_invalid_schedule',
+          message: 'schedulePickupAt must be a valid Date',
+          field: 'schedulePickupAt',
+        }),
+      );
+    }
+    const minMillis =
+      args.createdAt.getTime() + SCHEDULED_RIDE_MIN_LEAD_MINUTES * 60_000;
+    if (args.schedulePickupAt.getTime() < minMillis) {
+      return Result.err(
+        new ValidationError({
+          code: 'ride_invalid_schedule',
+          message: `schedulePickupAt must be at least ${SCHEDULED_RIDE_MIN_LEAD_MINUTES} minutes after createdAt`,
+          field: 'schedulePickupAt',
+        }),
+      );
+    }
+    return Result.ok(
+      new Ride({
+        id: args.id,
+        status: 'scheduled',
+        passenger: args.passenger,
+        driver: null,
+        rideService: args.rideService,
+        pickup: args.pickup,
+        dropoff: args.dropoff,
+        createdAt: args.createdAt,
+        pickupTiming: {
+          startedAt: null,
+          completedAt: null,
+          odometerMeters: null,
+          elapsedSeconds: null,
+        },
+        dropoffTiming: {
+          startedAt: null,
+          completedAt: null,
+          odometerMeters: null,
+        },
+        cancellation: null,
+        routePreference: args.routePreference ?? null,
+        schedulePickupAt: args.schedulePickupAt,
       }),
     );
   }
@@ -184,6 +290,9 @@ export class Ride {
   }
   get routePreference(): RideRoutePreference | null {
     return this.props.routePreference;
+  }
+  get schedulePickupAt(): Date | null {
+    return this.props.schedulePickupAt;
   }
 
   /* ────────── transitions ────────── */

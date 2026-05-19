@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DevToolsSection } from '@presentation/components/dev/DevToolsSection';
+import { TripCard } from '@presentation/components/trip/TripCard';
 import { TripList } from '@presentation/components/trip/TripList';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useCurrentUserId } from '@presentation/stores/useSessionStore';
@@ -81,6 +82,31 @@ export default function ActivityScreen() {
     </View>
   );
 
+  // Phase 10 turn 7 — rider-side Scheduled section. Renders above the
+  // Recent Rides list when at least one scheduled ride exists; hidden
+  // when empty (matches legacy `ScheduledTrips` returning null on
+  // empty). Lives as a `ListHeaderComponent` on the TripList so
+  // pull-to-refresh + the empty-state still work uniformly.
+  const scheduledHeader =
+    vm.scheduledRides.length > 0 ? (
+      <View
+        testID="activity-scheduled-section"
+        className="border-b border-border px-4 pb-2 pt-3"
+      >
+        <Text className="mb-2 text-base font-semibold text-foreground">
+          Scheduled
+        </Text>
+        {vm.scheduledRides.map((ride) => (
+          <TripCard
+            key={String(ride.id)}
+            ride={ride}
+            viewerRole="rider"
+            onPress={vm.onSelectRide}
+          />
+        ))}
+      </View>
+    ) : null;
+
   if (vm.status === 'loading') {
     return (
       <SafeAreaView
@@ -132,6 +158,7 @@ export default function ActivityScreen() {
       className="flex-1 bg-background"
       testID="activity-screen"
     >
+      {scheduledHeader}
       <View className="border-b border-border px-4 py-3">
         <Text className="text-lg font-semibold text-foreground">
           Recent rides

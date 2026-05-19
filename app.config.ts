@@ -355,6 +355,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         merchantIdentifier: 'merchant.tech.yeapp.yeridenext.dev',
       },
     ],
+    // Phase 10 turn 7: `@react-native-community/datetimepicker` plugin.
+    // The plugin block (a) writes nothing to Info.plist on iOS — the
+    // SDK has no native config requirement there — and (b) leaves the
+    // Android side untouched. It's listed because Expo's autolinking
+    // pulls the plugin during prebuild; omitting it would leave the
+    // pod uninstalled on iOS native builds. Used by `RouteSelectScreen`'s
+    // schedule-pickup picker (`ScheduleDatetimePicker.tsx`). Legacy
+    // yeride lists this plugin verbatim. `npm run prebuild` is required
+    // after this plugin lands so the native pod resolves.
+    '@react-native-community/datetimepicker',
     // Google Maps API keys → AndroidManifest meta-data + iOS GMSApiKey.
     // No-ops when the env vars aren't set (dev convenience: the runtime
     // falls back to FakeRoutesService in that case).

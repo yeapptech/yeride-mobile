@@ -614,3 +614,169 @@ describe('InMemoryRideRepository.listByDriver', () => {
     }
   });
 });
+
+describe('InMemoryRideRepository — observeScheduledRidesByPassenger', () => {
+  function makeScheduledRide(args: {
+    id: string;
+    passenger?: PassengerSnapshot;
+    createdAt?: Date;
+    schedulePickupAt?: Date;
+  }): Ride {
+    const createdAt = args.createdAt ?? new Date('2026-04-27T12:00:00Z');
+    return unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create(args.id)),
+        passenger: args.passenger ?? PASSENGER,
+        rideService: ECONOMY,
+        pickup: unwrap(
+          Endpoint.create({
+            location: MIAMI,
+            address: 'pickup',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        dropoff: unwrap(
+          Endpoint.create({
+            location: FORT_LAUDERDALE,
+            address: 'dropoff',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        createdAt,
+        schedulePickupAt:
+          args.schedulePickupAt ?? new Date(createdAt.getTime() + 30 * 60_000),
+      }),
+    );
+  }
+
+  it('emits initial empty list when no scheduled rides match', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: readonly Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => {
+        (seen as Ride[][]).push([...rs]);
+      },
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual([]);
+    unsub();
+  });
+
+  it('delivers scheduled-status rides scoped to the passenger', async () => {
+    const repo = new InMemoryRideRepository();
+    const scheduled = makeScheduledRide({ id: 'AAAAAAAAAAAAAAAAAAAA' });
+    await repo.create(scheduled);
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    // Initial emit captures the pre-existing scheduled ride.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toHaveLength(1);
+    expect(seen[0]?.[0]?.status).toBe('scheduled');
+    unsub();
+  });
+
+  it('does NOT deliver awaiting_driver or completed rides', async () => {
+    const repo = new InMemoryRideRepository();
+    const awaiting = makeRide({ id: 'BBBBBBBBBBBBBBBBBBBB', pickup: MIAMI });
+    await repo.create(awaiting);
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[0]).toEqual([]);
+    unsub();
+  });
+
+  it('re-emits when a new scheduled ride is created', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[0]).toEqual([]);
+
+    await repo.create(makeScheduledRide({ id: 'CCCCCCCCCCCCCCCCCCCC' }));
+    expect(seen[1]).toHaveLength(1);
+    expect(seen[1]?.[0]?.status).toBe('scheduled');
+    unsub();
+  });
+
+  it('isolates passengers: rider A does not see rider B scheduled rides', async () => {
+    const repo = new InMemoryRideRepository();
+    const otherPassenger = unwrap(
+      PassengerSnapshot.create({
+        id: unwrap(UserId.create('cccccccccccccccccccccccccccc')),
+        name: unwrap(PersonName.create({ first: 'Edsger', last: 'Dijkstra' })),
+        email: unwrap(Email.create('edsger@yeapp.tech')),
+        phoneNumber: unwrap(PhoneNumber.create('+14155553333')),
+        pushToken: null,
+        avatarUrl: null,
+        stripeCustomerId: null,
+        defaultPaymentMethod: null,
+      }),
+    );
+    await repo.create(
+      makeScheduledRide({
+        id: 'DDDDDDDDDDDDDDDDDDDD',
+        passenger: otherPassenger,
+      }),
+    );
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[0]).toEqual([]);
+    unsub();
+  });
+
+  it('stops emitting after unsubscribe', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    unsub();
+    await repo.create(makeScheduledRide({ id: 'EEEEEEEEEEEEEEEEEEEE' }));
+    // Only the initial empty emit, no follow-up.
+    expect(seen).toHaveLength(1);
+  });
+
+  it('drops a scheduled ride from the set once it transitions out (cancel)', async () => {
+    const repo = new InMemoryRideRepository();
+    const scheduled = makeScheduledRide({ id: 'FFFFFFFFFFFFFFFFFFFF' });
+    await repo.create(scheduled);
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[0]).toHaveLength(1);
+
+    // Cancel transitions the ride to 'cancelled' — out of the scheduled set.
+    const cancelReason = unwrap(
+      CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+    );
+    const cancelled = await repo.cancel({
+      rideId: scheduled.id,
+      by: 'rider',
+      reason: cancelReason,
+    });
+    expect(cancelled.ok).toBe(true);
+    expect(seen[seen.length - 1]).toEqual([]);
+    unsub();
+  });
+});

@@ -407,6 +407,48 @@ export class FirestoreRideRepository implements RideRepository {
     );
   }
 
+  observeScheduledRidesByPassenger(args: {
+    passengerId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    // No `orderBy` clause — keeps the cutover-plan §3.4 "Firestore
+    // indexes unchanged from legacy app's HEAD" gate green. Callers
+    // sort by `schedulePickupAt asc` client-side. A composite
+    // `(passenger.id, status, schedulePickupAt)` index would be the
+    // future-proofing if scheduled-ride volume per rider grew, but
+    // typical rider has < 5 pending scheduled rides — Sort cost is
+    // negligible.
+    const q = query(
+      collection(this.firestore, TRIPS),
+      where('passenger.id', '==', String(args.passengerId)),
+      where('status', 'in', ['scheduled', 'scheduled_driver_accepted']),
+    );
+    return onSnapshot(
+      q,
+      (snap) => {
+        const out: Ride[] = [];
+        snap.forEach((d) => {
+          const r = this.toDomainOrCorrupt(d.id, d.data());
+          if (!r.ok) return;
+          out.push(r.value);
+        });
+        args.callback(out);
+      },
+      (e) => {
+        // Stays warn — Firestore SDK stream error (network outage,
+        // permission flip mid-stream). Matches the
+        // `subscribeAvailableRides` / `observeById` pattern: deliver an
+        // empty list so the caller observes a graceful disconnection
+        // rather than double-reporting against a NetworkError surface.
+        logger.warn('observeScheduledRidesByPassenger error', {
+          passengerId: String(args.passengerId),
+          code: errCode(e),
+        });
+        args.callback([]);
+      },
+    );
+  }
+
   subscribeEvents(args: {
     rideId: RideId;
     callback: (events: readonly TripEvent[]) => void;

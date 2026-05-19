@@ -1,10 +1,16 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import { Coordinates } from '@domain/entities/Coordinates';
+import { Endpoint } from '@domain/entities/Endpoint';
+import { Ride } from '@domain/entities/Ride';
+import { RideId } from '@domain/entities/RideId';
 import { UserId } from '@domain/entities/UserId';
 import {
   makeAwaitingRide,
+  makePassenger,
   makeRideAt,
+  makeRideService,
   unwrap,
 } from '@presentation/components/trip/__tests__/_rideFixture';
 import { InMemoryRideRepository, TestContainerProvider } from '@shared/testing';
@@ -199,5 +205,150 @@ describe('useActivityViewModel', () => {
       expect(result.current.status).toBe('empty');
     });
     expect(result.current.rides).toEqual([]);
+  });
+
+  // Phase 10 turn 7 — scheduled-rides subscription.
+  function makeScheduledRide(args: {
+    id: string;
+    scheduledMinutesAhead: number;
+  }): Ride {
+    const createdAt = new Date('2026-05-19T10:00:00Z');
+    return unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create(args.id)),
+        passenger: makePassenger(String(PASSENGER_ID)),
+        rideService: makeRideService(),
+        pickup: unwrap(
+          Endpoint.create({
+            location: unwrap(Coordinates.create(25.7617, -80.1918)),
+            address: 'pickup',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        dropoff: unwrap(
+          Endpoint.create({
+            location: unwrap(Coordinates.create(26.1224, -80.1373)),
+            address: 'dropoff',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        createdAt,
+        schedulePickupAt: new Date(
+          createdAt.getTime() + args.scheduledMinutesAhead * 60_000,
+        ),
+      }),
+    );
+  }
+
+  it('starts with empty scheduledRides, then surfaces the rider scheduled trips', async () => {
+    const rides = new InMemoryRideRepository();
+    rides.seed(
+      makeScheduledRide({
+        id: 'rideSchA12345678901ab',
+        scheduledMinutesAhead: 60,
+      }),
+    );
+    const nav = makeNavigator();
+    const { result } = renderHook(
+      () =>
+        useActivityViewModel({
+          passengerId: PASSENGER_ID,
+          navigator: nav,
+        }),
+      { wrapper: wrapperWithRides(rides) },
+    );
+    await waitFor(() => {
+      expect(result.current.scheduledRides.length).toBe(1);
+    });
+    expect(String(result.current.scheduledRides[0]?.id)).toBe(
+      'rideSchA12345678901ab',
+    );
+  });
+
+  it('sorts scheduledRides by schedulePickupAt ascending (next-soonest first)', async () => {
+    const rides = new InMemoryRideRepository();
+    // Insert in reverse-chrono order — VM sort should put soonest first.
+    rides.seed(
+      makeScheduledRide({
+        id: 'rideSchLate12345678ab',
+        scheduledMinutesAhead: 240,
+      }),
+    );
+    rides.seed(
+      makeScheduledRide({
+        id: 'rideSchSoon12345678ab',
+        scheduledMinutesAhead: 30,
+      }),
+    );
+    rides.seed(
+      makeScheduledRide({
+        id: 'rideSchMid12345678abc',
+        scheduledMinutesAhead: 90,
+      }),
+    );
+    const nav = makeNavigator();
+    const { result } = renderHook(
+      () =>
+        useActivityViewModel({
+          passengerId: PASSENGER_ID,
+          navigator: nav,
+        }),
+      { wrapper: wrapperWithRides(rides) },
+    );
+    await waitFor(() => {
+      expect(result.current.scheduledRides.length).toBe(3);
+    });
+    expect(result.current.scheduledRides.map((r) => String(r.id))).toEqual([
+      'rideSchSoon12345678ab',
+      'rideSchMid12345678abc',
+      'rideSchLate12345678ab',
+    ]);
+  });
+
+  it('re-emits scheduledRides when a new scheduled ride is created', async () => {
+    const rides = new InMemoryRideRepository();
+    const nav = makeNavigator();
+    const { result } = renderHook(
+      () =>
+        useActivityViewModel({
+          passengerId: PASSENGER_ID,
+          navigator: nav,
+        }),
+      { wrapper: wrapperWithRides(rides) },
+    );
+    await waitFor(() => {
+      expect(result.current.scheduledRides.length).toBe(0);
+    });
+
+    await act(async () => {
+      await rides.create(
+        makeScheduledRide({
+          id: 'rideSchNew12345678abc',
+          scheduledMinutesAhead: 60,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(result.current.scheduledRides.length).toBe(1);
+    });
+  });
+
+  it('returns empty scheduledRides when passengerId is null', async () => {
+    const nav = makeNavigator();
+    const { result } = renderHook(
+      () =>
+        useActivityViewModel({
+          passengerId: null,
+          navigator: nav,
+        }),
+      {
+        wrapper: ({ children }) => (
+          <TestContainerProvider>{children}</TestContainerProvider>
+        ),
+      },
+    );
+    expect(result.current.scheduledRides).toEqual([]);
   });
 });

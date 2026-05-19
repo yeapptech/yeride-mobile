@@ -118,6 +118,7 @@ function makeRide(args: { passengerId: UserId; status: RideStatus }): Ride {
       },
       cancellation: null,
       routePreference: null,
+      schedulePickupAt: null,
     }),
   );
 }

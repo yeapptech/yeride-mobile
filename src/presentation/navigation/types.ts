@@ -67,6 +67,22 @@ export type RiderStackParamList = {
   RideMonitor: { rideId: string };
   RideReceipt: { rideId: string };
   /**
+   * Confirmation surface shown immediately after a rider creates a
+   * SCHEDULED ride (not a "now" ride). Stateless one-way screen: ✓
+   * icon, formatted pickup datetime, pickup address, reassurance
+   * line, "Got it" button that pops back to `RiderTabs`.
+   *
+   * Params carry the already-formatted display strings rather than a
+   * `rideId` — confirmation is transient (not deep-linkable; rider
+   * sees it once) and the view-model already had the formatted
+   * datetime when it made the create call. Phase 10 turn 7
+   * Decision 3 (a).
+   */
+  RideScheduledConfirmation: {
+    formattedSchedulePickupAt: string;
+    pickupAddress: string | null;
+  };
+  /**
    * Trip-detail surface reached from Activity tab row taps on
    * terminal-status trips (`completed` / `cancelled`). Role-agnostic;
    * the same screen is also mounted on the driver stack so both sides

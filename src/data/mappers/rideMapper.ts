@@ -172,6 +172,10 @@ export function toDomain(
     dropoffTiming,
     cancellation: cancellationR.value,
     routePreference,
+    // `RideDocSchema.schedulePickupAt` preprocess already coerced the
+    // Firestore Timestamp / ISO-string variants to a `Date | null`.
+    // Undefined (missing field) folds to null at the domain boundary.
+    schedulePickupAt: doc.schedulePickupAt ?? null,
   });
 }
 
@@ -645,6 +649,15 @@ export function toDoc(ride: Ride): RideDoc {
       : {}),
     ...(ride.routePreference
       ? { routePreference: routePreferenceToDoc(ride.routePreference) }
+      : {}),
+    // schedulePickupAt is emitted as a `Date` instance. The modular
+    // Firestore SDK serializes JS Date → Firestore Timestamp on write,
+    // which is the shape the deployed Cloud Function
+    // `yeride-functions/handlers/trip-created.js:121` reads via
+    // `.toDate()`. CLAUDE.md forbids `undefined` Firestore writes, so
+    // for `null` rides we OMIT the field rather than emit undefined.
+    ...(ride.schedulePickupAt !== null
+      ? { schedulePickupAt: ride.schedulePickupAt }
       : {}),
   };
 }

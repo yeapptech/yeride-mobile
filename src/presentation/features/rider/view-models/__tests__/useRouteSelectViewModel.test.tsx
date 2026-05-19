@@ -348,6 +348,42 @@ describe('useRouteSelectViewModel', () => {
     });
     expect(result.current.canConfirm).toBe(true);
   });
+
+  // Phase 10 turn 7 — scheduled-pickup state and the tagged
+  // confirm() return shape.
+  it('scheduledPickupAt starts null; setScheduledPickupAt(Date) updates the formatter', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useRouteSelectViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    expect(result.current.scheduledPickupAt).toBeNull();
+    expect(result.current.formattedSchedulePickupAt).toBeNull();
+
+    const future = new Date(Date.now() + 60 * 60_000);
+    act(() => {
+      result.current.setScheduledPickupAt(future);
+    });
+    expect(result.current.scheduledPickupAt).toEqual(future);
+    expect(result.current.formattedSchedulePickupAt).not.toBeNull();
+  });
+
+  it('setScheduledPickupAt(null) clears the schedule', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useRouteSelectViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    const future = new Date(Date.now() + 60 * 60_000);
+    act(() => {
+      result.current.setScheduledPickupAt(future);
+    });
+    expect(result.current.scheduledPickupAt).toEqual(future);
+
+    act(() => {
+      result.current.setScheduledPickupAt(null);
+    });
+    expect(result.current.scheduledPickupAt).toBeNull();
+    expect(result.current.formattedSchedulePickupAt).toBeNull();
+  });
 });
 
 function makeSetupWithoutEndpoints(): {

@@ -136,6 +136,32 @@ export interface RideRepository {
     callback: (rides: readonly Ride[]) => void;
   }): () => void;
 
+  /**
+   * Live "rider's scheduled rides" subscription. Emits the rider's
+   * trips whose status is `'scheduled'` (pending dispatch) or
+   * `'scheduled_driver_accepted'` (driver has accepted, pickup window
+   * still in the future). Used by the rider's Activity tab to render
+   * the Scheduled section above the recent-rides list.
+   *
+   * Subscription-shaped (not request/response) because scheduled rides
+   * DO mutate while the rider watches them: a driver accepts (status
+   * flips from `'scheduled'` → `'scheduled_driver_accepted'`), the
+   * pickup window arrives and the Cloud Function flips to
+   * `'dispatched'` (drops from this set), or the rider cancels (drops
+   * to terminal). Synchronous unsubscribe for React-effect cleanup.
+   *
+   * The adapter is responsible for the Firestore
+   * `where('passenger.id', '==', passengerId) AND
+   * where('status', 'in', ['scheduled', 'scheduled_driver_accepted'])`
+   * query. Result ordering is intentionally NOT specified server-side
+   * (avoids a composite-index deploy at cutover); callers sort
+   * client-side by `schedulePickupAt asc` for "next-soonest" UX.
+   */
+  observeScheduledRidesByPassenger(args: {
+    passengerId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void;
+
   /** Audit-log subcollection. Read-only; emits sorted by createdAt asc. */
   subscribeEvents(args: {
     rideId: RideId;
