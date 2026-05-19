@@ -502,6 +502,21 @@ export const RideDocSchema = z.object({
   // post-parse type is `Date | null | undefined`; the mapper treats
   // undefined the same as null.
   schedulePickupAt: SchedulePickupAtSchema.optional(),
+  // Chat unread-badge signal: parent-trip-doc `lastSeenByRiderAt` /
+  // `lastSeenByDriverAt` are set to `serverTimestamp()` whenever the
+  // matching role opens the chat thread. Phase 10 turn 8 wires the
+  // write path via `ChatRepository.markMessagesRead`; legacy yeride has
+  // been writing both fields since the original ChatModal landed. The
+  // rewrite doesn't currently project these into the `Ride` domain
+  // entity (the unread-dot derivation uses `useChatUiStore.lastReadAt`
+  // as a local mirror); declaring the accepters here keeps the DTO
+  // permissive on the legacy fields so reads don't fail, and the
+  // `setDoc { merge: true }` path on `RideRepository.update` continues
+  // to preserve them across unrelated ride writes. Coerced via the
+  // same `SchedulePickupAtSchema` permissive accepter — both fields
+  // share the on-disk Firestore Timestamp shape.
+  lastSeenByRiderAt: SchedulePickupAtSchema.optional(),
+  lastSeenByDriverAt: SchedulePickupAtSchema.optional(),
 });
 
 export type RideDoc = z.infer<typeof RideDocSchema>;

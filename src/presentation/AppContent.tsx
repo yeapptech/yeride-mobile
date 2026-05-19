@@ -6,6 +6,7 @@ import { useUseCases } from '@presentation/di';
 import {
   useActiveRideForGeofence,
   useCrashReportingLifecycle,
+  useForegroundNotificationHandler,
   useGlobalErrorHandler,
   useGpsLifecycle,
   useNotificationResponseHandler,
@@ -200,6 +201,15 @@ export function AppContent({ children }: { children: ReactNode }) {
   // path. Routes via the shared `navigationRef` from
   // `@presentation/navigation/navigationRef`.
   useNotificationResponseHandler();
+
+  // Foreground notification handler (Phase 10 turn 8). Decides
+  // whether to show the OS-level banner / sound / list entry when a
+  // push arrives while the app is foregrounded. Suppresses
+  // `chat_message` banners for the currently-open chat thread so the
+  // user isn't notified about a message they're already reading.
+  // Mounted unconditionally — the handler reads
+  // `useChatUiStore.getState().openRideId` lazily on every delivery.
+  useForegroundNotificationHandler();
 
   // Soft-ask sheet: visible when the user is fully registered, the OS
   // permission is undetermined, and the user hasn't tapped "Not now"

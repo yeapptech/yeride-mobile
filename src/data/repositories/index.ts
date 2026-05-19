@@ -1,5 +1,6 @@
 export { FirebaseAuthRepository } from './FirebaseAuthRepository';
 export { FirebaseStorageVehiclePhotoRepository } from './FirebaseStorageVehiclePhotoRepository';
+export { FirestoreChatRepository } from './FirestoreChatRepository';
 export { FirestoreLocationRepository } from './FirestoreLocationRepository';
 export { FirestoreRideRepository } from './FirestoreRideRepository';
 export { FirestoreServiceAreaRepository } from './FirestoreServiceAreaRepository';

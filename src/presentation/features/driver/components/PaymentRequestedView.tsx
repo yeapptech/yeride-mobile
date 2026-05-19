@@ -4,7 +4,10 @@ import type { Money } from '@domain/entities/Money';
 import type { Ride } from '@domain/entities/Ride';
 import { FareCalculator } from '@domain/services';
 import { FareEstimate } from '@presentation/components/route';
-import { BottomSheetHeader } from '@presentation/components/trip/BottomSheetHeader';
+import {
+  BottomSheetHeader,
+  HeaderIconButton,
+} from '@presentation/components/trip/BottomSheetHeader';
 
 /**
  * Brief intermediate state during server status `payment_requested`. The
@@ -24,9 +27,18 @@ import { BottomSheetHeader } from '@presentation/components/trip/BottomSheetHead
  */
 interface PaymentRequestedViewProps {
   readonly ride: Ride;
+  /** Phase 10 turn 8 — chat button on the driver-side
+   *  payment_requested view. The Stripe webhook may take several
+   *  seconds; the driver may want to message the rider mid-wait. */
+  readonly onPressChat?: () => void;
+  readonly hasUnread?: boolean;
 }
 
-export function PaymentRequestedView({ ride }: PaymentRequestedViewProps) {
+export function PaymentRequestedView({
+  ride,
+  onPressChat,
+  hasUnread,
+}: PaymentRequestedViewProps) {
   const fare = computeRunningFare(ride);
 
   return (
@@ -34,6 +46,28 @@ export function PaymentRequestedView({ ride }: PaymentRequestedViewProps) {
       <BottomSheetHeader
         title="Awaiting payment confirmation…"
         subtitle="We're confirming the charge with the rider's bank."
+        trailing={
+          onPressChat !== undefined ? (
+            <HeaderIconButton
+              label={hasUnread ? 'Open chat (unread)' : 'Open chat'}
+              onPress={onPressChat}
+              testID="payment-requested-chat"
+            >
+              <View className="flex-row items-center">
+                <Text className="text-sm font-semibold text-foreground">
+                  Chat
+                </Text>
+                {hasUnread && (
+                  <View
+                    className="ml-1 h-2 w-2 rounded-full bg-primary"
+                    accessibilityLabel="Unread messages"
+                    testID="payment-requested-chat-unread"
+                  />
+                )}
+              </View>
+            </HeaderIconButton>
+          ) : undefined
+        }
       />
 
       <View className="items-center px-4 py-6">

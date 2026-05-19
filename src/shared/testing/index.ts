@@ -40,6 +40,7 @@ export { FakeStripeServerService } from './FakeStripeServerService';
 export type { FakeStripeServerSpies } from './FakeStripeServerService';
 export { FakeVinDecoderService } from './FakeVinDecoderService';
 export { InMemoryAuthRepository } from './InMemoryAuthRepository';
+export { InMemoryChatRepository } from './InMemoryChatRepository';
 export { InMemoryLocationRepository } from './InMemoryLocationRepository';
 export { InMemoryRideRepository } from './InMemoryRideRepository';
 export { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';

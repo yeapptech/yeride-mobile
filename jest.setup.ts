@@ -838,6 +838,13 @@ jest.mock('expo-file-system', () => {
   };
 });
 
+// react-native-gifted-chat (Phase 10 turn 8): manual mock lives at
+// `<rootDir>/__mocks__/react-native-gifted-chat.tsx`. Jest auto-resolves
+// it. Same babel / NativeWind hoisting reason as the react-native-maps
+// and react-native-svg mocks: an inline `jest.mock` factory in this
+// file would reference the auto-injected `_ReactNativeCSSInterop`
+// helper from outside the factory scope.
+
 // react-native-svg (Phase 9 turn 13): manual mock lives at
 // `<rootDir>/__mocks__/react-native-svg.tsx`. Jest auto-resolves it.
 //

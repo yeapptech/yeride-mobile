@@ -1,34 +1,49 @@
 import { create } from 'zustand';
 
+import type { RideId } from '@domain/entities/RideId';
+
 /**
  * UI-only state for the in-trip chat surface.
  *
- * Phase 3 scope: this store carries the open/closed flag and a
- * `lastReadAt` timestamp the unread-dot derives from. The full chat thread
- * + send/markRead use cases land in Phase 3.5; until then the store
- * remains write-only from the chat-stub button (which sets `isOpen` long
- * enough to show a "Chat lands in Phase 3.5" toast).
+ * State shape:
+ *   - `isOpen` — whether the chat modal is currently mounted.
+ *   - `openRideId` — when open, which trip's thread is being viewed. The
+ *     foreground notification handler in `AppContent` reads this to
+ *     suppress banner / toast notifications for `chat_message` pushes
+ *     whose `tripId` matches the currently-open thread (legacy parity:
+ *     legacy `ChatModal.js:18-19` keeps a module-scoped `openChatId` ref
+ *     for exactly this purpose; the rewrite uses Zustand for the same
+ *     signal).
+ *   - `lastReadAt` — wall-clock time of the last local `markRead`. The
+ *     unread-dot memo on `useRideMonitorViewModel` /
+ *     `useDriverMonitorViewModel` derives dot-visibility by comparing
+ *     the latest message's `createdAt` against this timestamp; bumping
+ *     `lastReadAt` on chat-open clears the local dot immediately,
+ *     ahead of the server-side `lastSeenBy*` write completing.
  *
  * Why this is separate from `useGeofenceUiStore`:
  *   - Different lifecycles: chat-open is high-frequency (per-tap), banner
  *     visibility is rare. Keeping them split avoids spurious re-renders.
- *   - Phase 3.5 will likely add `unreadCount`, `composing`, and the like
- *     here without touching geofence state.
+ *   - Phase 10 turn 8 promoted this store from a Phase 3 stub: it carried
+ *     just `{isOpen, lastReadAt}` then; the typed `open(rideId)` /
+ *     `openRideId` surface lands with the real chat thread.
  *
- * `lastReadAt` is local-only (not persisted across sessions). When Phase
- * 3.5 lands, this becomes a write-through to a Firestore field on the
- * trip's chat thread doc; the local cache remains for offline UX.
+ * `lastReadAt` is local-only (not persisted across sessions). The
+ * authoritative cross-app unread signal is the parent-trip-doc
+ * `lastSeenByRiderAt` / `lastSeenByDriverAt` field, written by
+ * `ChatRepository.markMessagesRead`. The local mirror exists for
+ * instant optimistic dot-clearing.
  */
 
 interface ChatUiState {
   readonly isOpen: boolean;
-  /**
-   * Wall-clock time of the last `markRead`. `null` means the rider has
-   * never opened the chat in this session.
-   */
+  readonly openRideId: RideId | null;
   readonly lastReadAt: Date | null;
 
-  open: () => void;
+  /** Opens the modal for a specific ride. The `rideId` is the signal the
+   *  foreground notification handler matches against to suppress banners
+   *  for messages on the currently-open thread. */
+  open: (rideId: RideId) => void;
   close: () => void;
   /** Record that the user just read the thread. */
   markRead: (at?: Date) => void;
@@ -37,14 +52,15 @@ interface ChatUiState {
 
 const INITIAL = {
   isOpen: false,
+  openRideId: null,
   lastReadAt: null,
 } as const;
 
 export const useChatUiStore = create<ChatUiState>((set) => ({
   ...INITIAL,
 
-  open: () => set({ isOpen: true }),
-  close: () => set({ isOpen: false }),
+  open: (rideId) => set({ isOpen: true, openRideId: rideId }),
+  close: () => set({ isOpen: false, openRideId: null }),
   markRead: (at) => set({ lastReadAt: at ?? new Date() }),
   reset: () => set(INITIAL),
 }));
@@ -52,6 +68,9 @@ export const useChatUiStore = create<ChatUiState>((set) => ({
 /* ───── Selector hooks ───── */
 
 export const useChatIsOpen = (): boolean => useChatUiStore((s) => s.isOpen);
+
+export const useChatOpenRideId = (): RideId | null =>
+  useChatUiStore((s) => s.openRideId);
 
 export const useChatLastReadAt = (): Date | null =>
   useChatUiStore((s) => s.lastReadAt);

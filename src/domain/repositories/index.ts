@@ -3,6 +3,7 @@ export type {
   AuthRepository,
   RegisterUserCredentials,
 } from './AuthRepository';
+export type { ChatRepository } from './ChatRepository';
 export type { LocationRepository } from './LocationRepository';
 export type { RideRepository } from './RideRepository';
 export type { ServiceAreaRepository } from './ServiceAreaRepository';

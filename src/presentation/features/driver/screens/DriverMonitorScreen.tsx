@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import { RideId } from '@domain/entities/RideId';
+import { ChatModal } from '@presentation/components/chat/ChatModal';
 import {
   Map,
   type MapMarkerProps,
@@ -17,6 +18,7 @@ import type {
   DriverStackNavigation,
   DriverStackScreenProps,
 } from '@presentation/navigation/types';
+import { useCurrentUserQuery } from '@presentation/queries';
 
 import { AtPickupView } from '../components/AtPickupView';
 import { CompletedView } from '../components/CompletedView';
@@ -84,6 +86,7 @@ export default function DriverMonitorScreen({
 function DriverMonitorContent({ rideId }: { rideId: RideId }) {
   const currentLocation = useCurrentLocation();
   const navigation = useNavigation<DriverStackNavigation>();
+  const userQuery = useCurrentUserQuery();
   // Push the SDK NavigationController into our adapter as soon as
   // DriverMonitor mounts. This makes the controller alive whenever
   // the driver is on an active trip — well before they tap "Open
@@ -223,6 +226,8 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
               ride={ride}
               onArrived={vm.onArriveAtPickup}
               onPressCancel={openCancelSheet}
+              onPressChat={vm.onPressChat}
+              hasUnread={vm.hasUnreadMessages}
               onLaunchNavigation={() => {
                 void vm.onLaunchNavigation();
               }}
@@ -237,6 +242,8 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
               }}
               onBackToEnRoute={vm.onBackToEnRoute}
               onPressCancel={openCancelSheet}
+              onPressChat={vm.onPressChat}
+              hasUnread={vm.hasUnreadMessages}
               cancelDisabled={vm.isCancelling}
               startDisabled={vm.isStarting}
             />
@@ -247,6 +254,8 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
               onRequestPayment={() => {
                 void vm.requestPayment();
               }}
+              onPressChat={vm.onPressChat}
+              hasUnread={vm.hasUnreadMessages}
               onLaunchNavigation={() => {
                 void vm.onLaunchNavigation();
               }}
@@ -255,7 +264,11 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
               launchNavigationDisabled={vm.isLaunchingNavigation}
             />
           ) : vm.status === 'payment_requested' ? (
-            <PaymentRequestedView ride={ride} />
+            <PaymentRequestedView
+              ride={ride}
+              onPressChat={vm.onPressChat}
+              hasUnread={vm.hasUnreadMessages}
+            />
           ) : vm.status === 'completed' ? (
             <CompletedView ride={ride} onClose={handleCloseTrip} />
           ) : vm.status === 'payment_failed' ? (
@@ -280,6 +293,21 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
         onClose={closeCancelSheet}
         onConfirm={handleCancelConfirm}
       />
+
+      {/* Phase 10 turn 8 — driver-side in-trip chat modal. Mounted as a
+          sibling to the bottom-sheet + cancel sheet. Gated on the
+          user query so we don't render gifted-chat before we have a
+          name to display. */}
+      {userQuery.data && (
+        <ChatModal
+          visible={vm.chatOpen}
+          onClose={vm.closeChat}
+          rideId={rideId}
+          userId={userQuery.data.id}
+          userName={userQuery.data.name}
+          role="driver"
+        />
+      )}
     </View>
   );
 }

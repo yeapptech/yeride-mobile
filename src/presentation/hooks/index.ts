@@ -24,3 +24,4 @@ export {
   type UseCrashReportingLifecycleArgs,
 } from './useCrashReportingLifecycle';
 export { useGlobalErrorHandler } from './useGlobalErrorHandler';
+export { useForegroundNotificationHandler } from './useForegroundNotificationHandler';

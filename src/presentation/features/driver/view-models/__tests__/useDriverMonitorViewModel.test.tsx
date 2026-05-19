@@ -21,12 +21,17 @@ import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
 import { AuthorizationError, NetworkError } from '@domain/errors';
 import type { BgGeofenceEvent, BgLocationEvent } from '@domain/services';
-import { useDriverStatusStore, useGpsStore } from '@presentation/stores';
+import {
+  useChatUiStore,
+  useDriverStatusStore,
+  useGpsStore,
+} from '@presentation/stores';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import {
   FakeCrashReportingService,
   FakeNavigationSdkClient,
+  InMemoryChatRepository,
   InMemoryLocationRepository,
   InMemoryRideRepository,
   TestContainerProvider,
@@ -220,13 +225,17 @@ function setupSeededState(opts?: { seedRide?: Ride }): SeededState {
 
 function withTestContainer(
   setup: SeededState,
-  fakes?: { readonly navigationSdk?: FakeNavigationSdkClient },
+  fakes?: {
+    readonly navigationSdk?: FakeNavigationSdkClient;
+    readonly chats?: InMemoryChatRepository;
+  },
 ) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       rides={setup.ridesRepo}
       locations={setup.locationsRepo}
       {...(fakes?.navigationSdk ? { navigationSdk: fakes.navigationSdk } : {})}
+      {...(fakes?.chats ? { chats: fakes.chats } : {})}
     >
       {children}
     </TestContainerProvider>
@@ -1486,6 +1495,102 @@ describe('useDriverMonitorViewModel', () => {
         expect(written.value.tripTracking?.durationSeconds).toBeNull();
         expect(written.value.tripTracking?.tripStatus).toBe('dispatched');
       }
+    });
+  });
+
+  describe('chat (Phase 10 turn 8)', () => {
+    beforeEach(() => {
+      // Module-scoped Zustand store — reset between tests.
+      useChatUiStore.getState().reset();
+    });
+
+    it('exposes chatOpen=false by default and latestMessage=null on an empty thread', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const chats = new InMemoryChatRepository();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { chats }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      expect(result.current.chatOpen).toBe(false);
+      expect(result.current.latestMessage).toBeNull();
+      expect(result.current.hasUnreadMessages).toBe(false);
+    });
+
+    it('derives hasUnreadMessages from latestMessage vs useChatUiStore.lastReadAt', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const chats = new InMemoryChatRepository();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { chats }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      // A peer sends a message; lastReadAt is still null → unread.
+      const passengerUid = unwrap(
+        UserId.create('aaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+      );
+      const passengerName = unwrap(
+        PersonName.create({ first: 'Ada', last: 'Lovelace' }),
+      );
+      await act(async () => {
+        await chats.send({
+          rideId: RIDE_ID,
+          sender: { id: passengerUid, name: passengerName },
+          text: 'hi',
+        });
+      });
+      await waitFor(() => {
+        expect(result.current.latestMessage).not.toBeNull();
+      });
+      expect(result.current.hasUnreadMessages).toBe(true);
+    });
+
+    it('onPressChat flips chatOpen, sets openRideId, marks read, fires markMessagesRead', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const chats = new InMemoryChatRepository();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { chats }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+
+      act(() => {
+        result.current.onPressChat();
+      });
+      expect(result.current.chatOpen).toBe(true);
+      expect(String(useChatUiStore.getState().openRideId)).toBe(
+        String(RIDE_ID),
+      );
+      expect(useChatUiStore.getState().lastReadAt).not.toBeNull();
+      await waitFor(() => {
+        expect(chats.getMarkReadCallsFor(RIDE_ID, 'driver')).toBe(1);
+      });
+    });
+
+    it('closeChat clears local + store state', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const chats = new InMemoryChatRepository();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { chats }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      act(() => {
+        result.current.onPressChat();
+      });
+      act(() => {
+        result.current.closeChat();
+      });
+      expect(result.current.chatOpen).toBe(false);
+      expect(useChatUiStore.getState().openRideId).toBe(null);
     });
   });
 });

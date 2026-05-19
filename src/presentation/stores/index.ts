@@ -44,6 +44,7 @@ export {
 export {
   useChatIsOpen,
   useChatLastReadAt,
+  useChatOpenRideId,
   useChatUiStore,
 } from './useChatUiStore';
 export {

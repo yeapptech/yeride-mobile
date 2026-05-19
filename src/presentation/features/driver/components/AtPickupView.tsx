@@ -28,6 +28,8 @@ interface AtPickupViewProps {
   readonly onStartRide: () => void;
   readonly onPressCancel: () => void;
   readonly onBackToEnRoute: () => void;
+  readonly onPressChat: () => void;
+  readonly hasUnread?: boolean;
   readonly cancelDisabled?: boolean;
   readonly startDisabled?: boolean;
 }
@@ -37,6 +39,8 @@ export function AtPickupView({
   onStartRide,
   onPressCancel,
   onBackToEnRoute,
+  onPressChat,
+  hasUnread,
   cancelDisabled,
   startDisabled,
 }: AtPickupViewProps) {
@@ -48,15 +52,35 @@ export function AtPickupView({
         title="Pick up your passenger"
         subtitle={`Tap "Start ride" once ${passenger.name.first} is in the car.`}
         trailing={
-          <HeaderIconButton
-            label="Cancel ride"
-            tone="destructive"
-            onPress={onPressCancel}
-            disabled={cancelDisabled}
-            testID="at-pickup-cancel"
-          >
-            <Text className="text-sm font-semibold text-error">Cancel</Text>
-          </HeaderIconButton>
+          <>
+            <HeaderIconButton
+              label={hasUnread ? 'Open chat (unread)' : 'Open chat'}
+              onPress={onPressChat}
+              testID="at-pickup-chat"
+            >
+              <View className="flex-row items-center">
+                <Text className="text-sm font-semibold text-foreground">
+                  Chat
+                </Text>
+                {hasUnread && (
+                  <View
+                    className="ml-1 h-2 w-2 rounded-full bg-primary"
+                    accessibilityLabel="Unread messages"
+                    testID="at-pickup-chat-unread"
+                  />
+                )}
+              </View>
+            </HeaderIconButton>
+            <HeaderIconButton
+              label="Cancel ride"
+              tone="destructive"
+              onPress={onPressCancel}
+              disabled={cancelDisabled}
+              testID="at-pickup-cancel"
+            >
+              <Text className="text-sm font-semibold text-error">Cancel</Text>
+            </HeaderIconButton>
+          </>
         }
       />
 

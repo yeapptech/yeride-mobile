@@ -1,33 +1,28 @@
 import type { ChatMessage } from '@domain/entities/ChatMessage';
 import type { RideId } from '@domain/entities/RideId';
+import type { ChatRepository } from '@domain/repositories';
 
 /**
- * Phase 3 stub for the chat-button unread dot. Returns the synchronous
- * `(callback) => unsubscribe` shape the real Phase 3.5 implementation will
- * have, but always emits `null` once and never again.
+ * Live "most recent message or null" for a ride's chat thread. Drives
+ * the chat-button unread dot on the rider + driver trip-monitor surfaces.
  *
- * Why this exists in Phase 3:
- *   - `useRideMonitorViewModel` wires the chat unread dot through this use
- *     case so the integration point is real and tested.
- *   - When Phase 3.5 lands, swapping in the live ChatRepository-backed
- *     implementation requires zero changes to the view-model.
+ * Subscription-shaped — synchronous unsubscribe. Mirrors
+ * `ObserveChatMessages` but with the `.limit(1)` constraint applied
+ * at the adapter boundary for efficiency.
  *
- * This is a use case, not a domain interface, so the stub does NOT add an
- * `observeLatestMessage` method to `RideRepository`. Phase 3.5 introduces a
- * dedicated `ChatRepository` and replaces the body of `execute()` to call
- * into it.
+ * Phase 3 shipped this use case as a stub that emitted `null` once and
+ * never again — the chat backend didn't exist yet. Phase 10 turn 8
+ * rewires the body to delegate to `ChatRepository.observeLatestMessage`,
+ * so the unread dot now reflects real message arrivals (and the
+ * caller's `useChatUiStore.lastReadAt` clears it on open).
  */
 export class ObserveLatestMessage {
+  constructor(private readonly repo: ChatRepository) {}
+
   execute(args: {
     rideId: RideId;
     callback: (message: ChatMessage | null) => void;
   }): () => void {
-    // Phase 3: there is no chat backend yet. Emit `null` synchronously so
-    // the consumer can render the un-dotted chat button without a loading
-    // flicker.
-    args.callback(null);
-    return () => {
-      // No-op. Phase 3.5 wires real Firestore unsubscribe here.
-    };
+    return this.repo.observeLatestMessage(args);
   }
 }

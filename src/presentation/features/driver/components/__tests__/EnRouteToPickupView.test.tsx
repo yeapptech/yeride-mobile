@@ -134,10 +134,50 @@ describe('EnRouteToPickupView', () => {
         ride={makeRide()}
         onArrived={jest.fn()}
         onPressCancel={jest.fn()}
+        onPressChat={jest.fn()}
         onLaunchNavigation={onLaunchNavigation}
       />,
     );
     fireEvent.press(getByTestId('en-route-launch-navigation'));
     expect(onLaunchNavigation).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the chat button and fires onPressChat when tapped', () => {
+    const onPressChat = jest.fn();
+    const { getByTestId } = render(
+      <EnRouteToPickupView
+        ride={makeRide()}
+        onArrived={jest.fn()}
+        onPressCancel={jest.fn()}
+        onPressChat={onPressChat}
+        onLaunchNavigation={jest.fn()}
+      />,
+    );
+    fireEvent.press(getByTestId('en-route-chat'));
+    expect(onPressChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the unread dot when hasUnread is true', () => {
+    const { getByTestId, queryByTestId, rerender } = render(
+      <EnRouteToPickupView
+        ride={makeRide()}
+        onArrived={jest.fn()}
+        onPressCancel={jest.fn()}
+        onPressChat={jest.fn()}
+        onLaunchNavigation={jest.fn()}
+      />,
+    );
+    expect(queryByTestId('en-route-chat-unread')).toBeNull();
+    rerender(
+      <EnRouteToPickupView
+        ride={makeRide()}
+        onArrived={jest.fn()}
+        onPressCancel={jest.fn()}
+        onPressChat={jest.fn()}
+        onLaunchNavigation={jest.fn()}
+        hasUnread
+      />,
+    );
+    expect(getByTestId('en-route-chat-unread')).toBeTruthy();
   });
 });

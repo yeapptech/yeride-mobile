@@ -37,12 +37,15 @@ import { GetRideById } from '@app/usecases/ride/GetRideById';
 import { ListAvailableRides } from '@app/usecases/ride/ListAvailableRides';
 import { ListRidesByDriver } from '@app/usecases/ride/ListRidesByDriver';
 import { ListRidesByPassenger } from '@app/usecases/ride/ListRidesByPassenger';
+import { MarkMessagesRead } from '@app/usecases/ride/MarkMessagesRead';
+import { ObserveChatMessages } from '@app/usecases/ride/ObserveChatMessages';
 import { ObserveLatestMessage } from '@app/usecases/ride/ObserveLatestMessage';
 import { ObserveRide } from '@app/usecases/ride/ObserveRide';
 import { ObserveScheduledRides } from '@app/usecases/ride/ObserveScheduledRides';
 import { ObserveTripEvents } from '@app/usecases/ride/ObserveTripEvents';
 import { ObserveTripPayments } from '@app/usecases/ride/ObserveTripPayments';
 import { RequestPayment } from '@app/usecases/ride/RequestPayment';
+import { SendChatMessage } from '@app/usecases/ride/SendChatMessage';
 import { StartRide } from '@app/usecases/ride/StartRide';
 import { ComputeRoutes } from '@app/usecases/route/ComputeRoutes';
 import { EstimateFare } from '@app/usecases/route/EstimateFare';
@@ -61,6 +64,7 @@ import { SetActiveVehicle } from '@app/usecases/vehicle/SetActiveVehicle';
 import { UploadVehiclePhotos } from '@app/usecases/vehicle/UploadVehiclePhotos';
 import type { FirebaseAuthRepository as FirebaseAuthRepositoryType } from '@data/repositories/FirebaseAuthRepository';
 import type { FirebaseStorageVehiclePhotoRepository as FirebaseStorageVehiclePhotoRepositoryType } from '@data/repositories/FirebaseStorageVehiclePhotoRepository';
+import type { FirestoreChatRepository as FirestoreChatRepositoryType } from '@data/repositories/FirestoreChatRepository';
 import type { FirestoreLocationRepository as FirestoreLocationRepositoryType } from '@data/repositories/FirestoreLocationRepository';
 import type { FirestoreRideRepository as FirestoreRideRepositoryType } from '@data/repositories/FirestoreRideRepository';
 import type { FirestoreServiceAreaRepository as FirestoreServiceAreaRepositoryType } from '@data/repositories/FirestoreServiceAreaRepository';
@@ -74,6 +78,7 @@ import type { NhtsaVinDecoderService as NhtsaVinDecoderServiceType } from '@data
 import type { StripeServerHttpAdapter as StripeServerHttpAdapterType } from '@data/services/StripeServerHttpAdapter';
 import type {
   AuthRepository,
+  ChatRepository,
   LocationRepository,
   RideRepository,
   ServiceAreaRepository,
@@ -100,6 +105,7 @@ import type {
   FakeRoutesService as FakeRoutesServiceType,
   FakeStripeServerService as FakeStripeServerServiceType,
   InMemoryAuthRepository as InMemoryAuthRepositoryType,
+  InMemoryChatRepository as InMemoryChatRepositoryType,
   InMemoryLocationRepository as InMemoryLocationRepositoryType,
   InMemoryRideRepository as InMemoryRideRepositoryType,
   InMemoryServiceAreaRepository as InMemoryServiceAreaRepositoryType,
@@ -183,6 +189,11 @@ export interface UseCases {
   observeTripEvents: ObserveTripEvents;
   observeLatestMessage: ObserveLatestMessage;
   observeTripPayments: ObserveTripPayments;
+
+  // Chat (Phase 10 turn 8)
+  observeChatMessages: ObserveChatMessages;
+  sendChatMessage: SendChatMessage;
+  markMessagesRead: MarkMessagesRead;
 
   // Scheduled rides (Phase 10 turn 7)
   observeScheduledRides: ObserveScheduledRides;
@@ -297,6 +308,7 @@ export function makeUseCases(args: {
   users: UserRepository;
   serviceAreas: ServiceAreaRepository;
   rides: RideRepository;
+  chats: ChatRepository;
   locations: LocationRepository;
   routes: RoutesService;
   vehicles: VehicleRepository;
@@ -340,7 +352,10 @@ export function makeUseCases(args: {
     listRidesByPassenger: new ListRidesByPassenger(args.rides),
     listRidesByDriver: new ListRidesByDriver(args.rides),
     observeTripEvents: new ObserveTripEvents(args.rides),
-    observeLatestMessage: new ObserveLatestMessage(),
+    observeLatestMessage: new ObserveLatestMessage(args.chats),
+    observeChatMessages: new ObserveChatMessages(args.chats),
+    sendChatMessage: new SendChatMessage(args.chats),
+    markMessagesRead: new MarkMessagesRead(args.chats),
     observeTripPayments: new ObserveTripPayments(args.rides),
     observeScheduledRides: new ObserveScheduledRides(args.rides),
     evaluateExitWarning: new EvaluateExitWarning(),
@@ -507,6 +522,9 @@ export function buildContainer(): Container {
     const dataRides = require('@data/repositories/FirestoreRideRepository') as {
       FirestoreRideRepository: new () => FirestoreRideRepositoryType;
     };
+    const dataChats = require('@data/repositories/FirestoreChatRepository') as {
+      FirestoreChatRepository: new () => FirestoreChatRepositoryType;
+    };
     const dataLocations =
       require('@data/repositories/FirestoreLocationRepository') as {
         FirestoreLocationRepository: new () => FirestoreLocationRepositoryType;
@@ -534,6 +552,7 @@ export function buildContainer(): Container {
         users: new dataUsers.FirestoreUserRepository(),
         serviceAreas: new dataServiceAreas.FirestoreServiceAreaRepository(),
         rides: new dataRides.FirestoreRideRepository(),
+        chats: new dataChats.FirestoreChatRepository(),
         locations: new dataLocations.FirestoreLocationRepository(),
         routes,
         vehicles: new dataVehicles.FirestoreVehicleRepository(),
@@ -554,6 +573,7 @@ export function buildContainer(): Container {
   const testing = require('@shared/testing') as {
     FakeCloudFunctionsService: new () => FakeCloudFunctionsServiceType;
     InMemoryAuthRepository: new () => InMemoryAuthRepositoryType;
+    InMemoryChatRepository: new () => InMemoryChatRepositoryType;
     InMemoryLocationRepository: new () => InMemoryLocationRepositoryType;
     InMemoryRideRepository: new () => InMemoryRideRepositoryType;
     InMemoryServiceAreaRepository: new () => InMemoryServiceAreaRepositoryType;
@@ -562,7 +582,7 @@ export function buildContainer(): Container {
     InMemoryVehiclePhotoRepository: new () => InMemoryVehiclePhotoRepositoryType;
   };
   LOG.warn(
-    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides/locations/vehicles + FakeCloudFunctionsService. ' +
+    'Firebase config not detected — using in-memory fakes for auth/user/service-areas/rides/chats/locations/vehicles + FakeCloudFunctionsService. ' +
       'No data will persist. See docs/FIREBASE_SETUP.md.',
   );
   return {
@@ -571,6 +591,7 @@ export function buildContainer(): Container {
       users: new testing.InMemoryUserRepository(),
       serviceAreas: new testing.InMemoryServiceAreaRepository(),
       rides: new testing.InMemoryRideRepository(),
+      chats: new testing.InMemoryChatRepository(),
       locations: new testing.InMemoryLocationRepository(),
       routes,
       vehicles: new testing.InMemoryVehicleRepository(),

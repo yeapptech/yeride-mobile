@@ -151,10 +151,50 @@ describe('StartedView', () => {
         ride={makeStartedRide()}
         onPressCancel={jest.fn()}
         onRequestPayment={jest.fn()}
+        onPressChat={jest.fn()}
         onLaunchNavigation={onLaunchNavigation}
       />,
     );
     fireEvent.press(getByTestId('started-launch-navigation'));
     expect(onLaunchNavigation).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the chat button and fires onPressChat when tapped', () => {
+    const onPressChat = jest.fn();
+    const { getByTestId } = render(
+      <StartedView
+        ride={makeStartedRide()}
+        onPressCancel={jest.fn()}
+        onRequestPayment={jest.fn()}
+        onPressChat={onPressChat}
+        onLaunchNavigation={jest.fn()}
+      />,
+    );
+    fireEvent.press(getByTestId('started-chat'));
+    expect(onPressChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the unread dot only when hasUnread is true', () => {
+    const { queryByTestId, rerender } = render(
+      <StartedView
+        ride={makeStartedRide()}
+        onPressCancel={jest.fn()}
+        onRequestPayment={jest.fn()}
+        onPressChat={jest.fn()}
+        onLaunchNavigation={jest.fn()}
+      />,
+    );
+    expect(queryByTestId('started-chat-unread')).toBeNull();
+    rerender(
+      <StartedView
+        ride={makeStartedRide()}
+        onPressCancel={jest.fn()}
+        onRequestPayment={jest.fn()}
+        onPressChat={jest.fn()}
+        onLaunchNavigation={jest.fn()}
+        hasUnread
+      />,
+    );
+    expect(queryByTestId('started-chat-unread')).not.toBeNull();
   });
 });

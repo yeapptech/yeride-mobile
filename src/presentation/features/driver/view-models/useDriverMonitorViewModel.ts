@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toast from 'react-native-toast-message';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
+import type { ChatMessage } from '@domain/entities/ChatMessage';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
@@ -20,6 +21,7 @@ import {
   useUpdateLocationMutation,
 } from '@presentation/queries';
 import {
+  useChatUiStore,
   useDriverStatusStore,
   useGpsCurrentLocation,
   useGpsCurrentOdometer,
@@ -163,6 +165,18 @@ export interface UseDriverMonitorViewModel {
   onLaunchNavigation: () => Promise<void>;
   /** True while `onLaunchNavigation`'s init/terms chain is in flight. */
   readonly isLaunchingNavigation: boolean;
+  /* ── Chat (Phase 10 turn 8) ──────────────────────────────────── */
+  /** Most-recent chat message for the unread-dot derivation. */
+  readonly latestMessage: ChatMessage | null;
+  /** Derived from latest message createdAt vs `useChatUiStore.lastReadAt`. */
+  readonly hasUnreadMessages: boolean;
+  /** Open the in-trip chat modal. Sets `useChatUiStore.openRideId`,
+   *  fires `markMessagesRead({role: 'driver'})`, and flips `chatOpen`. */
+  onPressChat: () => void;
+  /** Whether the driver-side chat modal is currently mounted. */
+  readonly chatOpen: boolean;
+  /** Tear down the chat modal — clears local + store-side open state. */
+  closeChat: () => void;
 }
 
 export interface DriverMonitorViewModelArgs {
@@ -570,6 +584,56 @@ export function useDriverMonitorViewModel(
     }
   }, [isLaunchingNavigation, ride, navigationSdk, navigation]);
 
+  // ── Chat (Phase 10 turn 8) ─────────────────────────────────────
+  // Driver-side mirror of the rider chat wiring. Subscribe to the
+  // latest message for the unread dot; expose an `onPressChat` that
+  // opens the modal, flips `useChatUiStore.openRideId` (foreground
+  // push suppression signal), and fires `markMessagesRead({role:
+  // 'driver'})` on a best-effort basis. The `hasUnreadMessages` memo
+  // compares latest-message `createdAt` against the shared
+  // `useChatUiStore.lastReadAt` — the rider VM uses the same
+  // selector, but a given device only views chat from one role at a
+  // time, so the shared mirror works.
+  const subscribeLatestMessage = useCallback(
+    (cb: (message: ChatMessage | null) => void) =>
+      useCases.observeLatestMessage.execute({ rideId, callback: cb }),
+    [useCases, rideId],
+  );
+  const latestMessage = useFirestoreSubscription<ChatMessage | null>(
+    subscribeLatestMessage,
+    null,
+  );
+  const chatLastReadAt = useChatUiStore((s) => s.lastReadAt);
+  const hasUnreadMessages = useMemo(() => {
+    if (!latestMessage) return false;
+    if (!chatLastReadAt) return true;
+    return latestMessage.createdAt.getTime() > chatLastReadAt.getTime();
+  }, [latestMessage, chatLastReadAt]);
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const openChatInStore = useChatUiStore((s) => s.open);
+  const closeChatInStore = useChatUiStore((s) => s.close);
+  const markRead = useChatUiStore((s) => s.markRead);
+  const onPressChat = useCallback(() => {
+    setChatOpen(true);
+    openChatInStore(rideId);
+    markRead(new Date());
+    void useCases.markMessagesRead
+      .execute({ rideId, role: 'driver' })
+      .then((r) => {
+        if (!r.ok) {
+          // Cleanup-best-effort path — stays warn.
+          logger.warn('markMessagesRead (driver) failed', {
+            code: r.error.code,
+          });
+        }
+      });
+  }, [openChatInStore, markRead, useCases, rideId]);
+  const closeChat = useCallback(() => {
+    setChatOpen(false);
+    closeChatInStore();
+  }, [closeChatInStore]);
+
   // ── Status derivation ──────────────────────────────────────────
   const status = useMemo<DriverMonitorStatus>(() => {
     if (ride === null) return 'loading';
@@ -635,6 +699,11 @@ export function useDriverMonitorViewModel(
     cancel,
     onLaunchNavigation,
     isLaunchingNavigation,
+    latestMessage,
+    hasUnreadMessages,
+    onPressChat,
+    chatOpen,
+    closeChat,
   };
 }
 

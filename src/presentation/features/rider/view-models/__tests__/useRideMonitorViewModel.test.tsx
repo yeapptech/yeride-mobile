@@ -22,8 +22,13 @@ import { UserId } from '@domain/entities/UserId';
 import { UserLocation } from '@domain/entities/UserLocation';
 import { NetworkError } from '@domain/errors';
 import type { BgGeofenceEvent } from '@domain/services';
-import { useGeofenceUiStore, useGpsStore } from '@presentation/stores';
 import {
+  useChatUiStore,
+  useGeofenceUiStore,
+  useGpsStore,
+} from '@presentation/stores';
+import {
+  InMemoryChatRepository,
   InMemoryLocationRepository,
   InMemoryRideRepository,
   TestContainerProvider,
@@ -47,12 +52,10 @@ jest.mock('@react-navigation/native', () => ({
 // producer, and the VM reads via `useGpsLastGeofenceEvent`. No
 // `expo-location` mock needed.
 
-// react-native-toast-message: mock so the chat-stub doesn't throw when
-// the global Toast host isn't mounted in tests. The library exports a
-// default React component with static `.show` / `.hide` methods. Use
-// `jest.fn()` directly inside the factory (no outer-scope variable
-// references — babel's mock hoisting forbids that) and grab a handle
-// to the spy via `jest.requireMock` after the mock applies.
+// react-native-toast-message: kept mocked because TanStack mutations or
+// child components may still trigger toast surfaces via siblings.
+// The rider VM no longer fires a chat toast — Phase 10 turn 8 replaced
+// the Phase-3.5 stub with the real chat modal flow.
 jest.mock('react-native-toast-message', () => {
   const show = jest.fn();
   const hide = jest.fn();
@@ -66,11 +69,6 @@ jest.mock('react-native-toast-message', () => {
     default: ToastComponent,
   };
 });
-
-const mockToast = jest.requireMock('react-native-toast-message') as {
-  default: { show: jest.Mock; hide: jest.Mock };
-};
-const mockToastShow = mockToast.default.show;
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
   if (!r.ok) throw r.error;
@@ -180,11 +178,13 @@ function bgGeofenceEvent(
 function withTestContainer(opts: {
   ridesRepo: InMemoryRideRepository;
   locationsRepo?: InMemoryLocationRepository;
+  chatsRepo?: InMemoryChatRepository;
 }) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       rides={opts.ridesRepo}
       {...(opts.locationsRepo ? { locations: opts.locationsRepo } : {})}
+      {...(opts.chatsRepo ? { chats: opts.chatsRepo } : {})}
     >
       {children}
     </TestContainerProvider>
@@ -438,24 +438,40 @@ describe('useRideMonitorViewModel', () => {
     expect(mockReset).not.toHaveBeenCalled();
   });
 
-  it('onPressChat shows a "Phase 3.5" toast', async () => {
-    mockToastShow.mockClear();
+  it('onPressChat opens the chat modal, sets openRideId, and fires markMessagesRead', async () => {
+    useChatUiStore.getState().reset();
     const ridesRepo = new InMemoryRideRepository();
     await ridesRepo.create(makeAwaitingRide());
+    const chatsRepo = new InMemoryChatRepository();
 
     const { result } = renderHook(
       () => useRideMonitorViewModel({ rideId: RIDE_ID }),
-      { wrapper: withTestContainer({ ridesRepo }) },
+      { wrapper: withTestContainer({ ridesRepo, chatsRepo }) },
     );
     await waitFor(() => {
       expect(result.current.status).toBe('awaiting_driver');
     });
 
+    expect(result.current.chatOpen).toBe(false);
+
     act(() => {
       result.current.onPressChat();
     });
-    expect(mockToastShow).toHaveBeenCalledTimes(1);
-    expect(mockToastShow.mock.calls[0]?.[0]?.text1).toMatch(/messaging/i);
+
+    expect(result.current.chatOpen).toBe(true);
+    expect(String(useChatUiStore.getState().openRideId)).toBe(String(RIDE_ID));
+    expect(useChatUiStore.getState().lastReadAt).not.toBeNull();
+    // markMessagesRead fired with role='rider' (async; let it settle).
+    await waitFor(() => {
+      expect(chatsRepo.getMarkReadCallsFor(RIDE_ID, 'rider')).toBe(1);
+    });
+
+    // closeChat tears it down + clears the store-side flag.
+    act(() => {
+      result.current.closeChat();
+    });
+    expect(result.current.chatOpen).toBe(false);
+    expect(useChatUiStore.getState().openRideId).toBe(null);
   });
 
   describe('pickup geofence banner (Phase 7 turn 3)', () => {

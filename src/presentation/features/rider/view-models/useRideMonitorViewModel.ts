@@ -1,6 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Toast from 'react-native-toast-message';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { ChatMessage } from '@domain/entities/ChatMessage';
@@ -95,8 +94,16 @@ export interface UseRideMonitorViewModel {
     reason: CancellationReason;
     odometerMeters?: number;
   }) => Promise<boolean>;
-  /** Open chat — Phase 3.5 stub: shows a toast for now. */
+  /** Phase 10 turn 8 — open the in-trip chat modal. Sets
+   *  `useChatUiStore.openRideId` so the foreground push handler can
+   *  suppress banners on the open thread; fires `markMessagesRead`
+   *  on the rider role; flips `chatOpen` for the screen to mount
+   *  the modal. */
   onPressChat: () => void;
+  /** Whether the chat modal is currently mounted on the screen. */
+  readonly chatOpen: boolean;
+  /** Tear down the chat modal — clears local + store-side open state. */
+  closeChat: () => void;
   /**
    * Phase 9 turn 10. Open the OS app-settings page. Wraps
    * `Linking.openSettings()`.
@@ -246,15 +253,36 @@ export function useRideMonitorViewModel(args: {
     [cancelMutation, rideId],
   );
 
-  // ── Chat stub ──────────────────────────────────────────────────
+  // ── Chat (Phase 10 turn 8) ─────────────────────────────────────
+  // Real chat thread. `onPressChat` opens the in-screen ChatModal, sets
+  // the Zustand `openRideId` selector for foreground push suppression,
+  // and fires a best-effort `markMessagesRead` so the OTHER party's
+  // unread badge clears server-side. The local `markRead(new Date())`
+  // call clears the unread dot optimistically — the
+  // `hasUnreadMessages` memo above re-derives off `lastReadAt`.
+  const [chatOpen, setChatOpen] = useState(false);
+  const openChatInStore = useChatUiStore((s) => s.open);
+  const closeChatInStore = useChatUiStore((s) => s.close);
+  const markRead = useChatUiStore((s) => s.markRead);
   const onPressChat = useCallback(() => {
-    Toast.show({
-      type: 'info',
-      text1: 'Messaging coming soon',
-      text2: 'Chat threads land in Phase 3.5.',
-      visibilityTime: 2500,
-    });
-  }, []);
+    setChatOpen(true);
+    openChatInStore(rideId);
+    markRead(new Date());
+    void useCases.markMessagesRead
+      .execute({ rideId, role: 'rider' })
+      .then((r) => {
+        if (!r.ok) {
+          // Cleanup-best-effort path — stays warn.
+          logger.warn('markMessagesRead (rider) failed', {
+            code: r.error.code,
+          });
+        }
+      });
+  }, [openChatInStore, markRead, useCases, rideId]);
+  const closeChat = useCallback(() => {
+    setChatOpen(false);
+    closeChatInStore();
+  }, [closeChatInStore]);
 
   // ── Terminal redirects ─────────────────────────────────────────
   // Use a ref to remember whether we already dispatched a redirect so a
@@ -386,6 +414,8 @@ export function useRideMonitorViewModel(args: {
     bgPermissionDenied,
     cancel,
     onPressChat,
+    chatOpen,
+    closeChat,
     onOpenSettings,
     liveDurationSeconds,
     liveDistanceMeters,

@@ -1,6 +1,6 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19 · Turn 7 closed 2026-05-19
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19 · Turn 7 closed 2026-05-19 · Turn 8 closed 2026-05-19
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
 **Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
@@ -27,7 +27,7 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 + Turn 7 closures:** **2 ❌ rows, 0 🟡 rows, 0 ⚠️ rows**
+**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 + Turn 7 + Turn 8 closures:** **1 ❌ row, 0 🟡 rows, 0 ⚠️ rows**
 block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
 highest-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js`
 to inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next
@@ -259,8 +259,8 @@ in `docs/PHASE_10_TURN_7.md` §B:
   volume is low enough that client-side sort is free.
 - **Decision 5 (a)** — `useRouteSelectViewModel.confirm()` returns
   a discriminated union (vs. a VM-flag pattern): `Promise<{rideId,
-  isScheduled: false} | {rideId, isScheduled: true,
-  formattedSchedulePickupAt, pickupAddress} | null>`. The
+isScheduled: false} | {rideId, isScheduled: true,
+formattedSchedulePickupAt, pickupAddress} | null>`. The
   scheduled branch carries the display strings inline so
   `RouteSelectScreen` navigates from the typed result rather than
   reading stale-closured `vm.*` selectors after `reset()` clears
@@ -366,7 +366,7 @@ both `RiderStackParamList` and `DriverStackParamList`. Placeholders
   four layers; zero regressions outside Turn 9's 21 carry-over
   BG-geolocation failures.
 
-### 3.4 Chat / messaging — ❌ deferred at Phase 3.5
+### 3.4 Chat / messaging — ✅ closed in Turn 8 (2026-05-19)
 
 **Legacy:** `ChatModal.js` (rider + driver) — full bidirectional
 chat using `react-native-gifted-chat`, reads from + writes to
@@ -393,24 +393,62 @@ Supporting components: `ChatTouchable.js` (open-chat button),
 Phase 3.5 never happened. Chat is deferred work that needs to land
 in Phase 10.
 
-**Verdict:** ❌ — Phase 10.x turn required. Size: medium (~2-3 days).
+**Verdict:** ✅ closed in Turn 8 (2026-05-19).
 
-**Phase 10 turn scope:**
+**Turn 8 landed:**
 
-- Build `ChatModal.tsx` or `ChatScreen.tsx` (decide screen vs
-  modal — legacy is modal).
-- Add `react-native-gifted-chat` to dependencies; mock in
-  `jest.setup.ts`.
-- Use cases: `ObserveChatMessages(tripId)`, `SendChatMessage`,
-  `MarkChatRead`.
-- `ChatRepository` interface in `@domain/repositories`, Firestore
-  adapter in `@data/repositories/FirestoreChatRepository`, in-memory
-  fake in `@shared/testing`.
-- Foreground push-banner suppression: port the `openChatId`
-  module-scoped ref pattern, or replace with a Zustand selector on
-  `useChatUiStore.isOpen`.
-- Unread-dot already driven by `ObserveLatestMessage` —
-  wire `lastReadAt` write-through to Firestore.
+- `ChatModal.tsx` (`src/presentation/components/chat/`) wrapping
+  `react-native-gifted-chat@2.8.1` (legacy parity pin; also added
+  `react-native-keyboard-controller@1.21.5` +
+  `react-native-get-random-values@1.11.0` as peer-deps). Manual
+  jest mock at `__mocks__/react-native-gifted-chat.tsx` (same
+  babel/NativeWind pattern as `react-native-maps` /
+  `react-native-svg`).
+- `ChatRepository` interface
+  (`src/domain/repositories/ChatRepository.ts`) with four methods:
+  `observeMessages` / `observeLatestMessage` (subscription-shaped) +
+  `send` / `markMessagesRead` (Result-returning Promises).
+  `FirestoreChatRepository` adapter + `InMemoryChatRepository` fake.
+- Three new use cases: `ObserveChatMessages`, `SendChatMessage`,
+  `MarkMessagesRead`. `ObserveLatestMessage`'s Phase-3 stub body
+  rewritten to delegate to `ChatRepository.observeLatestMessage`.
+  All four wired through the DI container.
+- `ChatMessage` entity promoted from read-only interface to class
+  with `static create(props)` factory + `markRead(at)` evolve
+  method. `ChatMessageId` brand factory added.
+- `ChatMessageDoc` Zod DTO + `chatMessageMapper` (canonical-on-
+  write / permissive-on-read; `createdAt` uses Firestore
+  `serverTimestamp()` sentinel; `user.name` projected from
+  `PersonName.full` for the Cloud Function push title).
+- `useChatUiStore` extended with `openRideId: RideId | null`;
+  `open()` now takes the ride id. Selector `useChatOpenRideId()`
+  exported.
+- Rider VM (`useRideMonitorViewModel`): replaced Phase-3.5 Toast
+  stub with real `chatOpen` / `closeChat` + store-side `open(rideId)`
+  - best-effort `markMessagesRead({role: 'rider'})`. Driver VM
+    (`useDriverMonitorViewModel`): symmetric chat surface added
+    (`latestMessage` subscription, `hasUnreadMessages` memo,
+    `onPressChat`, `chatOpen`, `closeChat`).
+- Header chat button + unread dot added to driver-side
+  `EnRouteToPickupView` / `AtPickupView` / `StartedView` (driver) /
+  `PaymentRequestedView`. Rider-side `DispatchedView` gained the
+  unread dot (`StartedView` rider already had it).
+- `useForegroundNotificationHandler` hook registers a global
+  `setNotificationHandler` that suppresses `chat_message` banners
+  when `useChatUiStore.openRideId === payload.tripId`. Mounted in
+  AppContent.
+- Optional read additions: `RideDocSchema` accepts
+  `lastSeenByRiderAt` / `lastSeenByDriverAt` Timestamp / ISO / null
+  for cross-app permissive parsing — not projected into the `Ride`
+  domain entity (chat unread-dot derives from
+  `useChatUiStore.lastReadAt`, not the parent-doc field).
+- Server-side `onMessageCreated` Cloud Function was already
+  deployed on both stage and prod — no functions work in scope.
+- ~120 new tests across all six layers; jest carries only the 21
+  pre-existing BG-geolocation failures (Turn 9 scope). Decisions
+  locked in `docs/PHASE_10_TURN_8.md`: gifted-chat 2.8.1 (legacy
+  parity pin), modal-not-screen (legacy parity), text cap 1000
+  chars, server-side + client-side both for read state.
 
 ### 3.5 Rider-side ETA / Distance Matrix tracking — ✅ closed in Turn 5 (2026-05-18)
 
@@ -674,7 +712,7 @@ trigger-based functions need no client). No action needed.
 | Foreground handler                              | `InAppNotification.js` banner + `openChatId` suppression                                       | `useNotificationResponseHandler` (Phase 9 Turn 2)                                         | 🟡 Rewrite handles taps + foreground notification routing but may not have the in-app banner UI; verify per push payload type. |
 | Notification types handled                      | `trip_event`, `chat_message`, `scheduled_driver_accepted`, `pickup_reminder`, `payment_failed` | All five per `HandleNotificationResponse.ts` and `PushNotificationService.ts`             | ✅                                                                                                                             |
 | Deep links                                      | Tap-to-route to trip / chat                                                                    | Same per `HandleNotificationResponse.ts` (`scheduled_driver_accepted → rider_ride_monitor | tripId`)                                                                                                                       | ✅  |
-| `chat_message` banner suppression for open chat | Module-scoped `openChatId` ref in `ChatModal.js`                                               | Not implemented (chat itself is ❌)                                                       | ❌ blocked on §3.4                                                                                                             |
+| `chat_message` banner suppression for open chat | Module-scoped `openChatId` ref in `ChatModal.js`                                               | `useForegroundNotificationHandler` reads `useChatUiStore.openRideId` (Phase 10 turn 8)    | ✅                                                                                                                             |
 
 ---
 
@@ -683,18 +721,18 @@ trigger-based functions need no client). No action needed.
 Direct Firestore writes from the legacy client (excluding
 Cloud-Function-mediated writes):
 
-| Path                             | Legacy site                                               | Rewrite equivalent                                       | Status             |
-| -------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- | ------------------ |
-| `users/{uid}` create             | `Register.js` via `AuthUser.js:registerUser`              | `RegisterUser` use case + `FirebaseAuthRepository`       | ✅                 |
-| `users/{uid}` update             | `UserProfile.js` etc.                                     | `UpdateUser` use cases                                   | ✅                 |
-| `users/{uid}.location`           | `gpsLocation.js:updateUserLocation`                       | `LocationRepository.setLocation`                         | ✅                 |
-| `users/{uid}.pushToken`          | `AppContent.js` after `registerForPushNotificationsAsync` | `usePushTokenRegistration` (Phase 9)                     | ✅                 |
-| `trips/{tripId}` create          | `Trip.js:createTrip`                                      | `CreateRide` use case → `FirestoreRideRepository.create` | ✅                 |
-| `trips/{tripId}` update          | `Trip.js:dispatchTrip`, `startTrip`, etc.                 | Cloud Function callables / direct repo writes            | ✅                 |
-| `trips/{tripId}/events`          | `Trip.js:addTripEvent`                                    | `RideRepository.appendEvent` → `FirestoreRideRepository` | ✅                 |
-| `trips/{tripId}/messages`        | `ChatModal.js` GiftedChat send                            | ❌ not implemented                                       | ❌ blocked on §3.4 |
-| `trips/{tripId}/payments`        | written by Cloud Functions / Stripe webhooks              | read-only on client                                      | ✅                 |
-| `vehicles/{vin}` create / update | `Vehicle.js`                                              | `FirestoreVehicleRepository`                             | ✅                 |
+| Path                             | Legacy site                                               | Rewrite equivalent                                       | Status |
+| -------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- | ------ |
+| `users/{uid}` create             | `Register.js` via `AuthUser.js:registerUser`              | `RegisterUser` use case + `FirebaseAuthRepository`       | ✅     |
+| `users/{uid}` update             | `UserProfile.js` etc.                                     | `UpdateUser` use cases                                   | ✅     |
+| `users/{uid}.location`           | `gpsLocation.js:updateUserLocation`                       | `LocationRepository.setLocation`                         | ✅     |
+| `users/{uid}.pushToken`          | `AppContent.js` after `registerForPushNotificationsAsync` | `usePushTokenRegistration` (Phase 9)                     | ✅     |
+| `trips/{tripId}` create          | `Trip.js:createTrip`                                      | `CreateRide` use case → `FirestoreRideRepository.create` | ✅     |
+| `trips/{tripId}` update          | `Trip.js:dispatchTrip`, `startTrip`, etc.                 | Cloud Function callables / direct repo writes            | ✅     |
+| `trips/{tripId}/events`          | `Trip.js:addTripEvent`                                    | `RideRepository.appendEvent` → `FirestoreRideRepository` | ✅     |
+| `trips/{tripId}/messages`        | `ChatModal.js` GiftedChat send                            | `FirestoreChatRepository.send` (Phase 10 turn 8)         | ✅     |
+| `trips/{tripId}/payments`        | written by Cloud Functions / Stripe webhooks              | read-only on client                                      | ✅     |
+| `vehicles/{vin}` create / update | `Vehicle.js`                                              | `FirestoreVehicleRepository`                             | ✅     |
 
 ---
 
@@ -712,7 +750,7 @@ one-line `audio` UIBackgroundMode restoration). Remaining turns:
 | ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                        | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
 | ~~6~~ | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                           | ~~Largest user-facing gap~~           | ~~large (3-5d)~~        | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
 | ~~7~~ | ~~**Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.~~                                                                                                                                   | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (creation UI + listing + nav + native config; see `docs/PHASE_10_TURN_7.md`)                                        |
-| 8     | **Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.                                                                                                                                                                                                      | Existing feature regression risk      | medium (2-3d)           | —                                                                                                                                            |
+| ~~8~~ | ~~**Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.~~                                                                                                                                                                                                  | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (ChatModal + ChatRepository + foreground suppression; see `docs/PHASE_10_TURN_8.md`)                                |
 | 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate       | small (1d)              | —                                                                                                                                            |
 | 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                                                                                      |
 

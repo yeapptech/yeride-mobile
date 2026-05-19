@@ -17,6 +17,7 @@ import { FakeRoutesService } from './FakeRoutesService';
 import { FakeStripeServerService } from './FakeStripeServerService';
 import { FakeVinDecoderService } from './FakeVinDecoderService';
 import { InMemoryAuthRepository } from './InMemoryAuthRepository';
+import { InMemoryChatRepository } from './InMemoryChatRepository';
 import { InMemoryLocationRepository } from './InMemoryLocationRepository';
 import { InMemoryRideRepository } from './InMemoryRideRepository';
 import { InMemoryServiceAreaRepository } from './InMemoryServiceAreaRepository';
@@ -52,6 +53,7 @@ export function TestContainerProvider({
   users,
   serviceAreas,
   rides,
+  chats,
   locations,
   routes,
   vehicles,
@@ -70,6 +72,7 @@ export function TestContainerProvider({
   users?: InMemoryUserRepository;
   serviceAreas?: InMemoryServiceAreaRepository;
   rides?: InMemoryRideRepository;
+  chats?: InMemoryChatRepository;
   locations?: InMemoryLocationRepository;
   routes?: FakeRoutesService;
   vehicles?: InMemoryVehicleRepository;
@@ -88,6 +91,7 @@ export function TestContainerProvider({
   const usersRepo = users ?? new InMemoryUserRepository();
   const serviceAreasRepo = serviceAreas ?? new InMemoryServiceAreaRepository();
   const ridesRepo = rides ?? new InMemoryRideRepository();
+  const chatsRepo = chats ?? new InMemoryChatRepository();
   const locationsRepo = locations ?? new InMemoryLocationRepository();
   const routesService = routes ?? new FakeRoutesService();
   const vehiclesRepo = vehicles ?? new InMemoryVehicleRepository();
@@ -109,6 +113,7 @@ export function TestContainerProvider({
     users: usersRepo,
     serviceAreas: serviceAreasRepo,
     rides: ridesRepo,
+    chats: chatsRepo,
     locations: locationsRepo,
     routes: routesService,
     vehicles: vehiclesRepo,

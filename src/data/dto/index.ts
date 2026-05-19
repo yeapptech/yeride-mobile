@@ -1,3 +1,4 @@
+export { ChatMessageDocSchema, type ChatMessageDoc } from './ChatMessageDoc';
 export {
   RideDocSchema,
   type CancellationDoc,

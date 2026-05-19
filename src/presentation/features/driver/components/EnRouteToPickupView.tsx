@@ -11,8 +11,8 @@ import {
  * Driver is en route to the rider's pickup. Bottom-sheet content:
  *
  *   - Header with ETA-to-pickup (pulled from `ride.pickup.directions`,
- *     set by the dispatch use case at accept time) + a destructive
- *     cancel button.
+ *     set by the dispatch use case at accept time), a chat button
+ *     with unread dot, and a destructive cancel button.
  *   - Sanitized passenger card: first name + last initial only. PII
  *     boundary mirrors the rider-side `DispatchedView` driver card —
  *     no email, no phone, no avatar URL exposure.
@@ -26,14 +26,17 @@ import {
  *     `'at_pickup'` UI state. Phase 7's geofence-entry event will
  *     auto-fire this; until then it's a manual button tap.
  *
- * The header chat button is deferred to Phase 9 polish; the cancel
- * action is the only header trailing action.
+ * Phase 10 turn 8 — the header chat button + unread dot are now
+ * wired, mirroring the rider-side `DispatchedView`. The deferred
+ * "Phase 9 polish" note from the original kickoff has landed.
  */
 interface EnRouteToPickupViewProps {
   readonly ride: Ride;
   readonly onArrived: () => void;
   readonly onPressCancel: () => void;
+  readonly onPressChat: () => void;
   readonly onLaunchNavigation: () => void;
+  readonly hasUnread?: boolean;
   readonly cancelDisabled?: boolean;
   readonly arriveDisabled?: boolean;
   readonly launchNavigationDisabled?: boolean;
@@ -43,7 +46,9 @@ export function EnRouteToPickupView({
   ride,
   onArrived,
   onPressCancel,
+  onPressChat,
   onLaunchNavigation,
+  hasUnread,
   cancelDisabled,
   arriveDisabled,
   launchNavigationDisabled,
@@ -59,15 +64,35 @@ export function EnRouteToPickupView({
         title={eta ? `Pickup in ~${eta}` : 'Heading to pickup'}
         subtitle={distance ? `${distance} away` : undefined}
         trailing={
-          <HeaderIconButton
-            label="Cancel ride"
-            tone="destructive"
-            onPress={onPressCancel}
-            disabled={cancelDisabled}
-            testID="en-route-cancel"
-          >
-            <Text className="text-sm font-semibold text-error">Cancel</Text>
-          </HeaderIconButton>
+          <>
+            <HeaderIconButton
+              label={hasUnread ? 'Open chat (unread)' : 'Open chat'}
+              onPress={onPressChat}
+              testID="en-route-chat"
+            >
+              <View className="flex-row items-center">
+                <Text className="text-sm font-semibold text-foreground">
+                  Chat
+                </Text>
+                {hasUnread && (
+                  <View
+                    className="ml-1 h-2 w-2 rounded-full bg-primary"
+                    accessibilityLabel="Unread messages"
+                    testID="en-route-chat-unread"
+                  />
+                )}
+              </View>
+            </HeaderIconButton>
+            <HeaderIconButton
+              label="Cancel ride"
+              tone="destructive"
+              onPress={onPressCancel}
+              disabled={cancelDisabled}
+              testID="en-route-cancel"
+            >
+              <Text className="text-sm font-semibold text-error">Cancel</Text>
+            </HeaderIconButton>
+          </>
         }
       />
 

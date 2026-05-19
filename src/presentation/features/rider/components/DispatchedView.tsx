@@ -29,6 +29,10 @@ interface DispatchedViewProps {
   readonly ride: Ride;
   readonly onPressCancel: () => void;
   readonly onPressChat: () => void;
+  /** Phase 10 turn 8 — chat unread-dot signal. The rider can receive
+   *  messages between dispatch and start, so the dot ships here for
+   *  parity with `StartedView`. */
+  readonly hasUnread?: boolean;
   readonly cancelDisabled?: boolean;
   /**
    * Phase 10 turn 5 — live ETA fields surfaced by
@@ -45,6 +49,7 @@ export function DispatchedView({
   ride,
   onPressCancel,
   onPressChat,
+  hasUnread,
   cancelDisabled,
   liveDurationSeconds,
   liveDistanceMeters,
@@ -70,13 +75,22 @@ export function DispatchedView({
         trailing={
           <>
             <HeaderIconButton
-              label="Open chat"
+              label={hasUnread ? 'Open chat (unread)' : 'Open chat'}
               onPress={onPressChat}
               testID="dispatched-chat"
             >
-              <Text className="text-sm font-semibold text-foreground">
-                Chat
-              </Text>
+              <View className="flex-row items-center">
+                <Text className="text-sm font-semibold text-foreground">
+                  Chat
+                </Text>
+                {hasUnread && (
+                  <View
+                    className="ml-1 h-2 w-2 rounded-full bg-primary"
+                    accessibilityLabel="Unread messages"
+                    testID="dispatched-chat-unread"
+                  />
+                )}
+              </View>
             </HeaderIconButton>
             <HeaderIconButton
               label="Cancel ride"

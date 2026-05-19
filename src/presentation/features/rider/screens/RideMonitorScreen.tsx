@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import { RideId } from '@domain/entities/RideId';
+import { ChatModal } from '@presentation/components/chat/ChatModal';
 import {
   Map,
   type MapMarkerProps,
@@ -17,6 +18,7 @@ import type {
   RiderStackNavigation,
   RiderStackScreenProps,
 } from '@presentation/navigation/types';
+import { useCurrentUserQuery } from '@presentation/queries';
 
 import { AwaitingDriverView } from '../components/AwaitingDriverView';
 import { CompletedView } from '../components/CompletedView';
@@ -74,6 +76,7 @@ export default function RideMonitorScreen({
 function RideMonitorContent({ rideId }: { rideId: RideId }) {
   const vm = useRideMonitorViewModel({ rideId });
   const navigation = useNavigation<RiderStackNavigation>();
+  const userQuery = useCurrentUserQuery();
 
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['25%', '50%', '90%'], []);
@@ -194,6 +197,7 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
               ride={ride}
               onPressCancel={openCancel}
               onPressChat={vm.onPressChat}
+              hasUnread={vm.hasUnreadMessages}
               cancelDisabled={vm.isCancelling}
               liveDurationSeconds={vm.liveDurationSeconds}
               liveDistanceMeters={vm.liveDistanceMeters}
@@ -238,6 +242,25 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
         onClose={closeCancel}
         onConfirm={handleCancel}
       />
+
+      {/* Phase 10 turn 8 — in-trip chat modal. Mounted as a sibling
+          to the bottom-sheet + cancel sheet. Visibility gated by the
+          view-model; only renders the GiftedChat tree when open so the
+          subscription isn't created on dispatched / awaiting trips
+          where the user never opens the thread. The user query has
+          loaded by the time the chat button can be tapped (it's
+          gated on `ride.status === 'dispatched' | 'started'` which
+          requires authenticated session). */}
+      {userQuery.data && (
+        <ChatModal
+          visible={vm.chatOpen}
+          onClose={vm.closeChat}
+          rideId={rideId}
+          userId={userQuery.data.id}
+          userName={userQuery.data.name}
+          role="rider"
+        />
+      )}
     </View>
   );
 }

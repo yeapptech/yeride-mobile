@@ -43,6 +43,8 @@ interface StartedViewProps {
   readonly onPressCancel: () => void;
   readonly onRequestPayment: () => void;
   readonly onLaunchNavigation: () => void;
+  readonly onPressChat: () => void;
+  readonly hasUnread?: boolean;
   readonly cancelDisabled?: boolean;
   readonly requestPaymentDisabled?: boolean;
   readonly launchNavigationDisabled?: boolean;
@@ -53,6 +55,8 @@ export function StartedView({
   onPressCancel,
   onRequestPayment,
   onLaunchNavigation,
+  onPressChat,
+  hasUnread,
   cancelDisabled,
   requestPaymentDisabled,
   launchNavigationDisabled,
@@ -85,15 +89,35 @@ export function StartedView({
         title={eta ? `Arriving in ${eta}` : 'On the way'}
         subtitle={distance ? `${distance} to dropoff` : undefined}
         trailing={
-          <HeaderIconButton
-            label="Cancel ride"
-            tone="destructive"
-            onPress={onPressCancel}
-            disabled={cancelDisabled}
-            testID="started-cancel"
-          >
-            <Text className="text-sm font-semibold text-error">Cancel</Text>
-          </HeaderIconButton>
+          <>
+            <HeaderIconButton
+              label={hasUnread ? 'Open chat (unread)' : 'Open chat'}
+              onPress={onPressChat}
+              testID="started-chat"
+            >
+              <View className="flex-row items-center">
+                <Text className="text-sm font-semibold text-foreground">
+                  Chat
+                </Text>
+                {hasUnread && (
+                  <View
+                    className="ml-1 h-2 w-2 rounded-full bg-primary"
+                    accessibilityLabel="Unread messages"
+                    testID="started-chat-unread"
+                  />
+                )}
+              </View>
+            </HeaderIconButton>
+            <HeaderIconButton
+              label="Cancel ride"
+              tone="destructive"
+              onPress={onPressCancel}
+              disabled={cancelDisabled}
+              testID="started-cancel"
+            >
+              <Text className="text-sm font-semibold text-error">Cancel</Text>
+            </HeaderIconButton>
+          </>
         }
       />
 

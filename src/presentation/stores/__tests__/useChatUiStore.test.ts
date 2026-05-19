@@ -1,25 +1,47 @@
+import { RideId } from '@domain/entities/RideId';
+
 import { useChatUiStore } from '../useChatUiStore';
+
+function rideId(suffix = '1'): RideId {
+  const r = RideId.create(`ride_chatui_${suffix}`);
+  if (!r.ok) throw new Error('test setup');
+  return r.value;
+}
 
 describe('useChatUiStore', () => {
   beforeEach(() => {
     useChatUiStore.getState().reset();
   });
 
-  it('starts closed with no lastReadAt', () => {
+  it('starts closed with null openRideId and no lastReadAt', () => {
     const s = useChatUiStore.getState();
     expect(s.isOpen).toBe(false);
+    expect(s.openRideId).toBe(null);
     expect(s.lastReadAt).toBeNull();
   });
 
-  it('open flips isOpen', () => {
-    useChatUiStore.getState().open();
-    expect(useChatUiStore.getState().isOpen).toBe(true);
+  it('open(rideId) flips isOpen and records the openRideId', () => {
+    useChatUiStore.getState().open(rideId());
+    const s = useChatUiStore.getState();
+    expect(s.isOpen).toBe(true);
+    expect(s.openRideId).not.toBe(null);
+    expect(String(s.openRideId)).toBe(String(rideId()));
   });
 
-  it('close flips isOpen back', () => {
-    useChatUiStore.getState().open();
+  it('close flips isOpen back and clears openRideId', () => {
+    useChatUiStore.getState().open(rideId());
     useChatUiStore.getState().close();
-    expect(useChatUiStore.getState().isOpen).toBe(false);
+    const s = useChatUiStore.getState();
+    expect(s.isOpen).toBe(false);
+    expect(s.openRideId).toBe(null);
+  });
+
+  it('open replaces the openRideId when called twice', () => {
+    useChatUiStore.getState().open(rideId('A'));
+    useChatUiStore.getState().open(rideId('B'));
+    expect(String(useChatUiStore.getState().openRideId)).toBe(
+      String(rideId('B')),
+    );
   });
 
   it('markRead with no arg uses the current wall-clock', () => {
@@ -40,12 +62,13 @@ describe('useChatUiStore', () => {
     expect(useChatUiStore.getState().lastReadAt).toEqual(ts);
   });
 
-  it('reset clears state', () => {
-    useChatUiStore.getState().open();
+  it('reset clears state including openRideId', () => {
+    useChatUiStore.getState().open(rideId());
     useChatUiStore.getState().markRead();
     useChatUiStore.getState().reset();
     const s = useChatUiStore.getState();
     expect(s.isOpen).toBe(false);
+    expect(s.openRideId).toBe(null);
     expect(s.lastReadAt).toBeNull();
   });
 });
