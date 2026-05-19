@@ -132,14 +132,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     ...(iosFirebaseConfig ? { googleServicesFile: iosFirebaseConfig } : {}),
     infoPlist: {
-      // Phase 7: background-mode entitlements + Transistor BGTask identifiers
-      // required by `react-native-background-geolocation`. The SDK's iOS
-      // background-fetch hook will refuse to schedule the OS task without the
-      // identifiers below; `UIBackgroundModes` `location` + `fetch` are the
-      // entitlements the OS checks to allow GPS callbacks while the app is
-      // backgrounded. The motion-usage description is required because the
-      // SDK reads CMMotionActivityManager to gate the moving/stationary
-      // state machine.
+      // Phase 7: background-mode entitlements required by
+      // `react-native-background-geolocation`. `UIBackgroundModes`
+      // `location` + `fetch` are the entitlements the OS checks to
+      // allow GPS callbacks while the app is backgrounded. The
+      // motion-usage description is required because the SDK reads
+      // CMMotionActivityManager to gate the moving/stationary state
+      // machine.
       //
       // Foreground location-permission strings (`NSLocationWhenInUseUsageDescription`
       // + `NSLocationAlwaysAndWhenInUseUsageDescription`) are emitted by the
@@ -158,11 +157,31 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // Legacy yeride ships `audio` for the same reason. The SDK ships
       // with `VOICE_ALERTS_AND_GUIDANCE` as the default `AudioGuidance`
       // (see node_modules/@googlemaps/react-native-navigation-sdk types).
+      //
+      // Phase 10 turn 4: `BGTaskSchedulerPermittedIdentifiers` is
+      // intentionally NOT emitted. Legacy yeride and prior rewrite
+      // builds shipped `['com.transistorsoft.fetch',
+      // 'com.transistorsoft.customtask']` because the pre-v5
+      // Transistor SDK registered those identifiers via
+      // `BGTaskScheduler.registerForTaskWithIdentifier`. Since the
+      // v5.1.1 upgrade (Phase 9 chore), the SDK no longer uses
+      // BGTaskScheduler at all — verified by `strings(1)` on both
+      // slices of `ios/Pods/TSLocationManager.xcframework/<slice>/TSLocationManager.framework/TSLocationManager`
+      // (zero hits for `BGTaskScheduler` / `BGProcessingTaskRequest`
+      // / `BGAppRefreshTaskRequest` / `registerForTaskWithIdentifier`
+      // / the two transistorsoft identifier strings), corroborated
+      // by a clean source-grep of `node_modules/react-native-background-geolocation/{ios,src}`
+      // and the iOS Expo plugin handler being a documented no-op.
+      // Carrying the identifiers without their owning API would
+      // declare to the OS that the app intends to register a task it
+      // never will, triggering BGTaskScheduler's runtime
+      // validation-warning. We also do NOT add `processing` to
+      // `UIBackgroundModes` (Apple requires it for any
+      // `BGProcessingTaskRequest`) — the v5 SDK doesn't schedule one.
+      // If a future SDK bump reintroduces BGTaskScheduler usage,
+      // re-add both the identifier whitelist AND the `processing`
+      // background mode together.
       UIBackgroundModes: ['location', 'fetch', 'remote-notification', 'audio'],
-      BGTaskSchedulerPermittedIdentifiers: [
-        'com.transistorsoft.fetch',
-        'com.transistorsoft.customtask',
-      ],
       NSMotionUsageDescription:
         'YeRide Next uses motion-activity data to detect when your trip starts and stops, improving battery life.',
       // react-native-background-geolocation iOS license (v5+). The SDK's
@@ -262,11 +281,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     [
       // Phase 7: background-aware location + geofence pipeline. The SDK's
-      // Expo plugin (a) writes the iOS `BGTaskSchedulerPermittedIdentifiers`
-      // helper config and patches Android `AndroidManifest.xml` with the
+      // Expo plugin (a) patches Android `AndroidManifest.xml` with the
       // foreground-service permissions / notification channel scaffolding,
       // and (b) bakes the ANDROID license key into the native bundle. The
       // license is consumed at BUILD time only — there is no runtime read.
+      // (Pre-v5 versions of the plugin also wrote iOS
+      // `BGTaskSchedulerPermittedIdentifiers` into Info.plist; v5.1.1's
+      // iOS handler is a documented no-op — see iOSPlugin.js note below
+      // and the Phase 10 turn 4 comment block in `ios.infoPlist` above.)
       //
       // The plugin's `license` option only feeds the Android SDK. The iOS
       // plugin handler is a no-op (verified in

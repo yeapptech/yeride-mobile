@@ -1,8 +1,8 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
-**Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 closures annotated 2026-05-18.
+**Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
 cutover rollout (§6) cannot begin until every ❌ row below is
 resolved or explicitly de-scoped.
@@ -27,13 +27,18 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1) + Turn 2 + Turn 3 closures:** **5 ❌ rows, 2 🟡 rows, 0 ⚠️ rows**
-block the rollout (down from 7 ❌ at v2 — Turn 2 closed the highest-
-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js` to
-inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next ❌
-on 2026-05-18 by porting `plugins/withMaterialTheme.js` to unblock
-Stripe `<CardForm/>` on Android). Turn 1's verification pass
-resolved the four v1 ⚠️ rows and surfaced three additional ❌ gaps:
+**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 closures:** **5 ❌ rows, 1 🟡 row, 0 ⚠️ rows**
+block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
+highest-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js`
+to inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next
+❌ on 2026-05-18 by porting `plugins/withMaterialTheme.js` to
+unblock Stripe `<CardForm/>` on Android; Turn 4 closed the sole
+code-side 🟡 on 2026-05-18 by dropping the unused
+`BGTaskSchedulerPermittedIdentifiers` array from `app.config.ts`
+because the v5.1.1 Transistor SDK provably no longer uses
+BGTaskScheduler — see §10.4 + `docs/PHASE_10_TURN_4.md`). Turn 1's
+verification pass resolved the four v1 ⚠️ rows and surfaced three
+additional ❌ gaps:
 
 - **§3.5 rider ETA** flipped ⚠️ → ❌. The rewrite has only static
   ETA baked at trip-create / dispatch time; no driver-side telemetry
@@ -50,12 +55,21 @@ resolved the four v1 ⚠️ rows and surfaced three additional ❌ gaps:
 - **§4 audio** flipped ⚠️ → ✅ post-fix. Restored in this turn (one
   line in `app.config.ts`) — NavSdk default is `VOICE_ALERTS_AND_GUIDANCE`
   and iOS suspends audio when backgrounded without the entitlement.
-- **§4 processing** flipped ⚠️ → 🟡. The rewrite still declares
-  `com.transistorsoft.customtask` in `BGTaskSchedulerPermittedIdentifiers`
-  but iOS BGProcessingTaskRequest jobs require the `processing`
-  UIBackgroundMode — currently absent. Either re-add `processing`
-  OR drop the customtask identifier; needs device-level
-  investigation of what Transistor SDK v5 schedules under that name.
+- **§4 processing** flipped ⚠️ → 🟡 in Turn 1 → **✅ closed in
+  Turn 4 (2026-05-18)** via Path B (drop identifiers). Static
+  inspection of the v5.1.1 TSLocationManager binary (both arm64 and
+  simulator slices) found zero references to `BGTaskScheduler` /
+  `BGProcessingTaskRequest` / `BGAppRefreshTaskRequest` /
+  `registerForTaskWithIdentifier` / `com.transistorsoft.fetch` /
+  `com.transistorsoft.customtask`. Source-grep in
+  `node_modules/react-native-background-geolocation/{ios,src}`
+  confirmed (zero matches) and the iOS Expo plugin handler is a
+  documented no-op. Turn 4 removed the entire
+  `BGTaskSchedulerPermittedIdentifiers` key (not left as empty
+  array) and intentionally did NOT add `processing` to
+  `UIBackgroundModes` (Apple requires it for
+  `BGProcessingTaskRequest`, an API the v5 SDK provably doesn't
+  use). See `docs/PHASE_10_TURN_4.md` for the evidence chain.
 - **§4 withMaterialTheme** flipped ⚠️ → ❌ in Turn 1 → **✅ closed
   in Turn 3 (2026-05-18)**. Stripe `CardForm` (used in
   `AddPaymentMethodScreen`) requires Material Components theme on
@@ -498,8 +512,8 @@ and the two are NOT competing surfaces.
 
 | Surface                                         | Legacy                                                                | Rewrite                                                                                                  | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| iOS `UIBackgroundModes`                         | `['location', 'fetch', 'processing', 'remote-notification', 'audio']` | `['location', 'fetch', 'remote-notification', 'audio']` (post-Turn-1)                                    | 🟡 `audio` restored in Turn 1 (one-line fix in `app.config.ts:154`). `processing` still missing despite the rewrite declaring `com.transistorsoft.customtask` in `BGTaskSchedulerPermittedIdentifiers`; BGProcessingTaskRequest jobs require the `processing` UIBackgroundMode per Apple's BGTaskScheduler contract. Either re-add `processing` OR drop the customtask identifier from the permitted-identifiers array. Latent bug — likely not surfaced because legacy ships the mode and the rewrite hasn't been device-tested in isolation.                                                                                                                                          |
-| iOS `BGTaskSchedulerPermittedIdentifiers`       | `['com.transistorsoft.fetch', 'com.transistorsoft.customtask']`       | same                                                                                                     | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| iOS `UIBackgroundModes`                         | `['location', 'fetch', 'processing', 'remote-notification', 'audio']` | `['location', 'fetch', 'remote-notification', 'audio']` (post-Turn-1; unchanged Turn 4)                  | ✅ **closed Turn 4 (2026-05-18)** via Path B. `audio` was restored in Turn 1 (one-line fix in `app.config.ts:184`). `processing` intentionally NOT added in Turn 4: Apple requires it only for `BGProcessingTaskRequest`, and the v5.1.1 Transistor SDK binary contains zero references to `BGTaskScheduler` / `BGProcessingTaskRequest` / `registerForTaskWithIdentifier` (verified via `strings(1)` on both arm64 + simulator slices; source-grep in `node_modules/react-native-background-geolocation/{ios,src}` confirms; iOS Expo plugin is a documented no-op). Re-adding `processing` would inflate the app's entitlement surface for an API the SDK doesn't use. See §10.4.     |
+| iOS `BGTaskSchedulerPermittedIdentifiers`       | `['com.transistorsoft.fetch', 'com.transistorsoft.customtask']`       | not emitted (Turn 4)                                                                                     | ✅ **closed Turn 4 (2026-05-18)** via Path B. Legacy entries existed because the pre-v5 Transistor SDK registered those identifiers via `BGTaskScheduler.registerForTaskWithIdentifier`. The v5.1.1 upgrade (Phase 9 chore) removed BGTaskScheduler usage entirely; carrying the now-orphan identifiers would declare to the OS that the app intends to register a task it never will (triggering Apple's runtime validation-warning). The whole key is dropped from `ios.infoPlist` rather than left as an empty array (kickoff sign-off criterion #4). If a future SDK bump reintroduces BGTaskScheduler usage, re-add both the identifier whitelist AND `processing` together.       |
 | iOS permission strings                          | NSLocation×4, NSMotion, NSCamera, NSPhotoLibrary                      | NSMotion only (camera + photo handled by `expo-image-picker` plugin; location by `expo-location` plugin) | ✅ Different mechanism, same effect.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Android permissions                             | ACCESS_COARSE_LOCATION + ACCESS_FINE_LOCATION explicit                | Same via plugins                                                                                         | ✅ Confirm at build time.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `expo-notifications` plugin                     | Present                                                               | Present (Phase 9 Turn 2)                                                                                 | ✅                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -522,10 +536,15 @@ and the two are NOT competing surfaces.
 **Action items (v2):**
 
 - ❌ Add `@react-native-community/datetimepicker` plugin (gated on §3.2 work).
-- ✅ `audio` UIBackgroundMode restored in Turn 1 (`app.config.ts:154`).
-- 🟡 Decide on `processing` UIBackgroundMode vs dropping
-  `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`
-  (Turn 1 left both in conflict, low-risk but worth resolving).
+- ✅ `audio` UIBackgroundMode restored in Turn 1 (`app.config.ts:184`).
+- ✅ `processing` UIBackgroundMode vs `BGTaskSchedulerPermittedIdentifiers`
+  reconciled in Turn 4 (2026-05-18) via Path B — both transistorsoft
+  identifiers dropped from `app.config.ts`'s `ios.infoPlist` (whole
+  key removed). The v5.1.1 SDK binary doesn't reference
+  BGTaskScheduler at all, so the identifiers would have triggered a
+  runtime validation-warning without serving any function.
+  `processing` not added (the API requiring it isn't used). See
+  `docs/PHASE_10_TURN_4.md`.
 - ✅ `withMaterialTheme` ported in Turn 3 (2026-05-18) as
   `plugins/withMaterialTheme.js` (parent: DayNight, not legacy's
   Light) — unblocks Stripe `<CardForm/>` Android render. Production
@@ -619,7 +638,7 @@ one-line `audio` UIBackgroundMode restoration). Remaining turns:
 | ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                       | small (1d)          | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)      |
 | ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~     | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`) |
 | ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                         | ~~**Production blocker — Android**~~ | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)   |
-| 4     | **`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.                                                                                                                              | Latent BGTaskScheduler misconfig     | tiny (½d)           | —                                                                       |
+| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~ | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)   |
 | 5     | **Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.                                                                                                                                                                            | User-visible regression vs legacy    | small-medium (1-2d) | —                                                                       |
 | 6     | **Activity tab — rider + driver** (§3.3) — placeholder → real screen with InProgressTrips / ScheduledTrips / RecentTrips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).                                                                                                                             | Largest user-facing gap              | large (3-5d)        | —                                                                       |
 | 7     | **Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.                                                                                                                                       | Existing feature regression risk     | medium (2-3d)       | partly (6) for the listing                                              |
@@ -720,19 +739,53 @@ confirm `yeride.com/stripe-return` 302-bridges to the production
 deep-link scheme. Not engineering work in the rewrite repo; ops
 work on the marketing-domain DNS / web server.
 
-### 10.4 `processing` UIBackgroundMode vs `com.transistorsoft.customtask` mismatch — 🟡
+### 10.4 `processing` UIBackgroundMode vs `com.transistorsoft.customtask` mismatch — ✅ closed Turn 4
 
-Documented under §4 above. `BGTaskSchedulerPermittedIdentifiers` in
-the rewrite's `app.config.ts:156` still includes
-`com.transistorsoft.customtask`, but iOS BGProcessingTaskRequest jobs
-(which is what Transistor's customtask is) require the `processing`
-UIBackgroundMode per Apple's BGTaskScheduler contract. The rewrite
-ships without `processing`. Either Transistor v5+ no longer uses
-customtask (in which case drop the identifier) or the rewrite's
-customtask schedule is silently failing in production.
+Documented under §4 above. At v2 the rewrite's
+`BGTaskSchedulerPermittedIdentifiers` still declared
+`com.transistorsoft.customtask` without the `processing`
+UIBackgroundMode Apple requires for `BGProcessingTaskRequest`.
 
-**Verdict:** 🟡 — Turn 4 (per §8) — one-line app.config.ts decision
-either way.
+Turn 4 (2026-05-18) resolved this via **Path B — drop the
+identifiers** rather than Path A — add `processing`. The decision
+was driven by three lines of evidence on the post-Phase-9
+v5.1.1 Transistor SDK:
+
+1. **Binary inspection** (decisive). `strings(1)` over
+   `ios/Pods/TSLocationManager.xcframework/<slice>/TSLocationManager.framework/TSLocationManager`,
+   on both `ios-arm64` and `ios-arm64_x86_64-simulator` slices,
+   returns zero hits for `BGTaskScheduler` / `BGProcessingTaskRequest`
+   / `BGAppRefreshTaskRequest` / `registerForTaskWithIdentifier` /
+   `com.transistorsoft.fetch` / `com.transistorsoft.customtask`. The
+   only `bgTask` symbol present is `TSHttpService._bgTask`, an
+   instance variable using the legacy
+   `UIApplication.beginBackgroundTaskWithName:` API — a completely
+   different OS surface from BGTaskScheduler.
+2. **Source-grep** in
+   `node_modules/react-native-background-geolocation/{ios,src}`
+   returns zero matches for BGTaskScheduler references or for the
+   two legacy task identifier strings.
+3. **The iOS Expo plugin handler is a documented no-op**
+   (`node_modules/react-native-background-geolocation/expo/plugin/build/iOSPlugin.js`
+   returns the config unchanged with the comment "Nothing to here
+   here currently"). So the `app.config.ts` whitelist was pure
+   manual carryover from legacy yeride's pre-v5 SDK, not something
+   the plugin re-injected.
+
+Removing both identifiers (and the whole `BGTaskSchedulerPermittedIdentifiers`
+key, since the array would otherwise be empty) avoids declaring to
+the OS that the app intends to register a task it never will.
+`processing` was deliberately NOT added: Apple requires it only for
+`BGProcessingTaskRequest`, and the v5 SDK provably doesn't schedule
+one. Adding it would have inflated the entitlement surface for no
+benefit and could prompt App Store review questions about
+background-processing usage.
+
+**Verdict:** ✅ — closed in Turn 4 (2026-05-18). See
+`docs/PHASE_10_TURN_4.md` for the pre-checklist outcomes, the patch
+diff, and the rollback condition (if a future SDK bump
+reintroduces BGTaskScheduler usage, re-add both the identifier
+whitelist AND the `processing` background mode together).
 
 ---
 
