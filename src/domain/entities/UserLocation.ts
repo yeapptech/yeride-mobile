@@ -36,6 +36,26 @@ export interface TripTracking {
   readonly tripId: RideId;
   readonly tripStatus: TripTrackingStatus;
   readonly destination: TripTrackingDestination;
+  /**
+   * Phase 10 turn 5. Live ETA telemetry sourced from the driver's
+   * Google Navigation SDK (`subscribeToTimeAndDistance`). All three
+   * fields are nullable so a route-metadata-only `TripTracking`
+   * (legacy shape pre-Turn-5, or the moment between trip dispatch and
+   * the first NavSdk telemetry callback) is representable.
+   *
+   * `distanceMeters` and `durationSeconds` are integer minor units
+   * (metres, seconds — matches the SDK's `TimeAndDistance` shape).
+   * Negative SDK values are coerced to 0 at the adapter boundary.
+   *
+   * `updatedAt` is the adapter-stamped event time (`Date.now()` —
+   * the SDK doesn't surface a server timestamp). The rider VM
+   * doesn't currently apply a staleness gate on consumption — the
+   * driver-side throttle (Phase 10 turn 5: NavSdk freshness window
+   * 15s) keeps writes recent.
+   */
+  readonly distanceMeters: number | null;
+  readonly durationSeconds: number | null;
+  readonly updatedAt: Date | null;
 }
 
 export interface UserLocationProps {
@@ -73,6 +93,49 @@ export class UserLocation {
           field: 'updatedAt',
         }),
       );
+    }
+    // Phase 10 turn 5 — validate the optional live-ETA telemetry on
+    // `tripTracking`. We accept null for any of the three fields (so
+    // legacy-shape and pre-first-callback windows stay representable);
+    // when supplied, distance/duration must be non-negative finite
+    // numbers and `updatedAt` must parse to a valid Date.
+    if (props.tripTracking) {
+      const tt = props.tripTracking;
+      if (
+        tt.distanceMeters !== null &&
+        (!Number.isFinite(tt.distanceMeters) || tt.distanceMeters < 0)
+      ) {
+        return Result.err(
+          new ValidationError({
+            code: 'trip_tracking_invalid_distance',
+            message:
+              'tripTracking.distanceMeters must be null or a non-negative finite number',
+            field: 'tripTracking.distanceMeters',
+          }),
+        );
+      }
+      if (
+        tt.durationSeconds !== null &&
+        (!Number.isFinite(tt.durationSeconds) || tt.durationSeconds < 0)
+      ) {
+        return Result.err(
+          new ValidationError({
+            code: 'trip_tracking_invalid_duration',
+            message:
+              'tripTracking.durationSeconds must be null or a non-negative finite number',
+            field: 'tripTracking.durationSeconds',
+          }),
+        );
+      }
+      if (tt.updatedAt !== null && Number.isNaN(tt.updatedAt.getTime())) {
+        return Result.err(
+          new ValidationError({
+            code: 'trip_tracking_invalid_updated_at',
+            message: 'tripTracking.updatedAt must be a valid Date when set',
+            field: 'tripTracking.updatedAt',
+          }),
+        );
+      }
     }
     return Result.ok(new UserLocation(props));
   }

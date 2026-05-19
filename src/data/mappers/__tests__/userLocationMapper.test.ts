@@ -87,7 +87,7 @@ describe('domain → doc → domain round-trip', () => {
     expect(round.tripTracking).toBeNull();
   });
 
-  it('preserves tripTracking shape', () => {
+  it('preserves tripTracking shape (no live telemetry)', () => {
     const original = unwrap(
       UserLocation.create({
         userId: unwrap(UserId.create(USER_ID_STR)),
@@ -98,6 +98,9 @@ describe('domain → doc → domain round-trip', () => {
           tripId: unwrap(RideId.create(TRIP_ID_STR)),
           tripStatus: 'dispatched',
           destination: { type: 'pickup', location: FORT_LAUDERDALE },
+          distanceMeters: null,
+          durationSeconds: null,
+          updatedAt: null,
         },
       }),
     );
@@ -110,5 +113,157 @@ describe('domain → doc → domain round-trip', () => {
     expect(round.tripTracking?.destination.location.latitude).toBe(
       FORT_LAUDERDALE.latitude,
     );
+    expect(round.tripTracking?.distanceMeters).toBeNull();
+    expect(round.tripTracking?.durationSeconds).toBeNull();
+    expect(round.tripTracking?.updatedAt).toBeNull();
+  });
+
+  // Phase 10 turn 5 — live-ETA telemetry round-trip.
+  it('preserves tripTracking live-ETA telemetry through round-trip', () => {
+    const liveAt = new Date('2026-04-27T12:00:05Z');
+    const original = unwrap(
+      UserLocation.create({
+        userId: unwrap(UserId.create(USER_ID_STR)),
+        location: MIAMI,
+        speed: 10,
+        updatedAt: new Date('2026-04-27T12:00:05Z'),
+        tripTracking: {
+          tripId: unwrap(RideId.create(TRIP_ID_STR)),
+          tripStatus: 'started',
+          destination: { type: 'dropoff', location: FORT_LAUDERDALE },
+          distanceMeters: 4250,
+          durationSeconds: 420,
+          updatedAt: liveAt,
+        },
+      }),
+    );
+    const doc = toDoc(original);
+    const parsed = unwrap(parseUserLocationDoc(doc));
+    const round = unwrap(toDomain(USER_ID_STR, parsed));
+    expect(round.tripTracking?.distanceMeters).toBe(4250);
+    expect(round.tripTracking?.durationSeconds).toBe(420);
+    expect(round.tripTracking?.updatedAt?.getTime()).toBe(liveAt.getTime());
+  });
+});
+
+// Phase 10 turn 5 — DTO read-side accepts BOTH legacy nested and
+// canonical flat shapes; write side emits BOTH for legacy parity.
+describe('tripTracking shape coexistence (Phase 10 turn 5)', () => {
+  it('reads the legacy nested shape into canonical fields', () => {
+    const r = parseUserLocationDoc({
+      latitude: 25.7617,
+      longitude: -80.1918,
+      updatedAt: '2026-04-27T12:00:00Z',
+      tripTracking: {
+        tripId: TRIP_ID_STR,
+        tripStatus: 'started',
+        destination: {
+          type: 'dropoff',
+          latitude: 26.1224,
+          longitude: -80.1373,
+        },
+        // Legacy shape only.
+        distance: { value: 1500, text: '0.9 mi' },
+        duration: { value: 180, text: '3 mins' },
+        calculatedAt: '2026-04-27T12:00:05Z',
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const round = unwrap(toDomain(USER_ID_STR, r.value));
+    expect(round.tripTracking?.distanceMeters).toBe(1500);
+    expect(round.tripTracking?.durationSeconds).toBe(180);
+    expect(round.tripTracking?.updatedAt?.toISOString()).toBe(
+      '2026-04-27T12:00:05.000Z',
+    );
+  });
+
+  it('prefers canonical flat fields over legacy nested on conflict', () => {
+    const r = parseUserLocationDoc({
+      latitude: 25.7617,
+      longitude: -80.1918,
+      updatedAt: '2026-04-27T12:00:00Z',
+      tripTracking: {
+        tripId: TRIP_ID_STR,
+        tripStatus: 'started',
+        destination: {
+          type: 'dropoff',
+          latitude: 26.1224,
+          longitude: -80.1373,
+        },
+        // Both shapes — flat wins.
+        distanceMeters: 2000,
+        durationSeconds: 240,
+        updatedAtMs: Date.parse('2026-04-27T12:00:10Z'),
+        distance: { value: 1500, text: '0.9 mi' },
+        duration: { value: 180, text: '3 mins' },
+        calculatedAt: '2026-04-27T12:00:05Z',
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const round = unwrap(toDomain(USER_ID_STR, r.value));
+    expect(round.tripTracking?.distanceMeters).toBe(2000);
+    expect(round.tripTracking?.durationSeconds).toBe(240);
+    expect(round.tripTracking?.updatedAt?.toISOString()).toBe(
+      '2026-04-27T12:00:10.000Z',
+    );
+  });
+
+  it('write emits BOTH canonical flat + legacy nested shapes', () => {
+    const liveAt = new Date('2026-04-27T12:00:05Z');
+    const original = unwrap(
+      UserLocation.create({
+        userId: unwrap(UserId.create(USER_ID_STR)),
+        location: MIAMI,
+        speed: 10,
+        updatedAt: new Date('2026-04-27T12:00:05Z'),
+        tripTracking: {
+          tripId: unwrap(RideId.create(TRIP_ID_STR)),
+          tripStatus: 'started',
+          destination: { type: 'dropoff', location: FORT_LAUDERDALE },
+          distanceMeters: 1500,
+          durationSeconds: 180,
+          updatedAt: liveAt,
+        },
+      }),
+    );
+    const doc = toDoc(original);
+    // Canonical flat fields.
+    expect(doc.tripTracking?.distanceMeters).toBe(1500);
+    expect(doc.tripTracking?.durationSeconds).toBe(180);
+    expect(doc.tripTracking?.updatedAtMs).toBe(liveAt.getTime());
+    // Legacy nested shape (for legacy yeride clients during cutover).
+    expect(doc.tripTracking?.distance?.value).toBe(1500);
+    expect(typeof doc.tripTracking?.distance?.text).toBe('string');
+    expect(doc.tripTracking?.duration?.value).toBe(180);
+    expect(typeof doc.tripTracking?.duration?.text).toBe('string');
+    expect(doc.tripTracking?.calculatedAt).toBe(liveAt.toISOString());
+  });
+
+  it('write OMITS legacy nested shape when telemetry is null', () => {
+    const original = unwrap(
+      UserLocation.create({
+        userId: unwrap(UserId.create(USER_ID_STR)),
+        location: MIAMI,
+        speed: 10,
+        updatedAt: new Date('2026-04-27T12:00:00Z'),
+        tripTracking: {
+          tripId: unwrap(RideId.create(TRIP_ID_STR)),
+          tripStatus: 'dispatched',
+          destination: { type: 'pickup', location: FORT_LAUDERDALE },
+          distanceMeters: null,
+          durationSeconds: null,
+          updatedAt: null,
+        },
+      }),
+    );
+    const doc = toDoc(original);
+    expect(doc.tripTracking?.distance).toBeUndefined();
+    expect(doc.tripTracking?.duration).toBeUndefined();
+    expect(doc.tripTracking?.calculatedAt).toBeUndefined();
+    expect(doc.tripTracking?.distanceMeters).toBeUndefined();
+    expect(doc.tripTracking?.durationSeconds).toBeUndefined();
+    expect(doc.tripTracking?.updatedAtMs).toBeUndefined();
   });
 });

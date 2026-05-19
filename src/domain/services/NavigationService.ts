@@ -104,6 +104,28 @@ export interface NavArrivalEvent {
 }
 
 /**
+ * Phase 10 turn 5 — live ETA telemetry from the SDK's
+ * `setOnRemainingTimeOrDistanceChanged` callback. The SDK's
+ * `TimeAndDistance` carries `meters: number` + `seconds: number` (both
+ * may be negative when the destination is behind the driver — coerced
+ * to 0 at the adapter boundary). The adapter stamps `timestampMs`
+ * because the SDK doesn't surface a server timestamp.
+ *
+ * Domain consumers (rider VM, driver write path) treat these as the
+ * authoritative live ETA. The driver-side write path throttles per
+ * the legacy `distanceTrackingService` constants (30s min interval /
+ * 50m min movement / 60s data staleness; NavSdk-fresh window 15s).
+ */
+export interface NavTimeAndDistance {
+  /** Metres remaining to the next destination waypoint. Non-negative. */
+  readonly remainingMeters: number;
+  /** Seconds remaining to the next destination waypoint. Non-negative. */
+  readonly remainingSeconds: number;
+  /** Adapter-stamped event time. */
+  readonly timestampMs: number;
+}
+
+/**
  * Domain shape of a single waypoint for `setDestinations`. Either
  * `placeId` or `coords` must be provided (matches the SDK's
  * `Waypoint` shape but in domain primitives).
@@ -151,6 +173,18 @@ export interface NavTermsResult {
  */
 export interface NavigationListenerSetters {
   setOnArrival(callback: ((event: unknown) => void) | null): void;
+  /**
+   * Phase 10 turn 5 — single-slot setter for the SDK's
+   * `setOnRemainingTimeOrDistanceChanged`. The adapter narrows
+   * internally; same `unknown`-typed-callback pattern as `setOnArrival`
+   * so the domain layer doesn't import the SDK's `TimeAndDistance`
+   * type. Method-syntax declaration keeps the type checker bivariant
+   * on the inner callback (necessary for the adapter's internal
+   * SDK-typed handler to be assignable).
+   */
+  setOnRemainingTimeOrDistanceChanged(
+    callback: ((event: unknown) => void) | null,
+  ): void;
 }
 
 /**
@@ -247,4 +281,22 @@ export interface NavigationService {
    * subscribe before the navigation screen mounts.
    */
   subscribeToArrival(callback: (event: NavArrivalEvent) => void): () => void;
+
+  /**
+   * Phase 10 turn 5 — subscribe to live time/distance telemetry from
+   * the SDK's `setOnRemainingTimeOrDistanceChanged`. Multiple callers
+   * register against ONE underlying SDK listener; the adapter dedups
+   * by `(remainingMeters, remainingSeconds)` because the SDK can fire
+   * repeatedly with identical values during standstill (mirrors the
+   * `subscribeToArrival` multi-subscriber + dedup pattern).
+   *
+   * Same pre-connection-subscribe semantics as `subscribeToArrival`:
+   * if no controller is connected at the time of subscription, the
+   * subscriber is recorded and the SDK listener is registered on the
+   * next `setController(controller)` call. Returns a synchronous
+   * disposer.
+   */
+  subscribeToTimeAndDistance(
+    callback: (event: NavTimeAndDistance) => void,
+  ): () => void;
 }

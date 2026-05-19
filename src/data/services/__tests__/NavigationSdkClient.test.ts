@@ -23,6 +23,8 @@ interface NavMock {
   __makeController: () => MockController;
   __makeListeners: () => MockListeners;
   __emitArrival: (event: unknown) => void;
+  /** Phase 10 turn 5 — fan an SDK-shaped time/distance event into listeners. */
+  __emitTimeAndDistance: (event: unknown) => void;
   __reset: () => void;
 }
 
@@ -37,6 +39,8 @@ interface MockController {
 
 interface MockListeners {
   setOnArrival: jest.Mock;
+  /** Phase 10 turn 5 — new SDK setter for live ETA telemetry. */
+  setOnRemainingTimeOrDistanceChanged: jest.Mock;
 }
 
 // Pull the mocked module from `jest.setup.ts`. Using `require()` here
@@ -543,6 +547,155 @@ describe('NavigationSdkClient', () => {
       expect(activations.length).toBeGreaterThanOrEqual(1);
       // And events flow through.
       sdk.__emitArrival(sampleArrivalEvent());
+      expect(cb).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  /**
+   * Phase 10 turn 5 — subscribeToTimeAndDistance mirrors the
+   * subscribeToArrival pattern: one underlying SDK listener fanned out
+   * to N domain subscribers, with `(remainingMeters, remainingSeconds)`
+   * dedup so consecutive identical SDK fires collapse to one callback.
+   *
+   * Cases (parallel to subscribeToArrival's arm):
+   *   1. one SDK listener regardless of subscriber count
+   *   2. fan-out to every subscriber + dedup consecutive identical fires
+   *   3. last disposer clears the SDK listener
+   *   4. pre-controller subscribers get the SDK listener applied at
+   *      connect time (deferred-attach contract)
+   */
+  describe('subscribeToTimeAndDistance', () => {
+    const sampleTd = (
+      overrides: Partial<{ meters: number; seconds: number }> = {},
+    ): unknown => ({
+      meters: overrides.meters ?? 2500,
+      seconds: overrides.seconds ?? 300,
+      delaySeverity: 0,
+    });
+
+    it('registers exactly one underlying SDK listener regardless of subscriber count', () => {
+      const client = new NavigationSdkClient();
+      const controller = sdk.__makeController();
+      const listeners = sdk.__makeListeners();
+      client.setController({
+        controller: controller as unknown as Parameters<
+          NavigationSdkClient['setController']
+        >[0]['controller'],
+        listeners: listeners as unknown as NavigationListenerSetters,
+      });
+      const a = jest.fn();
+      const b = jest.fn();
+      const disposeA = client.subscribeToTimeAndDistance(a);
+      const disposeB = client.subscribeToTimeAndDistance(b);
+      const callsToActivate =
+        listeners.setOnRemainingTimeOrDistanceChanged.mock.calls.filter(
+          (c) => c[0] !== null && c[0] !== undefined,
+        );
+      expect(callsToActivate).toHaveLength(1);
+      disposeA();
+      disposeB();
+    });
+
+    it('fans events to every subscriber and dedupes consecutive identical fires', () => {
+      const client = new NavigationSdkClient();
+      const controller = sdk.__makeController();
+      const listeners = sdk.__makeListeners();
+      client.setController({
+        controller: controller as unknown as Parameters<
+          NavigationSdkClient['setController']
+        >[0]['controller'],
+        listeners: listeners as unknown as NavigationListenerSetters,
+      });
+      const a = jest.fn();
+      const b = jest.fn();
+      client.subscribeToTimeAndDistance(a);
+      client.subscribeToTimeAndDistance(b);
+
+      const evt = sampleTd({ meters: 2500, seconds: 300 });
+      sdk.__emitTimeAndDistance(evt);
+      sdk.__emitTimeAndDistance(evt); // duplicate — deduped
+
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).toHaveBeenCalledTimes(1);
+      const event = a.mock.calls[0][0] as {
+        remainingMeters: number;
+        remainingSeconds: number;
+        timestampMs: number;
+      };
+      expect(event.remainingMeters).toBe(2500);
+      expect(event.remainingSeconds).toBe(300);
+      expect(event.timestampMs).toBeGreaterThan(0);
+
+      // A NEW (different) value passes through.
+      sdk.__emitTimeAndDistance(sampleTd({ meters: 2400, seconds: 290 }));
+      expect(a).toHaveBeenCalledTimes(2);
+      expect(b).toHaveBeenCalledTimes(2);
+    });
+
+    it('coerces negative SDK meters/seconds to 0 at the boundary', () => {
+      const client = new NavigationSdkClient();
+      const controller = sdk.__makeController();
+      const listeners = sdk.__makeListeners();
+      client.setController({
+        controller: controller as unknown as Parameters<
+          NavigationSdkClient['setController']
+        >[0]['controller'],
+        listeners: listeners as unknown as NavigationListenerSetters,
+      });
+      const cb = jest.fn();
+      client.subscribeToTimeAndDistance(cb);
+      sdk.__emitTimeAndDistance({
+        meters: -50,
+        seconds: -10,
+        delaySeverity: 0,
+      });
+      const event = cb.mock.calls[0][0] as {
+        remainingMeters: number;
+        remainingSeconds: number;
+      };
+      expect(event.remainingMeters).toBe(0);
+      expect(event.remainingSeconds).toBe(0);
+    });
+
+    it('disposer removes the subscriber; final disposer clears the SDK listener', () => {
+      const client = new NavigationSdkClient();
+      const controller = sdk.__makeController();
+      const listeners = sdk.__makeListeners();
+      client.setController({
+        controller: controller as unknown as Parameters<
+          NavigationSdkClient['setController']
+        >[0]['controller'],
+        listeners: listeners as unknown as NavigationListenerSetters,
+      });
+      const cb = jest.fn();
+      const dispose = client.subscribeToTimeAndDistance(cb);
+      dispose();
+      expect(
+        listeners.setOnRemainingTimeOrDistanceChanged,
+      ).toHaveBeenLastCalledWith(null);
+      sdk.__emitTimeAndDistance(sampleTd());
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it('subscribers registered before setController get the SDK listener at connect time', () => {
+      const client = new NavigationSdkClient();
+      const cb = jest.fn();
+      const dispose = client.subscribeToTimeAndDistance(cb);
+      const controller = sdk.__makeController();
+      const listeners = sdk.__makeListeners();
+      client.setController({
+        controller: controller as unknown as Parameters<
+          NavigationSdkClient['setController']
+        >[0]['controller'],
+        listeners: listeners as unknown as NavigationListenerSetters,
+      });
+      const activations =
+        listeners.setOnRemainingTimeOrDistanceChanged.mock.calls.filter(
+          (c) => c[0] !== null && c[0] !== undefined,
+        );
+      expect(activations.length).toBeGreaterThanOrEqual(1);
+      sdk.__emitTimeAndDistance(sampleTd());
       expect(cb).toHaveBeenCalledTimes(1);
       dispose();
     });

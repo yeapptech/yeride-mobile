@@ -195,6 +195,8 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
               onPressCancel={openCancel}
               onPressChat={vm.onPressChat}
               cancelDisabled={vm.isCancelling}
+              liveDurationSeconds={vm.liveDurationSeconds}
+              liveDistanceMeters={vm.liveDistanceMeters}
             />
           ) : ride.status === 'started' ? (
             <StartedView
@@ -203,6 +205,8 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
               onPressCancel={openCancel}
               onPressChat={vm.onPressChat}
               cancelDisabled={vm.isCancelling}
+              liveDurationSeconds={vm.liveDurationSeconds}
+              liveDistanceMeters={vm.liveDistanceMeters}
             />
           ) : ride.status === 'payment_requested' ||
             ride.status === 'completed' ? (

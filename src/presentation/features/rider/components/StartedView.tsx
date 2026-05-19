@@ -10,7 +10,9 @@ import {
  * Status view for `started`. The driver has picked up the rider; the trip
  * is in motion. We show:
  *   - ETA-to-dropoff from `ride.dropoff.directions` (set at trip create
- *     time by the rider's RouteSelect view-model)
+ *     time by the rider's RouteSelect view-model) — UPDATED in Phase
+ *     10 turn 5 to prefer `liveDurationSeconds` / `liveDistanceMeters`
+ *     when available (driver's NavSdk telemetry).
  *   - cancel + chat-stub buttons (cancel is still allowed mid-trip)
  *   - a chat-unread dot when `hasUnread` is true
  *   - the dropoff endpoint (so the rider knows where they're going)
@@ -26,6 +28,14 @@ interface StartedViewProps {
   readonly onPressCancel: () => void;
   readonly onPressChat: () => void;
   readonly cancelDisabled?: boolean;
+  /**
+   * Phase 10 turn 5 — live ETA fields surfaced by
+   * `useRideMonitorViewModel`. When null (no NavSdk telemetry has
+   * fired since trip start), the view falls back to the static
+   * `ride.dropoff.directions.durationSeconds / .distanceText`.
+   */
+  readonly liveDurationSeconds?: number | null;
+  readonly liveDistanceMeters?: number | null;
 }
 
 export function StartedView({
@@ -34,11 +44,20 @@ export function StartedView({
   onPressCancel,
   onPressChat,
   cancelDisabled,
+  liveDurationSeconds,
+  liveDistanceMeters,
 }: StartedViewProps) {
   const driver = ride.driver;
   const directions = ride.dropoff.directions;
-  const eta = directions ? formatEta(directions.durationSeconds) : null;
-  const distance = directions ? directions.distanceText : null;
+  // Phase 10 turn 5 — prefer live values; fall back to static
+  // dropoff-directions (set at trip-create time).
+  const effectiveDuration =
+    liveDurationSeconds ?? directions?.durationSeconds ?? null;
+  const eta = effectiveDuration !== null ? formatEta(effectiveDuration) : null;
+  const distance =
+    liveDistanceMeters !== null && liveDistanceMeters !== undefined
+      ? formatDistanceMeters(liveDistanceMeters)
+      : (directions?.distanceText ?? null);
 
   return (
     <View>
@@ -114,4 +133,14 @@ function formatEta(durationSeconds: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
   return `${String(hours)} hr ${String(mins)}m`;
+}
+
+/** Phase 10 turn 5 — see DispatchedView for the same helper / rationale. */
+function formatDistanceMeters(meters: number): string {
+  const miles = meters / 1609.344;
+  if (miles < 0.1) {
+    const feet = Math.round(meters * 3.28084);
+    return `${String(feet)} ft`;
+  }
+  return `${miles.toFixed(1)} mi`;
 }

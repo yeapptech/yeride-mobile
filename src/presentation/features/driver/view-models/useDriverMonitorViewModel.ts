@@ -3,9 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toast from 'react-native-toast-message';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
+import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { TripEvent } from '@domain/entities/TripEvent';
+import type { UserId } from '@domain/entities/UserId';
+import { UserLocation } from '@domain/entities/UserLocation';
+import type { NavTimeAndDistance } from '@domain/services';
 import { useNavigationSdk, useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
@@ -13,11 +17,15 @@ import {
   useCancelRideAsDriverMutation,
   useRequestPaymentMutation,
   useStartRideMutation,
+  useUpdateLocationMutation,
 } from '@presentation/queries';
 import {
   useDriverStatusStore,
+  useGpsCurrentLocation,
   useGpsCurrentOdometer,
+  useGpsCurrentSpeed,
   useGpsIsInsidePickupGeofence,
+  useSessionStore,
 } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
@@ -339,6 +347,131 @@ export function useDriverMonitorViewModel(
     }
   }, [requestPaymentMutation, rideId, currentOdometerMeters]);
 
+  // ── Live ETA telemetry → tripTracking write (Phase 10 turn 5) ──
+  // The legacy `DriverHome.handleLocationChange` pipeline pushed
+  // `users/{driverId}.location.tripTracking` with `{distance, duration,
+  // calculatedAt}` per GPS event so the rider's `TripETAInfo`
+  // surfaces a live "driver arriving in X" / "arriving in X" string.
+  // The rewrite owns this in the driver VM (decision 2 — Path α): the
+  // active-trip lifecycle lives where the ride state lives, and
+  // Firestore `set({merge: true})` makes the race against
+  // `useGpsLifecycle`'s plain location writes harmless.
+  //
+  // Sources:
+  //   - NavSdk telemetry via `navigationSdk.subscribeToTimeAndDistance`.
+  //     The SDK fires on geo / traffic deltas (and standstill — the
+  //     adapter dedupes those out).
+  //   - Driver GPS via `useGpsCurrentLocation()` + `useGpsCurrentSpeed()`
+  //     from the Zustand store (`useGpsLifecycle` is the only writer).
+  //   - Session user id via `useSessionStore` for the location's owner.
+  //
+  // Throttle (copied verbatim from legacy
+  // `yeride/src/api/services/distanceTrackingService.js`):
+  //   - min 30s between Firestore writes
+  //   - skip if last write was within 50m of current GPS
+  //   - skip if NavSdk reading is older than 60s (data staleness gate
+  //     mirrors legacy `THROTTLE_CONFIG.maxAge`)
+  //
+  // The 15s NavSdk-fresh window from legacy is implicit here — we
+  // only have NavSdk data because the SDK fired into our subscriber,
+  // so by construction it's at most a few ms stale. If the SDK
+  // stops firing (e.g. driver enters a tunnel), the existing
+  // `useGpsLifecycle` GPS writes continue with `tripTracking: null`
+  // and the rider falls back to the static `ride.pickup.directions`
+  // ETA. Distance Matrix fallback is deliberately out of scope per
+  // kickoff §"Out of scope".
+  const updateLocationMutation = useUpdateLocationMutation();
+  const driverUserId = useSessionStore((s) => s.userId);
+  const gpsLocation = useGpsCurrentLocation();
+  const gpsSpeed = useGpsCurrentSpeed();
+  const isActiveTripStatus =
+    ride?.status === 'dispatched' || ride?.status === 'started';
+
+  // Refs for throttle bookkeeping. Keeping latest values in refs lets
+  // the long-lived subscription effect read them without re-mounting
+  // the SDK listener every render.
+  const lastWriteAtMsRef = useRef<number>(0);
+  const lastWriteCoordsRef = useRef<Coordinates | null>(null);
+  /**
+   * Whether the LAST tripTracking write carried live NavSdk telemetry.
+   * Drives the bypass-the-30s-gate-when-first-live-data-arrives rule:
+   * if the last write was nav-less and a fresh NavSdk fire shows up,
+   * we land it immediately rather than waiting out the throttle. After
+   * that first live write, subsequent NavSdk fires respect the gate
+   * normally (legacy throttle stays in effect).
+   */
+  const lastWriteHadTelemetryRef = useRef<boolean>(false);
+  const latestNavSdkRef = useRef<NavTimeAndDistance | null>(null);
+  const latestGpsRef = useRef<{
+    location: Coordinates | null;
+    speed: number | null;
+  }>({ location: gpsLocation, speed: gpsSpeed });
+  latestGpsRef.current = { location: gpsLocation, speed: gpsSpeed };
+  const updateLocationMutationRef = useRef(updateLocationMutation);
+  updateLocationMutationRef.current = updateLocationMutation;
+  const driverUserIdRef = useRef(driverUserId);
+  driverUserIdRef.current = driverUserId;
+  const rideRef = useRef(ride);
+  rideRef.current = ride;
+
+  useEffect(() => {
+    if (!isActiveTripStatus) {
+      // Reset throttle state when the trip leaves the active window so
+      // the next dispatched trip starts with a clean slate.
+      lastWriteAtMsRef.current = 0;
+      lastWriteCoordsRef.current = null;
+      lastWriteHadTelemetryRef.current = false;
+      latestNavSdkRef.current = null;
+      return;
+    }
+
+    // Subscribe to NavSdk telemetry. The adapter dedupes consecutive
+    // identical fires; we just cache the latest and try a write.
+    const unsubscribe = navigationSdk.subscribeToTimeAndDistance(
+      (event: NavTimeAndDistance) => {
+        latestNavSdkRef.current = event;
+        tryWriteTripTracking({
+          source: 'navsdk',
+          navSdk: event,
+          gps: latestGpsRef.current,
+          userId: driverUserIdRef.current,
+          ride: rideRef.current,
+          lastWriteAtMsRef,
+          lastWriteCoordsRef,
+          lastWriteHadTelemetryRef,
+          mutation: updateLocationMutationRef.current,
+        });
+      },
+    );
+    return unsubscribe;
+  }, [isActiveTripStatus, navigationSdk]);
+
+  // Second effect: on every GPS update, also try a write. This handles
+  // the case where NavSdk telemetry hasn't arrived yet but the driver
+  // is moving — we still want the throttle to advance against
+  // distance/time, and we still want `tripTracking.destination` on
+  // the doc so the rider's UI can map it.
+  useEffect(() => {
+    if (!isActiveTripStatus) return;
+    tryWriteTripTracking({
+      source: 'gps',
+      navSdk: latestNavSdkRef.current,
+      gps: { location: gpsLocation, speed: gpsSpeed },
+      userId: driverUserId,
+      ride: rideRef.current,
+      lastWriteAtMsRef,
+      lastWriteCoordsRef,
+      lastWriteHadTelemetryRef,
+      mutation: updateLocationMutation,
+    });
+  }, [
+    isActiveTripStatus,
+    gpsLocation,
+    gpsSpeed,
+    driverUserId,
+    updateLocationMutation,
+  ]);
+
   // ── Launch Navigation (Phase 8 turn 2) ─────────────────────────
   // The connector hook (mounted by DriverMonitorScreen) has already
   // pushed the SDK controller into the adapter by the time this
@@ -487,6 +620,162 @@ export function useDriverMonitorViewModel(
 }
 
 /* ───── Helpers ───── */
+
+/**
+ * Phase 10 turn 5 — throttle constants ported verbatim from legacy
+ * `yeride/src/api/services/distanceTrackingService.js`. Tuning lives
+ * in a post-cutover turn; parity-first is the Phase 10 stance.
+ */
+const TRIP_TRACKING_MIN_INTERVAL_MS = 30_000;
+const TRIP_TRACKING_MIN_DISTANCE_M = 50;
+const TRIP_TRACKING_NAVSDK_MAX_AGE_MS = 60_000;
+
+const tripTrackingLogger = LOG.extend('DriverTripTracking');
+
+interface TryWriteArgs {
+  /** Just for telemetry — which subscription triggered this attempt. */
+  readonly source: 'navsdk' | 'gps';
+  readonly navSdk: NavTimeAndDistance | null;
+  readonly gps: {
+    readonly location: Coordinates | null;
+    readonly speed: number | null;
+  };
+  readonly userId: UserId | null;
+  readonly ride: Ride | null;
+  readonly lastWriteAtMsRef: { current: number };
+  readonly lastWriteCoordsRef: { current: Coordinates | null };
+  readonly lastWriteHadTelemetryRef: { current: boolean };
+  readonly mutation: ReturnType<typeof useUpdateLocationMutation>;
+}
+
+/**
+ * Build a populated `UserLocation` (with `tripTracking.distanceMeters
+ * / durationSeconds / updatedAt` if NavSdk has fired) and fire the
+ * update mutation, gated by the legacy throttle constants.
+ *
+ * Throttle conditions (any one trips a skip):
+ *   - within 30s of the last successful write
+ *   - within 50m of the last-written coords
+ *   - NavSdk data older than 60s (staleness gate — let useGpsLifecycle's
+ *     plain GPS write take over with tripTracking: null)
+ *
+ * On no-NavSdk yet (pre-first-callback), the write still goes through
+ * with `distance/duration/updatedAt: null` — the destination + status
+ * carry the route-metadata-only shape so the rider can fall back to
+ * `ride.pickup.directions` without missing UI state.
+ */
+function tryWriteTripTracking(args: TryWriteArgs): void {
+  const {
+    source,
+    navSdk,
+    gps,
+    userId,
+    ride,
+    lastWriteAtMsRef,
+    lastWriteCoordsRef,
+    lastWriteHadTelemetryRef,
+    mutation,
+  } = args;
+
+  if (!userId || !ride || !gps.location) return;
+  if (ride.status !== 'dispatched' && ride.status !== 'started') return;
+
+  const now = Date.now();
+
+  // NavSdk staleness gate — if telemetry is older than 60s, treat
+  // this write as nav-less.
+  const navSdkFresh =
+    navSdk !== null &&
+    now - navSdk.timestampMs < TRIP_TRACKING_NAVSDK_MAX_AGE_MS;
+
+  // Time-gate bypass: when a fresh NavSdk fire arrives AND the last
+  // write didn't carry telemetry, land it immediately so the rider
+  // sees live ETA without waiting out the 30s window. After that
+  // first live write, subsequent NavSdk fires respect the gate
+  // (legacy parity preserved).
+  const bypassThrottle =
+    source === 'navsdk' && navSdkFresh && !lastWriteHadTelemetryRef.current;
+
+  if (
+    !bypassThrottle &&
+    now - lastWriteAtMsRef.current < TRIP_TRACKING_MIN_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  if (!bypassThrottle) {
+    const lastCoords = lastWriteCoordsRef.current;
+    if (
+      lastCoords !== null &&
+      haversineMetres(lastCoords, gps.location) < TRIP_TRACKING_MIN_DISTANCE_M
+    ) {
+      return;
+    }
+  }
+
+  // Destination from current ride status — legacy parity.
+  const destLocation: Coordinates =
+    ride.status === 'dispatched' ? ride.pickup.location : ride.dropoff.location;
+  const destType: 'pickup' | 'dropoff' =
+    ride.status === 'dispatched' ? 'pickup' : 'dropoff';
+
+  const distanceMeters = navSdkFresh ? navSdk.remainingMeters : null;
+  const durationSeconds = navSdkFresh ? navSdk.remainingSeconds : null;
+  const trackingUpdatedAt = navSdkFresh ? new Date(navSdk.timestampMs) : null;
+
+  const locR = UserLocation.create({
+    userId,
+    location: gps.location,
+    speed: gps.speed,
+    updatedAt: new Date(now),
+    tripTracking: {
+      tripId: ride.id,
+      tripStatus: ride.status,
+      destination: { type: destType, location: destLocation },
+      distanceMeters,
+      durationSeconds,
+      updatedAt: trackingUpdatedAt,
+    },
+  });
+  if (!locR.ok) {
+    // Construct error for rawMeta channel — matches the
+    // useGpsLifecycle handler at L253. ValidationError here means a
+    // contract bug.
+    tripTrackingLogger.error(
+      'UserLocation.create failed',
+      new Error(locR.error.code),
+    );
+    return;
+  }
+
+  lastWriteAtMsRef.current = now;
+  lastWriteCoordsRef.current = gps.location;
+  lastWriteHadTelemetryRef.current = navSdkFresh;
+  mutation.mutate(locR.value, {
+    onError: (e) => {
+      tripTrackingLogger.error('updateLocation mutation failed', e);
+    },
+  });
+}
+
+/**
+ * Phase 10 turn 5 — haversine distance in metres between two
+ * `Coordinates`. Same formula legacy
+ * `yeride/src/api/maps/GoogleMapsAPI.js` uses for its
+ * `calculateDistance` helper (mi conversion folded in at the call
+ * site; here we stay in metres).
+ */
+function haversineMetres(a: Coordinates, b: Coordinates): number {
+  const earthRadiusM = 6_371_000;
+  const lat1 = (a.latitude * Math.PI) / 180;
+  const lat2 = (b.latitude * Math.PI) / 180;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadiusM * Math.asin(Math.sqrt(h));
+}
 
 /**
  * Build the route param for `DriverNavigation`, picking pickup vs.

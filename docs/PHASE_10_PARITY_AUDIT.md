@@ -1,6 +1,6 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
 **Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
@@ -27,7 +27,7 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 closures:** **5 ❌ rows, 1 🟡 row, 0 ⚠️ rows**
+**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 closures:** **4 ❌ rows, 1 🟡 row, 0 ⚠️ rows**
 block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
 highest-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js`
 to inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next
@@ -40,11 +40,28 @@ BGTaskScheduler — see §10.4 + `docs/PHASE_10_TURN_4.md`). Turn 1's
 verification pass resolved the four v1 ⚠️ rows and surfaced three
 additional ❌ gaps:
 
-- **§3.5 rider ETA** flipped ⚠️ → ❌. The rewrite has only static
-  ETA baked at trip-create / dispatch time; no driver-side telemetry
-  feeds Firestore for live ETA. Phase 9 Turn 5 (the planned NavSdk-
-  telemetry / Distance-Matrix bypass) was repurposed away and never
-  shipped.
+- **§3.5 rider ETA** flipped ⚠️ → ❌ → **✅ closed in Turn 5
+  (2026-05-18)** via an end-to-end NavSdk-telemetry pipeline:
+  `NavigationService` gained `subscribeToTimeAndDistance`,
+  `TripTracking` gained nullable `distanceMeters / durationSeconds /
+updatedAt` (with the DTO accepting BOTH the canonical flat shape
+  AND legacy nested `{distance, duration, calculatedAt}` and writing
+  both for cutover parity), `useDriverMonitorViewModel` pushes live
+  telemetry to `users/{driverId}.location.tripTracking` on a 30s /
+  50m / 60s throttle (legacy `distanceTrackingService` constants
+  copied verbatim) with a one-shot bypass when the first live fire
+  follows a nav-less GPS write, and `useRideMonitorViewModel`
+  subscribes to the driver's location via the existing
+  `SubscribeToUserLocation` use case (decision 3 = (a) — keyed off
+  `ride.driver?.id`, no new use case). `DispatchedView` /
+  `StartedView` prefer `liveDurationSeconds` / `liveDistanceMeters`
+  with static `ride.pickup.directions` / `ride.dropoff.directions`
+  fallback (same "Calculating…" UX as legacy). Driver-side write
+  uses Path α (VM-owned, not extending `useGpsLifecycle`) per
+  decision 2 because `merge: true` makes the racing write harmless
+  and the VM-owns-its-screen-lifecycle invariant is stronger than
+  the AppContent-only-writer invariant. See
+  `docs/PHASE_10_TURN_5.md`.
 - **§3.7 trip preview** flipped ⚠️ → ✅. The "pre-confirm" / "pre-
   accept" surfaces exist in the rewrite (RouteSelect's Confirm
   button + DriverDispatchScreen's Accept/Decline). Legacy's
@@ -326,7 +343,7 @@ in Phase 10.
 - Unread-dot already driven by `ObserveLatestMessage` —
   wire `lastReadAt` write-through to Firestore.
 
-### 3.5 Rider-side ETA / Distance Matrix tracking — ❌ verified (Turn 1)
+### 3.5 Rider-side ETA / Distance Matrix tracking — ✅ closed in Turn 5 (2026-05-18)
 
 **Legacy:** `TripETAInfo.js` component on rider-side `RideMonitorScreen`
 shows the driver's ETA to pickup. Powered by
@@ -359,40 +376,34 @@ Rider's `DispatchedView.js` / `StartedView.js` subscribe via
   was deferred to "Phase 9 polish" (per Phase 8 Turn 2 kickoff
   line 348) and never landed.
 
-**Verdict:** ❌ — Rider sees a stale, never-updated ETA. This is a
-**user-visible regression** from legacy: the rider in legacy sees
-"driver is N min away" updated every 30 seconds; the rider in the
-rewrite sees a fixed value baked into `ride.pickup.directions` at
-dispatch time. Phase 10.x turn required. Size: small-medium
-(~1-2 days).
+**Verdict:** ✅ closed in Turn 5 (2026-05-18). End-to-end NavSdk-
+telemetry pipeline shipped. The rewrite now matches legacy's "ETA
+updates every ~15-30s as the driver drives" UX. Decisions captured:
 
-**Phase 10 turn scope:**
+- **Decision 1** = (a) extend `TripTracking` rather than splitting
+  off a separate `LiveTracking` VO — matches the legacy doc shape
+  exactly and avoids a second Firestore field that would break
+  read-back parity with legacy clients.
+- **Decision 2** = (α) `useDriverMonitorViewModel` owns the write
+  path with `merge: true`-safe race against `useGpsLifecycle`'s
+  plain GPS writes. The "VM owns its screen's lifecycle" convention
+  is stronger than the "AppContent is the only writer" invariant.
+- **Decision 3** = (a) reuse `SubscribeToUserLocation` keyed off
+  `ride.driver?.id` rather than introducing a wrapping
+  `ObserveDriverLocation` use case.
+- **Decision 4** = copy legacy throttle constants verbatim (30s
+  min interval / 50m min movement / 60s NavSdk staleness). Tuning
+  defers to a post-cutover turn.
 
-- Add `onTrafficUpdated` / `onRouteChanged` /
-  `setOnRemainingTimeOrDistanceChanged` listener support to
-  `NavigationService` interface in `@domain/services` and the
-  `NavigationSdkClient` adapter (same multi-subscriber listener-dedup
-  pattern as `subscribeToArrival`).
-- Extend `UserLocation.tripTracking` to carry `distanceMeters` +
-  `durationSeconds` (mirror legacy's `tripTracking.distance` /
-  `tripTracking.duration` numeric values rather than the legacy
-  `{text, value}` Google Maps object shape — DTO can read legacy
-  shape, write canonical).
-- In `useDriverMonitorViewModel` (the closest analog to legacy's
-  `DriverHome.js` GPS lifecycle for dispatched-or-started trips),
-  wire NavSdk telemetry callbacks → `updateUserLocation` mutation,
-  populating `tripTracking.distanceMeters` / `durationSeconds`.
-- Rider side: a new use case `ObserveDriverLocation(driverId, rideId)`
-  (or extend the existing `SubscribeToUserLocation`) feeds
-  `useRideMonitorViewModel`. Wire the live values into
-  `DispatchedView` / `StartedView` (replace the static
-  `ride.pickup.directions.durationSeconds` reads with the live
-  values, falling back to the static value when no live data has
-  arrived yet — same UX as legacy `TripETAInfo`'s "Calculating..."
-  state).
-- Tests: add a status-arm test to the rider VM and the driver VM
-  exercising the NavSdk telemetry → Firestore → rider-subscription
-  round-trip via the in-memory fakes.
+A one-shot time-gate bypass on the first nav-less → live edge
+ensures the rider sees a live ETA on the very first NavSdk fire
+even if a `tripTracking: null` GPS write landed first. The
+mapper dual-writes the canonical flat fields AND the legacy
+nested `{distance, duration, calculatedAt}` shape so legacy
+yeride clients keep reading ETA correctly during cutover.
+
+See `docs/PHASE_10_TURN_5.md` for the patch shape, test counts,
+and full evidence chain.
 
 ### 3.6 Wallet & per-trip TransactionHistory — 🟡 (Turn 1: re-characterized)
 
@@ -633,18 +644,18 @@ Cloud-Function-mediated writes):
 Turn 1 closed 2026-05-18 (this audit's verification pass + the
 one-line `audio` UIBackgroundMode restoration). Remaining turns:
 
-| #     | Turn                                                                                                                                                                                                                                                                                                                                                | Driver                               | Size                | Blocked by                                                              |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------- | ----------------------------------------------------------------------- |
-| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                       | small (1d)          | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)      |
-| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~     | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`) |
-| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                         | ~~**Production blocker — Android**~~ | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)   |
-| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~ | ~~tiny (½d)~~       | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)   |
-| 5     | **Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.                                                                                                                                                                            | User-visible regression vs legacy    | small-medium (1-2d) | —                                                                       |
-| 6     | **Activity tab — rider + driver** (§3.3) — placeholder → real screen with InProgressTrips / ScheduledTrips / RecentTrips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).                                                                                                                             | Largest user-facing gap              | large (3-5d)        | —                                                                       |
-| 7     | **Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.                                                                                                                                       | Existing feature regression risk     | medium (2-3d)       | partly (6) for the listing                                              |
-| 8     | **Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.                                                                                                                                                                                                      | Existing feature regression risk     | medium (2-3d)       | —                                                                       |
-| 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate      | small (1d)          | —                                                                       |
-| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep         | small (½d)          | (2)-(9)                                                                 |
+| #     | Turn                                                                                                                                                                                                                                                                                                                                                | Driver                                | Size                    | Blocked by                                                                          |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                        | small (1d)              | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                  |
+| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~      | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)             |
+| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                         | ~~**Production blocker — Android**~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)               |
+| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)               |
+| ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                        | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`) |
+| 6     | **Activity tab — rider + driver** (§3.3) — placeholder → real screen with InProgressTrips / ScheduledTrips / RecentTrips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).                                                                                                                             | Largest user-facing gap               | large (3-5d)            | —                                                                                   |
+| 7     | **Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.                                                                                                                                       | Existing feature regression risk      | medium (2-3d)           | partly (6) for the listing                                                          |
+| 8     | **Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.                                                                                                                                                                                                      | Existing feature regression risk      | medium (2-3d)           | —                                                                                   |
+| 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate       | small (1d)              | —                                                                                   |
+| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                             |
 
 **Estimated total:** ~10-15 days of work before
 [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §6 staged
@@ -714,13 +725,50 @@ that the tests already exercise via the existing
 `FakeBackgroundGeolocationClient`. Either approach restores native-
 path assertions without breaking the emulator workaround.
 
-### 10.2 NavSdk telemetry → live ETA never shipped — ❌
+### 10.2 NavSdk telemetry → live ETA never shipped — ✅ closed in Turn 5 (2026-05-18)
 
-Documented under §3.5 above. Discovery details: `docs/PHASE_9_TURN_5.md`
-exists but its scope was changed from the originally-planned NavSdk
-telemetry / Distance-Matrix bypass to a passenger-snapshot Stripe-gap
-fix. Phase 8 Turn 2 kickoff (line 348) confirms the telemetry work
-was deferred to "Phase 9 polish" but never landed.
+Documented under §3.5 above (now ✅). Turn 5 shipped the end-to-end
+pipeline:
+
+- `NavigationService.subscribeToTimeAndDistance` + multi-subscriber
+  fan-out + `(meters, seconds)` dedup in `NavigationSdkClient`
+  (mirrors the existing `subscribeToArrival` pattern). Domain layer
+  exposes `NavTimeAndDistance` (adapter-stamped `timestampMs`); the
+  SDK's `TimeAndDistance` type doesn't leak past the data layer.
+- `TripTracking` gained nullable `distanceMeters / durationSeconds /
+updatedAt`. DTO `z.preprocess` accepts BOTH the canonical flat
+  shape AND the legacy nested `{distance, duration, calculatedAt}`
+  shape (legacy writes win when both are present? No — flat wins,
+  per the "permissive read / canonical write" convention).
+- Driver-side write path lives in `useDriverMonitorViewModel`
+  (Path α — VM-owned, not extending `useGpsLifecycle`). On every
+  NavSdk fire OR every GPS update, the VM throttles to one
+  Firestore write per 30s / 50m / 60s and writes `UserLocation`
+  with `tripTracking.{distanceMeters, durationSeconds, updatedAt}`
+  populated when NavSdk telemetry is < 60s old. A one-shot bypass
+  on the nav-less → live transition lands the first live data
+  immediately.
+- Rider-side consumption in `useRideMonitorViewModel` reuses the
+  existing `SubscribeToUserLocation` use case keyed off
+  `ride.driver?.id`. The VM surfaces `liveDurationSeconds` /
+  `liveDistanceMeters`; `DispatchedView` / `StartedView` prefer
+  them with static `ride.pickup.directions` / `ride.dropoff.directions`
+  fallback (same "Calculating…" UX as legacy `TripETAInfo`).
+- Mapper dual-writes the canonical flat + legacy nested shapes so
+  legacy yeride clients reading the shared `locations/{uid}` doc
+  during cutover keep rendering ETA correctly.
+
+Tests added: NavigationSdkClient subscribe + dedup + pre-controller
+
+- negative coercion arms; FakeNavigationSdkClient emit + dedup +
+  dispose; UserLocation validation for the three new fields;
+  userLocationMapper round-trips + legacy-read + flat-wins-on-conflict
+- dual-write emit; useDriverMonitorViewModel write-with-telemetry
+  (dispatched + started) + throttle + terminal cleanup +
+  no-telemetry GPS-only path; useRideMonitorViewModel live-value
+  surface + null-when-no-driver + null-when-route-metadata-only.
+
+See `docs/PHASE_10_TURN_5.md` for the full evidence chain.
 
 ### 10.3 Stripe Connect return-URL deep-link bridge — 🟡 polish
 

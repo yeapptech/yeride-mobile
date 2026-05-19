@@ -264,12 +264,20 @@ interface MockNavListeners {
   arrival: Array<(event: unknown) => void>;
   routeChanged: Array<() => void>;
   trafficUpdated: Array<() => void>;
+  /**
+   * Phase 10 turn 5 — registered `setOnRemainingTimeOrDistanceChanged`
+   * callbacks. `__emitTimeAndDistance(event)` fans an event into all
+   * registered listeners; setting the SDK slot to `null` clears the
+   * list (mirrors how the SDK behaves on listener removal).
+   */
+  timeAndDistance: Array<(event: unknown) => void>;
 }
 
 const mockNavListeners: MockNavListeners = {
   arrival: [],
   routeChanged: [],
   trafficUpdated: [],
+  timeAndDistance: [],
 };
 
 const mockMakeNavigationController = () => ({
@@ -322,7 +330,20 @@ const mockMakeListenerSetters = () => ({
   setOnRouteChanged: jest.fn(),
   setOnReroutingRequestedByOffRoute: jest.fn(),
   setOnTrafficUpdated: jest.fn(),
-  setOnRemainingTimeOrDistanceChanged: jest.fn(),
+  /**
+   * Phase 10 turn 5 — register/clear callbacks the same way
+   * `setOnArrival` does so `__emitTimeAndDistance` can fan events
+   * into the adapter's internal handler.
+   */
+  setOnRemainingTimeOrDistanceChanged: jest.fn(
+    (cb: ((event: unknown) => void) | null | undefined) => {
+      if (cb) {
+        mockNavListeners.timeAndDistance.push(cb);
+      } else {
+        mockNavListeners.timeAndDistance.length = 0;
+      }
+    },
+  ),
   setOnTurnByTurn: jest.fn(),
   setLogDebugInfo: jest.fn(),
 });
@@ -350,6 +371,7 @@ let mockSharedNavigation: {
       mockNavListeners.arrival.length = 0;
       mockNavListeners.routeChanged.length = 0;
       mockNavListeners.trafficUpdated.length = 0;
+      mockNavListeners.timeAndDistance.length = 0;
     }),
     ...listeners,
   };
@@ -364,6 +386,7 @@ const resetMockSharedNavigation = (): void => {
       mockNavListeners.arrival.length = 0;
       mockNavListeners.routeChanged.length = 0;
       mockNavListeners.trafficUpdated.length = 0;
+      mockNavListeners.timeAndDistance.length = 0;
     }),
     ...listeners,
   };
@@ -456,6 +479,16 @@ jest.mock('@googlemaps/react-native-navigation-sdk', () => {
       for (const cb of [...mockNavListeners.arrival]) cb(event);
     },
     /**
+     * Phase 10 turn 5 — fan an SDK-shaped `TimeAndDistance` event
+     * into every registered `setOnRemainingTimeOrDistanceChanged`
+     * callback. Tests pass the SDK shape (`{meters, seconds,
+     * delaySeverity?}`); the adapter's internal handler does the
+     * domain translation.
+     */
+    __emitTimeAndDistance: (event: unknown): void => {
+      for (const cb of [...mockNavListeners.timeAndDistance]) cb(event);
+    },
+    /**
      * Read the shared `useNavigation()` return value — the same
      * controller + listeners pair the connector hook will see. Tests
      * use this to assert reference identity across re-renders, OR to
@@ -472,6 +505,7 @@ jest.mock('@googlemaps/react-native-navigation-sdk', () => {
       mockNavListeners.arrival.length = 0;
       mockNavListeners.routeChanged.length = 0;
       mockNavListeners.trafficUpdated.length = 0;
+      mockNavListeners.timeAndDistance.length = 0;
       resetMockSharedNavigation();
     },
   };

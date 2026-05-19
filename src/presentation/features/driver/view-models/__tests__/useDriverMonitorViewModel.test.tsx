@@ -27,6 +27,7 @@ import { CrashlyticsLogTransport, LOG } from '@shared/logger';
 import {
   FakeCrashReportingService,
   FakeNavigationSdkClient,
+  InMemoryLocationRepository,
   InMemoryRideRepository,
   TestContainerProvider,
 } from '@shared/testing';
@@ -203,16 +204,18 @@ function makePaymentFailedRide(): Ride {
 
 interface SeededState {
   ridesRepo: InMemoryRideRepository;
+  locationsRepo: InMemoryLocationRepository;
 }
 
 function setupSeededState(opts?: { seedRide?: Ride }): SeededState {
   const ridesRepo = new InMemoryRideRepository();
+  const locationsRepo = new InMemoryLocationRepository();
   if (opts?.seedRide) {
     ridesRepo.seed(opts.seedRide);
   }
   // Production wires this in AppContent's auth observer; emulate it here.
   useSessionStore.getState().setSignedIn(DRIVER_ID);
-  return { ridesRepo };
+  return { ridesRepo, locationsRepo };
 }
 
 function withTestContainer(
@@ -222,6 +225,7 @@ function withTestContainer(
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       rides={setup.ridesRepo}
+      locations={setup.locationsRepo}
       {...(fakes?.navigationSdk ? { navigationSdk: fakes.navigationSdk } : {})}
     >
       {children}
@@ -1204,6 +1208,203 @@ describe('useDriverMonitorViewModel', () => {
         expect(mockNavigate).not.toHaveBeenCalled();
       } finally {
         LOG.removeTransport(transport);
+      }
+    });
+  });
+
+  /**
+   * Phase 10 turn 5 — live ETA tripTracking write path. The VM
+   * subscribes to NavSdk `subscribeToTimeAndDistance`, gates writes on
+   * `dispatched`/`started`, and pushes `UserLocation` with the
+   * populated `tripTracking.distanceMeters / durationSeconds /
+   * updatedAt`. Tests use the in-memory `LocationRepository` to
+   * inspect the writes; the SDK is driven via
+   * `FakeNavigationSdkClient.emitTimeAndDistance`.
+   */
+  describe('live tripTracking write (Phase 10 turn 5)', () => {
+    it('writes UserLocation with populated tripTracking on NavSdk fire (dispatched)', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      // Seed driver location so the write effect has GPS to emit.
+      useGpsStore.getState().setLocation(bgLocationEvent(0));
+      const fake = new FakeNavigationSdkClient();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      // Wait one tick so the subscribe effect attaches.
+      await waitFor(() => {
+        expect(fake.getTimeAndDistanceSubscriberCount()).toBeGreaterThan(0);
+      });
+
+      act(() => {
+        fake.emitTimeAndDistance({
+          remainingMeters: 2500,
+          remainingSeconds: 300,
+          timestampMs: Date.now(),
+        });
+      });
+
+      await waitFor(() => {
+        expect(setup.locationsRepo.spies.updateLocation).toBeGreaterThan(0);
+      });
+      const written = await setup.locationsRepo.getLastKnown(DRIVER_ID);
+      expect(written.ok).toBe(true);
+      if (written.ok && written.value) {
+        expect(written.value.tripTracking?.distanceMeters).toBe(2500);
+        expect(written.value.tripTracking?.durationSeconds).toBe(300);
+        expect(written.value.tripTracking?.tripStatus).toBe('dispatched');
+        expect(written.value.tripTracking?.destination.type).toBe('pickup');
+        expect(written.value.tripTracking?.destination.location.latitude).toBe(
+          MIAMI.latitude,
+        );
+      }
+    });
+
+    it('uses dropoff destination on started status', async () => {
+      const setup = setupSeededState({ seedRide: makeStartedRide() });
+      useGpsStore.getState().setLocation(bgLocationEvent(0));
+      const fake = new FakeNavigationSdkClient();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(fake.getTimeAndDistanceSubscriberCount()).toBeGreaterThan(0);
+      });
+
+      act(() => {
+        fake.emitTimeAndDistance({
+          remainingMeters: 8000,
+          remainingSeconds: 720,
+          timestampMs: Date.now(),
+        });
+      });
+
+      await waitFor(() => {
+        expect(setup.locationsRepo.spies.updateLocation).toBeGreaterThan(0);
+      });
+      const written = await setup.locationsRepo.getLastKnown(DRIVER_ID);
+      if (written.ok && written.value) {
+        expect(written.value.tripTracking?.tripStatus).toBe('started');
+        expect(written.value.tripTracking?.destination.type).toBe('dropoff');
+        expect(written.value.tripTracking?.destination.location.latitude).toBe(
+          FORT_LAUDERDALE.latitude,
+        );
+        expect(written.value.tripTracking?.distanceMeters).toBe(8000);
+      }
+    });
+
+    it('throttles subsequent NavSdk fires after the first live write lands (30s gate)', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      useGpsStore.getState().setLocation(bgLocationEvent(0));
+      const fake = new FakeNavigationSdkClient();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(fake.getTimeAndDistanceSubscriberCount()).toBeGreaterThan(0);
+      });
+
+      // First NavSdk fire bypasses the time gate (last write was the
+      // nav-less GPS one from mount). Land the live telemetry.
+      act(() => {
+        fake.emitTimeAndDistance({
+          remainingMeters: 2500,
+          remainingSeconds: 300,
+          timestampMs: Date.now(),
+        });
+      });
+      await waitFor(() => {
+        const written = setup.locationsRepo.spies.updateLocation;
+        // 1 nav-less write (from GPS seed at mount) + 1 bypass-landed
+        // live write = 2.
+        expect(written).toBe(2);
+      });
+
+      // Subsequent NavSdk fires within the 30s window MUST be
+      // throttled — the bypass is one-shot per nav-less → live edge.
+      act(() => {
+        fake.emitTimeAndDistance({
+          remainingMeters: 2400,
+          remainingSeconds: 290,
+          timestampMs: Date.now(),
+        });
+        fake.emitTimeAndDistance({
+          remainingMeters: 2300,
+          remainingSeconds: 280,
+          timestampMs: Date.now(),
+        });
+      });
+      // 50ms grace — throttle should hold at 2.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(setup.locationsRepo.spies.updateLocation).toBe(2);
+    });
+
+    it('clears tripTracking writes after the ride leaves the active window', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      useGpsStore.getState().setLocation(bgLocationEvent(0));
+      const fake = new FakeNavigationSdkClient();
+      const { result, rerender } = renderHook(
+        ({ rideId }: { rideId: typeof RIDE_ID }) =>
+          useDriverMonitorViewModel({ rideId }),
+        {
+          initialProps: { rideId: RIDE_ID },
+          wrapper: withTestContainer(setup, { navigationSdk: fake }),
+        },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(fake.getTimeAndDistanceSubscriberCount()).toBeGreaterThan(0);
+      });
+
+      // Drive the ride into a terminal state — the subscriber should
+      // unsubscribe + the throttle should reset.
+      act(() => {
+        setup.ridesRepo.seed(makeCompletedRide());
+      });
+      // Force a rerender so the effect re-evaluates isActiveTripStatus.
+      rerender({ rideId: RIDE_ID });
+      await waitFor(() => {
+        expect(fake.getTimeAndDistanceSubscriberCount()).toBe(0);
+      });
+    });
+
+    it('does not write when no NavSdk telemetry has arrived (GPS-only path is benign)', async () => {
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const fake = new FakeNavigationSdkClient();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { navigationSdk: fake }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      // Just push a GPS event with no NavSdk fire. The throttle write
+      // still triggers — but `tripTracking.distanceMeters` is null
+      // (route-metadata-only).
+      act(() => {
+        useGpsStore.getState().setLocation(bgLocationEvent(0));
+      });
+      await waitFor(() => {
+        expect(setup.locationsRepo.spies.updateLocation).toBeGreaterThan(0);
+      });
+      const written = await setup.locationsRepo.getLastKnown(DRIVER_ID);
+      if (written.ok && written.value) {
+        expect(written.value.tripTracking?.distanceMeters).toBeNull();
+        expect(written.value.tripTracking?.durationSeconds).toBeNull();
+        expect(written.value.tripTracking?.tripStatus).toBe('dispatched');
       }
     });
   });

@@ -5,6 +5,7 @@ import {
   type ArrivalEvent as SdkArrivalEvent,
   type NavigationController,
   type SetDestinationsOptions,
+  type TimeAndDistance as SdkTimeAndDistance,
   type Waypoint,
 } from '@googlemaps/react-native-navigation-sdk';
 
@@ -18,6 +19,7 @@ import type {
   NavRouteStatus,
   NavSetDestinationsArgs,
   NavTermsResult,
+  NavTimeAndDistance,
   NavWaypoint,
 } from '@domain/services';
 import { Result } from '@domain/shared/Result';
@@ -93,6 +95,15 @@ const logger = LOG.extend('NavigationSdk');
  */
 type SdkNavigationListenerSetters = {
   setOnArrival: (callback: ((event: SdkArrivalEvent) => void) | null) => void;
+  /**
+   * Phase 10 turn 5 — SDK-typed counterpart to the domain
+   * `NavigationListenerSetters.setOnRemainingTimeOrDistanceChanged`.
+   * Same single-slot-setter shape as `setOnArrival`; the adapter
+   * holds a multi-subscriber facade on top.
+   */
+  setOnRemainingTimeOrDistanceChanged: (
+    callback: ((event: SdkTimeAndDistance) => void) | null,
+  ) => void;
 };
 
 export class NavigationSdkClient implements NavigationService {
@@ -121,6 +132,29 @@ export class NavigationSdkClient implements NavigationService {
 
   /** True once we've registered our internal handler with `setOnArrival`. */
   private sdkArrivalListenerActive = false;
+
+  /**
+   * Phase 10 turn 5 — multi-subscriber facade over the SDK's
+   * single-slot `setOnRemainingTimeOrDistanceChanged`. Mirrors the
+   * arrival listener pattern: register ONE internal handler against
+   * the SDK on first subscribe, fan out to all subscribers, clear
+   * the SDK listener when the last subscriber leaves.
+   */
+  private timeDistanceCallbacks = new Set<
+    (event: NavTimeAndDistance) => void
+  >();
+
+  /**
+   * Most-recent time/distance dedup key (`${meters}:${seconds}`).
+   * The SDK fires repeatedly with identical values during standstill;
+   * the dedup keeps subscriber traffic proportional to actual change
+   * (matches legacy `distanceTrackingService` behaviour). Cleared on
+   * `cleanup()` / disconnect / last unsubscribe.
+   */
+  private lastTimeDistanceKey: string | null = null;
+
+  /** True once we've registered our internal handler with the SDK. */
+  private sdkTimeDistanceListenerActive = false;
 
   /**
    * Connect the SDK's NavigationController + listener setters to this
@@ -154,6 +188,16 @@ export class NavigationSdkClient implements NavigationService {
       this.listeners.setOnArrival(null);
       this.sdkArrivalListenerActive = false;
     }
+    // Phase 10 turn 5 — mirror the arrival listener swap for the
+    // time/distance listener.
+    if (
+      this.sdkTimeDistanceListenerActive &&
+      this.listeners &&
+      this.listeners !== newListeners
+    ) {
+      this.listeners.setOnRemainingTimeOrDistanceChanged(null);
+      this.sdkTimeDistanceListenerActive = false;
+    }
 
     this.controller = newController;
     this.listeners = newListeners;
@@ -167,6 +211,18 @@ export class NavigationSdkClient implements NavigationService {
     ) {
       this.listeners.setOnArrival(this.handleArrival);
       this.sdkArrivalListenerActive = true;
+    }
+    // Phase 10 turn 5 — same for the time/distance listener.
+    if (
+      this.controller &&
+      this.listeners &&
+      this.timeDistanceCallbacks.size > 0 &&
+      !this.sdkTimeDistanceListenerActive
+    ) {
+      this.listeners.setOnRemainingTimeOrDistanceChanged(
+        this.handleTimeAndDistance,
+      );
+      this.sdkTimeDistanceListenerActive = true;
     }
   }
 
@@ -399,6 +455,21 @@ export class NavigationSdkClient implements NavigationService {
       }
       this.sdkArrivalListenerActive = false;
     }
+    // Phase 10 turn 5 — symmetric teardown for the time/distance
+    // listener. Same swallow-but-LOG.error pattern.
+    this.timeDistanceCallbacks.clear();
+    this.lastTimeDistanceKey = null;
+    if (this.sdkTimeDistanceListenerActive && this.listeners) {
+      try {
+        this.listeners.setOnRemainingTimeOrDistanceChanged(null);
+      } catch (e) {
+        logger.error(
+          'cleanup: setOnRemainingTimeOrDistanceChanged(null) threw — swallowing',
+          e,
+        );
+      }
+      this.sdkTimeDistanceListenerActive = false;
+    }
 
     if (!this.controller) {
       return Result.ok(true);
@@ -469,6 +540,47 @@ export class NavigationSdkClient implements NavigationService {
     };
   }
 
+  /**
+   * Phase 10 turn 5 — subscribe to live time/distance telemetry. The
+   * SDK fires `setOnRemainingTimeOrDistanceChanged` once per meaningful
+   * change (and repeatedly during standstill with identical values —
+   * the dedup below collapses those). Multi-subscriber facade is
+   * identical in shape to `subscribeToArrival`: register ONE internal
+   * handler against the SDK on first subscriber, fan out to N, clear
+   * the SDK listener on last unsubscribe.
+   *
+   * If no controller is connected at the time of subscription, the
+   * subscriber is recorded and the SDK listener is registered on the
+   * next `setController(controller)` call.
+   */
+  subscribeToTimeAndDistance(
+    callback: (event: NavTimeAndDistance) => void,
+  ): () => void {
+    this.timeDistanceCallbacks.add(callback);
+    if (
+      !this.sdkTimeDistanceListenerActive &&
+      this.listeners &&
+      this.controller
+    ) {
+      this.listeners.setOnRemainingTimeOrDistanceChanged(
+        this.handleTimeAndDistance,
+      );
+      this.sdkTimeDistanceListenerActive = true;
+    }
+    return () => {
+      this.timeDistanceCallbacks.delete(callback);
+      if (
+        this.timeDistanceCallbacks.size === 0 &&
+        this.sdkTimeDistanceListenerActive &&
+        this.listeners
+      ) {
+        this.listeners.setOnRemainingTimeOrDistanceChanged(null);
+        this.sdkTimeDistanceListenerActive = false;
+        this.lastTimeDistanceKey = null;
+      }
+    };
+  }
+
   /* ───── Internal handlers ───── */
 
   private handleArrival = (event: SdkArrivalEvent): void => {
@@ -518,6 +630,39 @@ export class NavigationSdkClient implements NavigationService {
         // for-loop's `try/catch`; the new telemetry just makes the
         // bug visible.
         logger.error('handleArrival: subscriber threw', e);
+      }
+    }
+  };
+
+  /**
+   * Phase 10 turn 5 — translate SDK `TimeAndDistance` to the domain
+   * shape and fan out to subscribers (deduped). SDK can fire with
+   * negative `meters` / `seconds` when the destination is behind the
+   * driver (rare, but possible during reroute) — coerced to 0.
+   */
+  private handleTimeAndDistance = (event: SdkTimeAndDistance): void => {
+    const remainingMeters =
+      Number.isFinite(event.meters) && event.meters > 0 ? event.meters : 0;
+    const remainingSeconds =
+      Number.isFinite(event.seconds) && event.seconds > 0 ? event.seconds : 0;
+    const key = `${String(remainingMeters)}:${String(remainingSeconds)}`;
+    if (key === this.lastTimeDistanceKey) return;
+    this.lastTimeDistanceKey = key;
+
+    const domainEvent: NavTimeAndDistance = {
+      remainingMeters,
+      remainingSeconds,
+      timestampMs: Date.now(),
+    };
+    for (const cb of [...this.timeDistanceCallbacks]) {
+      try {
+        cb(domainEvent);
+      } catch (e) {
+        // Mirrors handleArrival's fan-out resilience + Crashlytics
+        // visibility tradeoff. A throwing subscriber is a domain-side
+        // bug worth a non-fatal report. The surrounding `try/catch`
+        // keeps the other subscribers receiving the event.
+        logger.error('handleTimeAndDistance: subscriber threw', e);
       }
     }
   };

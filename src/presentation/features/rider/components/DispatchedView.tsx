@@ -10,7 +10,10 @@ import { usePickupExitWarningVisible } from '@presentation/stores';
 /**
  * Status view for `dispatched`. The driver has accepted; the rider sees:
  *   - a header with ETA-to-pickup pulled from `ride.pickup.directions`
- *     (set by the driver app at dispatch time)
+ *     (set by the driver app at dispatch time) — UPDATED in Phase 10
+ *     turn 5 to prefer `liveDurationSeconds` / `liveDistanceMeters`
+ *     when present (driver's NavSdk telemetry written to
+ *     `users/{driverId}.location.tripTracking`).
  *   - the driver's name + vehicle make/model/color/plate
  *   - cancel + chat-stub buttons in the header
  *   - a geofence-banner slot wired to `useGeofenceUiStore`.
@@ -27,6 +30,15 @@ interface DispatchedViewProps {
   readonly onPressCancel: () => void;
   readonly onPressChat: () => void;
   readonly cancelDisabled?: boolean;
+  /**
+   * Phase 10 turn 5 — live ETA fields surfaced by
+   * `useRideMonitorViewModel`. When null (no driver doc yet, or no
+   * NavSdk telemetry has fired since dispatch), the view falls back
+   * to the static `ride.pickup.directions.durationSeconds /
+   * .distanceText` — same "Calculating…" feel as legacy yeride.
+   */
+  readonly liveDurationSeconds?: number | null;
+  readonly liveDistanceMeters?: number | null;
 }
 
 export function DispatchedView({
@@ -34,11 +46,20 @@ export function DispatchedView({
   onPressCancel,
   onPressChat,
   cancelDisabled,
+  liveDurationSeconds,
+  liveDistanceMeters,
 }: DispatchedViewProps) {
   const driver = ride.driver;
   const directions = ride.pickup.directions;
-  const eta = directions ? formatEta(directions.durationSeconds) : null;
-  const distance = directions ? directions.distanceText : null;
+  // Phase 10 turn 5 — prefer live values; fall back to static
+  // pickup-directions (set at dispatch time and never updated).
+  const effectiveDuration =
+    liveDurationSeconds ?? directions?.durationSeconds ?? null;
+  const eta = effectiveDuration !== null ? formatEta(effectiveDuration) : null;
+  const distance =
+    liveDistanceMeters !== null && liveDistanceMeters !== undefined
+      ? formatDistanceMeters(liveDistanceMeters)
+      : (directions?.distanceText ?? null);
   const showExitWarning = usePickupExitWarningVisible();
 
   return (
@@ -130,4 +151,19 @@ function formatEta(durationSeconds: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
   return `${String(hours)} hr ${String(mins)}m`;
+}
+
+/**
+ * Phase 10 turn 5 — short distance label for live telemetry. Matches
+ * legacy `formatMetersToText` from
+ * `yeride/src/api/services/distanceTrackingService.js` so the rewrite
+ * UI converges on the legacy text after a live update arrives.
+ */
+function formatDistanceMeters(meters: number): string {
+  const miles = meters / 1609.344;
+  if (miles < 0.1) {
+    const feet = Math.round(meters * 3.28084);
+    return `${String(feet)} ft`;
+  }
+  return `${miles.toFixed(1)} mi`;
 }

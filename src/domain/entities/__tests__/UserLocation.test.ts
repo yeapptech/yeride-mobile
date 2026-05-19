@@ -29,7 +29,7 @@ describe('UserLocation.create', () => {
     }
   });
 
-  it('accepts a record with active trip tracking', () => {
+  it('accepts a record with active trip tracking (no live telemetry yet)', () => {
     const r = UserLocation.create({
       userId: USER,
       location: MIAMI,
@@ -39,13 +39,101 @@ describe('UserLocation.create', () => {
         tripId: TRIP,
         tripStatus: 'dispatched',
         destination: { type: 'pickup', location: FORT_LAUDERDALE },
+        distanceMeters: null,
+        durationSeconds: null,
+        updatedAt: null,
       },
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.value.tripTracking?.tripStatus).toBe('dispatched');
       expect(r.value.tripTracking?.destination.type).toBe('pickup');
+      expect(r.value.tripTracking?.distanceMeters).toBeNull();
+      expect(r.value.tripTracking?.durationSeconds).toBeNull();
+      expect(r.value.tripTracking?.updatedAt).toBeNull();
     }
+  });
+
+  // Phase 10 turn 5 — live-ETA telemetry coverage.
+  it('accepts a record with live NavSdk telemetry populated', () => {
+    const calculatedAt = new Date('2026-04-27T12:00:05Z');
+    const r = UserLocation.create({
+      userId: USER,
+      location: MIAMI,
+      speed: 12.5,
+      updatedAt: new Date('2026-04-27T12:00:05Z'),
+      tripTracking: {
+        tripId: TRIP,
+        tripStatus: 'started',
+        destination: { type: 'dropoff', location: FORT_LAUDERDALE },
+        distanceMeters: 4250,
+        durationSeconds: 420,
+        updatedAt: calculatedAt,
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.tripTracking?.distanceMeters).toBe(4250);
+      expect(r.value.tripTracking?.durationSeconds).toBe(420);
+      expect(r.value.tripTracking?.updatedAt).toEqual(calculatedAt);
+    }
+  });
+
+  it('rejects negative tripTracking.distanceMeters', () => {
+    const r = UserLocation.create({
+      userId: USER,
+      location: MIAMI,
+      speed: null,
+      updatedAt: new Date(),
+      tripTracking: {
+        tripId: TRIP,
+        tripStatus: 'dispatched',
+        destination: { type: 'pickup', location: FORT_LAUDERDALE },
+        distanceMeters: -1,
+        durationSeconds: 0,
+        updatedAt: new Date(),
+      },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('trip_tracking_invalid_distance');
+  });
+
+  it('rejects non-finite tripTracking.durationSeconds', () => {
+    const r = UserLocation.create({
+      userId: USER,
+      location: MIAMI,
+      speed: null,
+      updatedAt: new Date(),
+      tripTracking: {
+        tripId: TRIP,
+        tripStatus: 'dispatched',
+        destination: { type: 'pickup', location: FORT_LAUDERDALE },
+        distanceMeters: 100,
+        durationSeconds: Number.POSITIVE_INFINITY,
+        updatedAt: new Date(),
+      },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('trip_tracking_invalid_duration');
+  });
+
+  it('rejects an invalid tripTracking.updatedAt', () => {
+    const r = UserLocation.create({
+      userId: USER,
+      location: MIAMI,
+      speed: null,
+      updatedAt: new Date(),
+      tripTracking: {
+        tripId: TRIP,
+        tripStatus: 'dispatched',
+        destination: { type: 'pickup', location: FORT_LAUDERDALE },
+        distanceMeters: 100,
+        durationSeconds: 60,
+        updatedAt: new Date('not-a-date'),
+      },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('trip_tracking_invalid_updated_at');
   });
 
   it('rejects negative speed', () => {

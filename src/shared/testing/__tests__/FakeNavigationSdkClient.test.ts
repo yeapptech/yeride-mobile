@@ -159,6 +159,70 @@ describe('FakeNavigationSdkClient', () => {
     });
   });
 
+  // Phase 10 turn 5 — emitTimeAndDistance mirrors emitArrival.
+  describe('emitTimeAndDistance + dedup', () => {
+    it('fans events to every registered subscriber', () => {
+      const fake = new FakeNavigationSdkClient();
+      const a = jest.fn();
+      const b = jest.fn();
+      fake.subscribeToTimeAndDistance(a);
+      fake.subscribeToTimeAndDistance(b);
+      fake.emitTimeAndDistance({
+        remainingMeters: 1200,
+        remainingSeconds: 150,
+        timestampMs: 1_700_000_000_000,
+      });
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).toHaveBeenCalledTimes(1);
+    });
+
+    it('dedupes consecutive identical fires (meters, seconds)', () => {
+      const fake = new FakeNavigationSdkClient();
+      const cb = jest.fn();
+      fake.subscribeToTimeAndDistance(cb);
+      const evt = {
+        remainingMeters: 1200,
+        remainingSeconds: 150,
+        timestampMs: 1_700_000_000_000,
+      };
+      fake.emitTimeAndDistance(evt);
+      fake.emitTimeAndDistance(evt);
+      fake.emitTimeAndDistance(evt);
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats different (meters, seconds) as distinct events', () => {
+      const fake = new FakeNavigationSdkClient();
+      const cb = jest.fn();
+      fake.subscribeToTimeAndDistance(cb);
+      fake.emitTimeAndDistance({
+        remainingMeters: 1200,
+        remainingSeconds: 150,
+        timestampMs: 1,
+      });
+      fake.emitTimeAndDistance({
+        remainingMeters: 1150,
+        remainingSeconds: 145,
+        timestampMs: 2,
+      });
+      expect(cb).toHaveBeenCalledTimes(2);
+    });
+
+    it('disposer removes the subscriber and zeroes the subscriber count', () => {
+      const fake = new FakeNavigationSdkClient();
+      const cb = jest.fn();
+      const dispose = fake.subscribeToTimeAndDistance(cb);
+      dispose();
+      fake.emitTimeAndDistance({
+        remainingMeters: 1200,
+        remainingSeconds: 150,
+        timestampMs: 1,
+      });
+      expect(cb).not.toHaveBeenCalled();
+      expect(fake.getTimeAndDistanceSubscriberCount()).toBe(0);
+    });
+  });
+
   describe('spies', () => {
     it('records call counts + args', async () => {
       const fake = new FakeNavigationSdkClient();

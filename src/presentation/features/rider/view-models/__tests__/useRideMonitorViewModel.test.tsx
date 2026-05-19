@@ -3,6 +3,10 @@ import type { ReactNode } from 'react';
 
 import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
+import {
+  DriverSnapshot,
+  VehicleSnapshot,
+} from '@domain/entities/DriverSnapshot';
 import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
@@ -15,10 +19,15 @@ import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import type { TripEvent } from '@domain/entities/TripEvent';
 import { UserId } from '@domain/entities/UserId';
+import { UserLocation } from '@domain/entities/UserLocation';
 import { NetworkError } from '@domain/errors';
 import type { BgGeofenceEvent } from '@domain/services';
 import { useGeofenceUiStore, useGpsStore } from '@presentation/stores';
-import { InMemoryRideRepository, TestContainerProvider } from '@shared/testing';
+import {
+  InMemoryLocationRepository,
+  InMemoryRideRepository,
+  TestContainerProvider,
+} from '@shared/testing';
 
 import { useRideMonitorViewModel } from '../useRideMonitorViewModel';
 
@@ -167,9 +176,15 @@ function bgGeofenceEvent(
   };
 }
 
-function withTestContainer(opts: { ridesRepo: InMemoryRideRepository }) {
+function withTestContainer(opts: {
+  ridesRepo: InMemoryRideRepository;
+  locationsRepo?: InMemoryLocationRepository;
+}) {
   return ({ children }: { children: ReactNode }) => (
-    <TestContainerProvider rides={opts.ridesRepo}>
+    <TestContainerProvider
+      rides={opts.ridesRepo}
+      {...(opts.locationsRepo ? { locations: opts.locationsRepo } : {})}
+    >
       {children}
     </TestContainerProvider>
   );
@@ -683,6 +698,186 @@ describe('useRideMonitorViewModel', () => {
         expect(result.current.status).toBe('dispatched');
       });
       expect(typeof result.current.onOpenSettings).toBe('function');
+    });
+  });
+
+  /**
+   * Phase 10 turn 5 — live ETA consumption. The VM subscribes to the
+   * driver's `users/{uid}.location` doc via `SubscribeToUserLocation`
+   * keyed on `ride.driver?.id`. The two surfaced fields
+   * (`liveDurationSeconds` / `liveDistanceMeters`) read directly
+   * from `UserLocation.tripTracking`.
+   */
+  describe('liveDurationSeconds / liveDistanceMeters (Phase 10 turn 5)', () => {
+    const DRIVER_ID = unwrap(UserId.create('driverxxxxxxxxxxxxxxxxxxxxxx'));
+
+    function makeDriverSnapshot(): DriverSnapshot {
+      return unwrap(
+        DriverSnapshot.create({
+          id: DRIVER_ID,
+          name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+          email: unwrap(Email.create('driver@yeapp.tech')),
+          phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+          stripeAccountId: 'acct_test',
+          pushToken: null,
+          avatarUrl: null,
+          vehicle: unwrap(
+            VehicleSnapshot.create({
+              make: 'Toyota',
+              model: 'Camry',
+              year: 2024,
+              color: 'White',
+              licensePlate: 'ABC1234',
+              stockPhoto: null,
+              photos: [],
+            }),
+          ),
+        }),
+      );
+    }
+
+    function makeDispatchedRideWithDriver(): Ride {
+      const awaiting = makeAwaitingRide();
+      return unwrap(
+        Ride.fromProps({
+          id: awaiting.id,
+          status: 'dispatched',
+          passenger: awaiting.passenger,
+          driver: makeDriverSnapshot(),
+          rideService: awaiting.rideService,
+          pickup: awaiting.pickup,
+          dropoff: awaiting.dropoff,
+          createdAt: awaiting.createdAt,
+          pickupTiming: awaiting.pickupTiming,
+          dropoffTiming: awaiting.dropoffTiming,
+          cancellation: null,
+          routePreference: null,
+        }),
+      );
+    }
+
+    function makeDriverLocationWithLiveEta(args: {
+      readonly distanceMeters: number | null;
+      readonly durationSeconds: number | null;
+    }): UserLocation {
+      return unwrap(
+        UserLocation.create({
+          userId: DRIVER_ID,
+          location: unwrap(Coordinates.create(25.79, -80.2)),
+          speed: 12,
+          updatedAt: new Date('2026-04-28T10:01:00Z'),
+          tripTracking: {
+            tripId: RIDE_ID,
+            tripStatus: 'dispatched',
+            destination: {
+              type: 'pickup',
+              location: unwrap(Coordinates.create(25.7617, -80.1918)),
+            },
+            distanceMeters: args.distanceMeters,
+            durationSeconds: args.durationSeconds,
+            updatedAt: new Date('2026-04-28T10:01:00Z'),
+          },
+        }),
+      );
+    }
+
+    it('emits null until a driver-location with telemetry arrives', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      const locationsRepo = new InMemoryLocationRepository();
+      ridesRepo.seed(makeDispatchedRideWithDriver());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        {
+          wrapper: withTestContainer({ ridesRepo, locationsRepo }),
+        },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+      // No driver-location doc yet — both live fields null.
+      expect(result.current.liveDurationSeconds).toBeNull();
+      expect(result.current.liveDistanceMeters).toBeNull();
+    });
+
+    it('surfaces live ETA values once the driver doc is written', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      const locationsRepo = new InMemoryLocationRepository();
+      ridesRepo.seed(makeDispatchedRideWithDriver());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        {
+          wrapper: withTestContainer({ ridesRepo, locationsRepo }),
+        },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+
+      // Driver pipeline writes its location doc with tripTracking.
+      await act(async () => {
+        await locationsRepo.updateLocation(
+          makeDriverLocationWithLiveEta({
+            distanceMeters: 2500,
+            durationSeconds: 300,
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(result.current.liveDurationSeconds).toBe(300);
+      });
+      expect(result.current.liveDistanceMeters).toBe(2500);
+    });
+
+    it('keeps live fields null when tripTracking is route-metadata-only (pre-first-telemetry)', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      const locationsRepo = new InMemoryLocationRepository();
+      ridesRepo.seed(makeDispatchedRideWithDriver());
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        {
+          wrapper: withTestContainer({ ridesRepo, locationsRepo }),
+        },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('dispatched');
+      });
+
+      await act(async () => {
+        await locationsRepo.updateLocation(
+          makeDriverLocationWithLiveEta({
+            distanceMeters: null,
+            durationSeconds: null,
+          }),
+        );
+      });
+      // Doc arrived but no live telemetry yet — VM keeps both as null
+      // so the views can fall back to static `ride.pickup.directions`.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(result.current.liveDurationSeconds).toBeNull();
+      expect(result.current.liveDistanceMeters).toBeNull();
+    });
+
+    it('does NOT subscribe when no driver is assigned', async () => {
+      const ridesRepo = new InMemoryRideRepository();
+      const locationsRepo = new InMemoryLocationRepository();
+      const ride = makeAwaitingRide(); // status: awaiting_driver, driver: null
+      await ridesRepo.create(ride);
+
+      const { result } = renderHook(
+        () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+        {
+          wrapper: withTestContainer({ ridesRepo, locationsRepo }),
+        },
+      );
+      await waitFor(() => {
+        expect(result.current.status).toBe('awaiting_driver');
+      });
+      // Live fields stay null; no subscribeToLocation calls.
+      expect(result.current.liveDurationSeconds).toBeNull();
+      expect(result.current.liveDistanceMeters).toBeNull();
     });
   });
 });

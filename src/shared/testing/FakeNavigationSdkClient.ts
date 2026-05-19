@@ -7,6 +7,7 @@ import type {
   NavRouteStatus,
   NavSetDestinationsArgs,
   NavTermsResult,
+  NavTimeAndDistance,
 } from '@domain/services';
 import { Result } from '@domain/shared/Result';
 
@@ -70,6 +71,9 @@ export interface FakeNavigationSdkSpies {
   readonly cleanupCalls: number;
   readonly subscribeArrivalCalls: number;
   readonly arrivalDisposes: number;
+  /** Phase 10 turn 5 — time/distance subscribe / dispose counters. */
+  readonly subscribeTimeAndDistanceCalls: number;
+  readonly timeAndDistanceDisposes: number;
   /**
    * Each `setController(args)` push from the connector hook (Phase 8
    * turn 2). Index 0 is the mount-push (controller non-null), index 1
@@ -101,6 +105,16 @@ export class FakeNavigationSdkClient implements NavigationService {
   /** Dedup key — same scheme as the real adapter. */
   private lastArrivalKey: string | null = null;
 
+  /**
+   * Phase 10 turn 5 — multi-subscriber registry for time/distance
+   * telemetry. Mirrors the real adapter's surface 1:1 so view-model
+   * tests can drive the pipeline deterministically.
+   */
+  private timeDistanceCallbacks = new Set<
+    (event: NavTimeAndDistance) => void
+  >();
+  private lastTimeDistanceKey: string | null = null;
+
   private nextFailures = new Map<FakeNavigationSdkMethod, AnyFakeError>();
 
   private readonly _spies = {
@@ -112,6 +126,8 @@ export class FakeNavigationSdkClient implements NavigationService {
     cleanupCalls: 0,
     subscribeArrivalCalls: 0,
     arrivalDisposes: 0,
+    subscribeTimeAndDistanceCalls: 0,
+    timeAndDistanceDisposes: 0,
     setControllerCalls: [] as FakeSetControllerCall[],
   };
 
@@ -158,6 +174,8 @@ export class FakeNavigationSdkClient implements NavigationService {
     this.activeDestinations = null;
     this.arrivalCallbacks.clear();
     this.lastArrivalKey = null;
+    this.timeDistanceCallbacks.clear();
+    this.lastTimeDistanceKey = null;
     this.nextFailures.clear();
     this._spies.initCalls = 0;
     this._spies.showTermsCalls = 0;
@@ -167,6 +185,8 @@ export class FakeNavigationSdkClient implements NavigationService {
     this._spies.cleanupCalls = 0;
     this._spies.subscribeArrivalCalls = 0;
     this._spies.arrivalDisposes = 0;
+    this._spies.subscribeTimeAndDistanceCalls = 0;
+    this._spies.timeAndDistanceDisposes = 0;
     this._spies.setControllerCalls.length = 0;
   }
 
@@ -195,6 +215,19 @@ export class FakeNavigationSdkClient implements NavigationService {
    */
   emitMultiFireArrival(event: NavArrivalEvent, count: number): void {
     for (let i = 0; i < count; i += 1) this.emitArrival(event);
+  }
+
+  /**
+   * Phase 10 turn 5 — fire a single deduped time/distance event into
+   * every subscriber. Mirrors the real adapter's
+   * `(remainingMeters, remainingSeconds)` dedup so back-to-back
+   * identical fires collapse to one callback.
+   */
+  emitTimeAndDistance(event: NavTimeAndDistance): void {
+    const key = `${String(event.remainingMeters)}:${String(event.remainingSeconds)}`;
+    if (key === this.lastTimeDistanceKey) return;
+    this.lastTimeDistanceKey = key;
+    for (const cb of [...this.timeDistanceCallbacks]) cb(event);
   }
 
   /* ───── Public adapter surface ───── */
@@ -277,12 +310,16 @@ export class FakeNavigationSdkClient implements NavigationService {
       // behaviour.
       this.arrivalCallbacks.clear();
       this.lastArrivalKey = null;
+      this.timeDistanceCallbacks.clear();
+      this.lastTimeDistanceKey = null;
       this.activeDestinations = null;
       this.guiding = false;
       return Result.err(failure as NetworkError);
     }
     this.arrivalCallbacks.clear();
     this.lastArrivalKey = null;
+    this.timeDistanceCallbacks.clear();
+    this.lastTimeDistanceKey = null;
     this.activeDestinations = null;
     this.guiding = false;
     return Result.ok(true);
@@ -295,6 +332,25 @@ export class FakeNavigationSdkClient implements NavigationService {
       this._spies.arrivalDisposes += 1;
       this.arrivalCallbacks.delete(callback);
       if (this.arrivalCallbacks.size === 0) this.lastArrivalKey = null;
+    };
+  }
+
+  /**
+   * Phase 10 turn 5 — subscribe to live time/distance telemetry. The
+   * fake mirrors the real adapter's multi-subscriber + dedup
+   * semantics so VM tests exercise the production fan-out behaviour.
+   */
+  subscribeToTimeAndDistance(
+    callback: (event: NavTimeAndDistance) => void,
+  ): () => void {
+    this._spies.subscribeTimeAndDistanceCalls += 1;
+    this.timeDistanceCallbacks.add(callback);
+    return () => {
+      this._spies.timeAndDistanceDisposes += 1;
+      this.timeDistanceCallbacks.delete(callback);
+      if (this.timeDistanceCallbacks.size === 0) {
+        this.lastTimeDistanceKey = null;
+      }
     };
   }
 
@@ -321,6 +377,11 @@ export class FakeNavigationSdkClient implements NavigationService {
     return this.arrivalCallbacks.size;
   }
 
+  /** Phase 10 turn 5 — symmetric introspection for the time/distance side. */
+  getTimeAndDistanceSubscriberCount(): number {
+    return this.timeDistanceCallbacks.size;
+  }
+
   /* ───── Internals ───── */
 
   private takeFailure(method: FakeNavigationSdkMethod): AnyFakeError | null {
@@ -341,4 +402,5 @@ export type {
   NavRouteStatus,
   NavSetDestinationsArgs,
   NavTermsResult,
+  NavTimeAndDistance,
 };

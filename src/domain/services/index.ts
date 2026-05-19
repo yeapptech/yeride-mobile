@@ -36,5 +36,6 @@ export type {
   NavRouteStatus,
   NavSetDestinationsArgs,
   NavTermsResult,
+  NavTimeAndDistance,
   NavWaypoint,
 } from './NavigationService';

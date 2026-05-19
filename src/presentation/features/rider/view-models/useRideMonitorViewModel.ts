@@ -8,6 +8,7 @@ import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
+import type { UserLocation } from '@domain/entities/UserLocation';
 import { useUseCases } from '@presentation/di';
 import { useFirestoreSubscription, useOpenSettings } from '@presentation/hooks';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
@@ -101,6 +102,19 @@ export interface UseRideMonitorViewModel {
    * `Linking.openSettings()`.
    */
   onOpenSettings: () => void;
+  /**
+   * Phase 10 turn 5 — live ETA from the driver's `users/{uid}.location`
+   * doc. Subscribes via `SubscribeToUserLocation` keyed on
+   * `ride.driver?.id` and reads `tripTracking.durationSeconds`.
+   * Null when no driver assigned yet OR no live telemetry has
+   * arrived. The rider's `DispatchedView` / `StartedView` prefer
+   * this over `ride.pickup.directions.durationSeconds` /
+   * `ride.dropoff.directions.durationSeconds`, falling back when
+   * null — mirrors legacy `TripETAInfo`'s "Calculating…" surface.
+   */
+  readonly liveDurationSeconds: number | null;
+  /** Live distance in metres, paired with `liveDurationSeconds`. */
+  readonly liveDistanceMeters: number | null;
 }
 
 export function useRideMonitorViewModel(args: {
@@ -287,6 +301,54 @@ export function useRideMonitorViewModel(args: {
     (status === 'dispatched' || status === 'started');
   const onOpenSettings = useOpenSettings();
 
+  // ── Live driver ETA (Phase 10 turn 5) ──────────────────────────
+  // Subscribe to the driver's `users/{uid}.location` doc via
+  // `SubscribeToUserLocation`, keyed on `ride.driver?.id`. The
+  // returned `UserLocation.tripTracking` carries the driver-side
+  // populated `distanceMeters / durationSeconds / updatedAt` written
+  // by `useDriverMonitorViewModel`. We surface the two values as
+  // `liveDistanceMeters` / `liveDurationSeconds` so the rider's
+  // status views can prefer them over the static
+  // `ride.pickup.directions` / `ride.dropoff.directions` (set at
+  // dispatch / trip-create time and never updated).
+  //
+  // Null on:
+  //   - no driver assigned yet (awaiting_driver)
+  //   - driver assigned but `users/{uid}.location` doc hasn't been
+  //     written yet (first GPS event still en-route)
+  //   - written, but `tripTracking.distanceMeters / durationSeconds`
+  //     are null (route-metadata-only doc; NavSdk telemetry hasn't
+  //     fired yet, or has gone stale)
+  //
+  // Replaces the legacy `LocationContext.subscribeToUserLocation`
+  // path (`DispatchedView.useEffect` in legacy yeride). Decision 3
+  // chose (a): reuse the generic use case keyed by driver id rather
+  // than introducing an `ObserveDriverLocation` wrapper — VM effect
+  // cleanup already handles the ride-switch race.
+  const driverId = ride?.driver?.id ?? null;
+  const [driverLocation, setDriverLocation] = useState<UserLocation | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!driverId) {
+      setDriverLocation(null);
+      return;
+    }
+    // SubscribeToUserLocation emits null when the doc is missing OR
+    // on stream error — the effect treats both the same: clear local
+    // state and wait for the next emission.
+    const unsubscribe = useCases.subscribeToUserLocation.execute({
+      userId: driverId,
+      callback: (loc) => setDriverLocation(loc),
+    });
+    return unsubscribe;
+  }, [useCases, driverId]);
+
+  const liveDurationSeconds =
+    driverLocation?.tripTracking?.durationSeconds ?? null;
+  const liveDistanceMeters =
+    driverLocation?.tripTracking?.distanceMeters ?? null;
+
   return {
     ride,
     status,
@@ -299,5 +361,7 @@ export function useRideMonitorViewModel(args: {
     cancel,
     onPressChat,
     onOpenSettings,
+    liveDurationSeconds,
+    liveDistanceMeters,
   };
 }
