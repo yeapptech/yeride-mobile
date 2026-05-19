@@ -6,6 +6,7 @@ import RideMonitorScreen from '@presentation/features/rider/screens/RideMonitorS
 import RideReceiptScreen from '@presentation/features/rider/screens/RideReceiptScreen';
 import RouteSearchScreen from '@presentation/features/rider/screens/RouteSearchScreen';
 import RouteSelectScreen from '@presentation/features/rider/screens/RouteSelectScreen';
+import TripDetailScreen from '@presentation/features/shared/screens/TripDetailScreen';
 
 import { RiderTabsNavigator } from './RiderTabsNavigator';
 import type { RiderStackParamList } from './types';
@@ -54,6 +55,11 @@ export function RiderNavigator() {
         name="RideReceipt"
         component={RideReceiptScreen}
         options={{ title: 'Receipt' }}
+      />
+      <Stack.Screen
+        name="TripDetail"
+        component={TripDetailScreen}
+        options={{ title: 'Trip details' }}
       />
       <Stack.Screen
         name="UserProfile"

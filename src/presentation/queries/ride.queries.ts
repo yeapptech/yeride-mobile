@@ -115,7 +115,11 @@ export function useRidesByPassengerQuery(args: {
       if (limit !== undefined) queryArgs.limit = limit;
       const r = await useCases.listRidesByPassenger.execute(queryArgs);
       if (!r.ok) throw r.error;
-      return r.value;
+      // Use cases now return `RidePage`; the legacy callsite shape
+      // expected `readonly Ride[]`. The Activity tab is the only caller
+      // that needs `nextCursor`; this query (history-only, no
+      // pagination) discards it.
+      return r.value.rides;
     },
     enabled: passengerId !== null,
   });
@@ -144,7 +148,7 @@ export function useInProgressRideQuery(
         limit: 1,
       });
       if (!r.ok) throw r.error;
-      return r.value[0] ?? null;
+      return r.value.rides[0] ?? null;
     },
     enabled: passengerId !== null,
   });
@@ -184,7 +188,7 @@ export function useInProgressDriverRideQuery(
         limit: 1,
       });
       if (!r.ok) throw r.error;
-      return r.value[0] ?? null;
+      return r.value.rides[0] ?? null;
     },
     enabled: driverId !== null,
   });

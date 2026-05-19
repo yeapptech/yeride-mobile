@@ -8,6 +8,7 @@ import VehicleDetailsScreen from '@presentation/features/driver/screens/VehicleD
 import VehicleListScreen from '@presentation/features/driver/screens/VehicleListScreen';
 import VehiclePhotosScreen from '@presentation/features/driver/screens/VehiclePhotosScreen';
 import VehicleRegistrationScreen from '@presentation/features/driver/screens/VehicleRegistrationScreen';
+import TripDetailScreen from '@presentation/features/shared/screens/TripDetailScreen';
 
 import { DriverTabsNavigator } from './DriverTabsNavigator';
 import type { DriverStackParamList } from './types';
@@ -77,6 +78,11 @@ export function DriverNavigator() {
         name="VehiclePhotos"
         component={VehiclePhotosScreen}
         options={{ title: 'Vehicle photos' }}
+      />
+      <Stack.Screen
+        name="TripDetail"
+        component={TripDetailScreen}
+        options={{ title: 'Trip details' }}
       />
     </Stack.Navigator>
   );

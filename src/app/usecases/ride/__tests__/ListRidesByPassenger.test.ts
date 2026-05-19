@@ -128,9 +128,10 @@ describe('ListRidesByPassenger', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toHaveLength(2);
-      expect(String(r.value[0]?.id)).toBe('newA12345678901234567ab');
-      expect(String(r.value[1]?.id)).toBe('oldA12345678901234567ab');
+      expect(r.value.rides).toHaveLength(2);
+      expect(String(r.value.rides[0]?.id)).toBe('newA12345678901234567ab');
+      expect(String(r.value.rides[1]?.id)).toBe('oldA12345678901234567ab');
+      expect(r.value.nextCursor).toBeNull();
     }
   });
 
@@ -157,8 +158,10 @@ describe('ListRidesByPassenger', () => {
     });
     expect(onlyAwaiting.ok).toBe(true);
     if (onlyAwaiting.ok) {
-      expect(onlyAwaiting.value).toHaveLength(1);
-      expect(String(onlyAwaiting.value[0]?.id)).toBe('awaitingA1234567890ab12');
+      expect(onlyAwaiting.value.rides).toHaveLength(1);
+      expect(String(onlyAwaiting.value.rides[0]?.id)).toBe(
+        'awaitingA1234567890ab12',
+      );
     }
 
     const onlyCancelled = await new ListRidesByPassenger(repo).execute({
@@ -167,8 +170,8 @@ describe('ListRidesByPassenger', () => {
     });
     expect(onlyCancelled.ok).toBe(true);
     if (onlyCancelled.ok) {
-      expect(onlyCancelled.value).toHaveLength(1);
-      expect(String(onlyCancelled.value[0]?.id)).toBe(
+      expect(onlyCancelled.value.rides).toHaveLength(1);
+      expect(String(onlyCancelled.value.rides[0]?.id)).toBe(
         'cancelledA1234567890ab1',
       );
     }
@@ -179,7 +182,7 @@ describe('ListRidesByPassenger', () => {
     });
     expect(noneCompleted.ok).toBe(true);
     if (noneCompleted.ok) {
-      expect(noneCompleted.value).toHaveLength(0);
+      expect(noneCompleted.value.rides).toHaveLength(0);
     }
   });
 
@@ -212,8 +215,11 @@ describe('ListRidesByPassenger', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toHaveLength(1);
-      expect(String(r.value[0]?.id)).toBe('ccc12345678901234567ab');
+      expect(r.value.rides).toHaveLength(1);
+      expect(String(r.value.rides[0]?.id)).toBe('ccc12345678901234567ab');
+      // 3 rides total, limit 1, raw page size 1 == limit, so nextCursor
+      // is set.
+      expect(r.value.nextCursor).not.toBeNull();
     }
   });
 
@@ -223,6 +229,60 @@ describe('ListRidesByPassenger', () => {
       passengerId: PASSENGER_A,
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual([]);
+    if (r.ok) {
+      expect(r.value.rides).toEqual([]);
+      expect(r.value.nextCursor).toBeNull();
+    }
+  });
+
+  it('paginates: cursor returned from page 1 resumes page 2 correctly', async () => {
+    const repo = new InMemoryRideRepository();
+    repo.seed(
+      makeAwaitingRide({
+        id: 'ride1xxx12345678901abc',
+        passengerId: PASSENGER_A,
+        createdAt: new Date('2026-04-01T10:00:00Z'),
+      }),
+    );
+    repo.seed(
+      makeAwaitingRide({
+        id: 'ride2xxx12345678901abc',
+        passengerId: PASSENGER_A,
+        createdAt: new Date('2026-04-02T10:00:00Z'),
+      }),
+    );
+    repo.seed(
+      makeAwaitingRide({
+        id: 'ride3xxx12345678901abc',
+        passengerId: PASSENGER_A,
+        createdAt: new Date('2026-04-03T10:00:00Z'),
+      }),
+    );
+
+    const sut = new ListRidesByPassenger(repo);
+    const p1 = await sut.execute({
+      passengerId: PASSENGER_A,
+      limit: 2,
+    });
+    expect(p1.ok).toBe(true);
+    if (!p1.ok) return;
+    expect(p1.value.rides.map((r) => String(r.id))).toEqual([
+      'ride3xxx12345678901abc',
+      'ride2xxx12345678901abc',
+    ]);
+    expect(p1.value.nextCursor).not.toBeNull();
+    if (p1.value.nextCursor === null) return;
+
+    const p2 = await sut.execute({
+      passengerId: PASSENGER_A,
+      limit: 2,
+      cursor: p1.value.nextCursor,
+    });
+    expect(p2.ok).toBe(true);
+    if (!p2.ok) return;
+    expect(p2.value.rides.map((r) => String(r.id))).toEqual([
+      'ride1xxx12345678901abc',
+    ]);
+    expect(p2.value.nextCursor).toBeNull();
   });
 });

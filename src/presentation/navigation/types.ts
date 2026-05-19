@@ -67,6 +67,15 @@ export type RiderStackParamList = {
   RideMonitor: { rideId: string };
   RideReceipt: { rideId: string };
   /**
+   * Trip-detail surface reached from Activity tab row taps on
+   * terminal-status trips (`completed` / `cancelled`). Role-agnostic;
+   * the same screen is also mounted on the driver stack so both sides
+   * land somewhere consistent. Renders trip route, role-flipped party
+   * header, per-trip events, per-trip payments + total, and (rider +
+   * completed-tippable-trip) tip re-entry. Phase 10 Turn 6.
+   */
+  TripDetail: { rideId: string };
+  /**
    * Profile editor reachable as a modal from the Profile tab. Same screen
    * that the Profile tab points at, but pushed instead of root-mounted, so
    * the tab bar hides while editing. Phase 3 keeps both reachable for
@@ -183,6 +192,13 @@ export type DriverStackParamList = {
    * Phase 5 turn 4.
    */
   VehiclePhotos: { vin: string };
+  /**
+   * Trip-detail surface reached from the driver Activity tab on terminal-
+   * status trips (`completed` / `cancelled`). Same screen as the rider
+   * stack's `TripDetail` — role-agnostic; the screen body adapts based
+   * on which side of the trip the current user is on. Phase 10 Turn 6.
+   */
+  TripDetail: { rideId: string };
 };
 
 /**

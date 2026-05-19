@@ -193,9 +193,10 @@ describe('ListRidesByDriver', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toHaveLength(2);
-      expect(String(r.value[0]?.id)).toBe('newA12345678901234567ab');
-      expect(String(r.value[1]?.id)).toBe('oldA12345678901234567ab');
+      expect(r.value.rides).toHaveLength(2);
+      expect(String(r.value.rides[0]?.id)).toBe('newA12345678901234567ab');
+      expect(String(r.value.rides[1]?.id)).toBe('oldA12345678901234567ab');
+      expect(r.value.nextCursor).toBeNull();
     }
   });
 
@@ -211,7 +212,10 @@ describe('ListRidesByDriver', () => {
       driverId: DRIVER_A.id,
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual([]);
+    if (r.ok) {
+      expect(r.value.rides).toEqual([]);
+      expect(r.value.nextCursor).toBeNull();
+    }
   });
 
   it('filters by status when supplied', async () => {
@@ -230,7 +234,7 @@ describe('ListRidesByDriver', () => {
     });
     expect(onlyDispatched.ok).toBe(true);
     if (onlyDispatched.ok) {
-      expect(onlyDispatched.value).toHaveLength(1);
+      expect(onlyDispatched.value.rides).toHaveLength(1);
     }
 
     const onlyCompleted = await new ListRidesByDriver(repo).execute({
@@ -238,7 +242,7 @@ describe('ListRidesByDriver', () => {
       statuses: ['completed'],
     });
     expect(onlyCompleted.ok).toBe(true);
-    if (onlyCompleted.ok) expect(onlyCompleted.value).toHaveLength(0);
+    if (onlyCompleted.ok) expect(onlyCompleted.value.rides).toHaveLength(0);
   });
 
   it('respects the limit', async () => {
@@ -271,8 +275,9 @@ describe('ListRidesByDriver', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toHaveLength(1);
-      expect(String(r.value[0]?.id)).toBe('ccc1234567890123456abc');
+      expect(r.value.rides).toHaveLength(1);
+      expect(String(r.value.rides[0]?.id)).toBe('ccc1234567890123456abc');
+      expect(r.value.nextCursor).not.toBeNull();
     }
   });
 
@@ -282,6 +287,57 @@ describe('ListRidesByDriver', () => {
       driverId: DRIVER_A.id,
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual([]);
+    if (r.ok) {
+      expect(r.value.rides).toEqual([]);
+      expect(r.value.nextCursor).toBeNull();
+    }
+  });
+
+  it('paginates: cursor returned from page 1 resumes page 2 correctly', async () => {
+    const repo = new InMemoryRideRepository();
+    repo.seed(
+      makeDispatchedRide({
+        id: 'rideA1234567890123456ab',
+        driver: DRIVER_A,
+        createdAt: new Date('2026-04-01T00:00:00Z'),
+      }),
+    );
+    repo.seed(
+      makeDispatchedRide({
+        id: 'rideB1234567890123456ab',
+        driver: DRIVER_A,
+        createdAt: new Date('2026-04-02T00:00:00Z'),
+      }),
+    );
+    repo.seed(
+      makeDispatchedRide({
+        id: 'rideC1234567890123456ab',
+        driver: DRIVER_A,
+        createdAt: new Date('2026-04-03T00:00:00Z'),
+      }),
+    );
+
+    const sut = new ListRidesByDriver(repo);
+    const p1 = await sut.execute({ driverId: DRIVER_A.id, limit: 2 });
+    expect(p1.ok).toBe(true);
+    if (!p1.ok) return;
+    expect(p1.value.rides.map((r) => String(r.id))).toEqual([
+      'rideC1234567890123456ab',
+      'rideB1234567890123456ab',
+    ]);
+    expect(p1.value.nextCursor).not.toBeNull();
+    if (p1.value.nextCursor === null) return;
+
+    const p2 = await sut.execute({
+      driverId: DRIVER_A.id,
+      limit: 2,
+      cursor: p1.value.nextCursor,
+    });
+    expect(p2.ok).toBe(true);
+    if (!p2.ok) return;
+    expect(p2.value.rides.map((r) => String(r.id))).toEqual([
+      'rideA1234567890123456ab',
+    ]);
+    expect(p2.value.nextCursor).toBeNull();
   });
 });

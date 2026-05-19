@@ -2,6 +2,7 @@ import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride, RideCancellation } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
+import { RideListCursor, type RidePage } from '@domain/entities/RideListCursor';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
@@ -156,35 +157,37 @@ export class InMemoryRideRepository implements RideRepository {
     passengerId: UserId;
     statuses?: readonly RideStatus[];
     limit?: number;
-  }): Promise<Result<readonly Ride[], NetworkError>> {
-    const matching: Ride[] = [];
+    cursor?: RideListCursor;
+  }): Promise<Result<RidePage, NetworkError>> {
+    const allMatching: Ride[] = [];
     for (const r of this.rides.values()) {
       if (r.passenger.id !== args.passengerId) continue;
-      if (args.statuses && !args.statuses.includes(r.status)) continue;
-      matching.push(r);
+      allMatching.push(r);
     }
-    matching.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    const sliced = args.limit ? matching.slice(0, args.limit) : matching;
-    return Result.ok(sliced);
+    allMatching.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return Result.ok(
+      paginateInMemory(allMatching, args.statuses, args.limit, args.cursor),
+    );
   }
 
   async listByDriver(args: {
     driverId: UserId;
     statuses?: readonly RideStatus[];
     limit?: number;
-  }): Promise<Result<readonly Ride[], NetworkError>> {
-    const matching: Ride[] = [];
+    cursor?: RideListCursor;
+  }): Promise<Result<RidePage, NetworkError>> {
+    const allMatching: Ride[] = [];
     for (const r of this.rides.values()) {
       // Rides with no driver yet (awaiting_driver) are excluded — this is
       // "rides this driver has accepted", not "rides this driver could
       // accept" (which is `subscribeAvailableRides`).
       if (!r.driver || r.driver.id !== args.driverId) continue;
-      if (args.statuses && !args.statuses.includes(r.status)) continue;
-      matching.push(r);
+      allMatching.push(r);
     }
-    matching.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    const sliced = args.limit ? matching.slice(0, args.limit) : matching;
-    return Result.ok(sliced);
+    allMatching.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return Result.ok(
+      paginateInMemory(allMatching, args.statuses, args.limit, args.cursor),
+    );
   }
 
   subscribeAvailableRides(args: {
@@ -404,3 +407,72 @@ export class InMemoryRideRepository implements RideRepository {
 }
 
 const DEFAULT_AVAILABLE_RADIUS_METERS = 80_467; // 50 mi (matches legacy)
+
+/**
+ * Reproduce the Firestore pagination shape (`{ rides, nextCursor }`)
+ * over an already-sorted-desc-by-createdAt list of candidate rides.
+ *
+ * Mirrors the Firestore adapter:
+ *   1. Apply the cursor: drop rides up to and including the boundary
+ *      identity (`createdAtMillis` + `docId` composite).
+ *   2. Slice to `limit` raw rows.
+ *   3. Track the boundary doc id BEFORE applying the status filter, so
+ *      `nextCursor` advances by the raw last row (matches the Firestore
+ *      adapter's `buildPage` invariant).
+ *   4. Apply the optional status filter client-side.
+ *   5. Emit `nextCursor: null` when the raw page is shorter than
+ *      `limit` (end-of-list) or when no `limit` was given.
+ */
+function paginateInMemory(
+  sortedDesc: readonly Ride[],
+  statuses: readonly RideStatus[] | undefined,
+  limit: number | undefined,
+  cursor: RideListCursor | undefined,
+): RidePage {
+  let startIndex = 0;
+  if (cursor) {
+    const decoded = RideListCursor.decode(cursor);
+    if (decoded.ok) {
+      const { createdAtMillis, docId } = decoded.value;
+      const i = sortedDesc.findIndex(
+        (r) =>
+          r.createdAt.getTime() === createdAtMillis && String(r.id) === docId,
+      );
+      // If we can't locate the boundary, fall back to "skip past anything
+      // with createdAt >= cursorMillis". This matches Firestore's
+      // startAfter semantics for the single-field createdDateTime cursor.
+      startIndex =
+        i >= 0
+          ? i + 1
+          : sortedDesc.findIndex(
+              (r) => r.createdAt.getTime() < createdAtMillis,
+            );
+      if (startIndex < 0) {
+        startIndex = sortedDesc.length;
+      }
+    }
+  }
+
+  const rawSlice =
+    limit !== undefined
+      ? sortedDesc.slice(startIndex, startIndex + limit)
+      : sortedDesc.slice(startIndex);
+
+  const boundary = rawSlice.length > 0 ? rawSlice[rawSlice.length - 1] : null;
+  const filtered = statuses
+    ? rawSlice.filter((r) => statuses.includes(r.status))
+    : rawSlice;
+
+  const nextCursor =
+    limit !== undefined && rawSlice.length === limit && boundary
+      ? (() => {
+          const c = RideListCursor.create({
+            createdAtMillis: boundary.createdAt.getTime(),
+            docId: String(boundary.id),
+          });
+          return c.ok ? c.value : null;
+        })()
+      : null;
+
+  return { rides: filtered, nextCursor };
+}

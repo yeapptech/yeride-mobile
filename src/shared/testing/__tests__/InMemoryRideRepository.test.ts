@@ -411,8 +411,10 @@ describe('InMemoryRideRepository.listByPassenger', () => {
     const r = await repo.listByPassenger({ passengerId: PASSENGER.id });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toHaveLength(2);
-      expect(String(r.value[0]!.id)).toBe('tripB12345678901234567890');
+      expect(r.value.rides).toHaveLength(2);
+      expect(String(r.value.rides[0]!.id)).toBe('tripB12345678901234567890');
+      // Without a limit, nextCursor is always null (no page boundary).
+      expect(r.value.nextCursor).toBeNull();
     }
   });
 
@@ -425,7 +427,57 @@ describe('InMemoryRideRepository.listByPassenger', () => {
       statuses: ['completed'],
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual([]);
+    if (r.ok) {
+      expect(r.value.rides).toEqual([]);
+      expect(r.value.nextCursor).toBeNull();
+    }
+  });
+
+  it('paginates: first page returns cursor, second page resumes after it', async () => {
+    const repo = new InMemoryRideRepository();
+    const a = makeRide({
+      id: 'tripA12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T10:00:00Z'),
+    });
+    const b = makeRide({
+      id: 'tripB12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T11:00:00Z'),
+    });
+    const c = makeRide({
+      id: 'tripC12345678901234567890',
+      pickup: MIAMI,
+      createdAt: new Date('2026-04-27T12:00:00Z'),
+    });
+    await repo.create(a);
+    await repo.create(b);
+    await repo.create(c);
+
+    const page1 = await repo.listByPassenger({
+      passengerId: PASSENGER.id,
+      limit: 2,
+    });
+    expect(page1.ok).toBe(true);
+    if (!page1.ok) return;
+    expect(page1.value.rides.map((r) => String(r.id))).toEqual([
+      'tripC12345678901234567890',
+      'tripB12345678901234567890',
+    ]);
+    expect(page1.value.nextCursor).not.toBeNull();
+    if (page1.value.nextCursor === null) return;
+
+    const page2 = await repo.listByPassenger({
+      passengerId: PASSENGER.id,
+      limit: 2,
+      cursor: page1.value.nextCursor,
+    });
+    expect(page2.ok).toBe(true);
+    if (!page2.ok) return;
+    expect(page2.value.rides.map((r) => String(r.id))).toEqual([
+      'tripA12345678901234567890',
+    ]);
+    expect(page2.value.nextCursor).toBeNull();
   });
 });
 
@@ -467,8 +519,9 @@ describe('InMemoryRideRepository.listByDriver', () => {
     const r = await repo.listByDriver({ driverId: DRIVER.id });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value).toHaveLength(2);
-      expect(String(r.value[0]!.id)).toBe('tripB12345678901234567890');
+      expect(r.value.rides).toHaveLength(2);
+      expect(String(r.value.rides[0]!.id)).toBe('tripB12345678901234567890');
+      expect(r.value.nextCursor).toBeNull();
     }
   });
 
@@ -478,7 +531,10 @@ describe('InMemoryRideRepository.listByDriver', () => {
     await repo.create(ride);
     const r = await repo.listByDriver({ driverId: DRIVER.id });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual([]);
+    if (r.ok) {
+      expect(r.value.rides).toEqual([]);
+      expect(r.value.nextCursor).toBeNull();
+    }
   });
 
   it('honours the statuses filter', async () => {
@@ -501,6 +557,9 @@ describe('InMemoryRideRepository.listByDriver', () => {
       statuses: ['completed'],
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value).toEqual([]);
+    if (r.ok) {
+      expect(r.value.rides).toEqual([]);
+      expect(r.value.nextCursor).toBeNull();
+    }
   });
 });

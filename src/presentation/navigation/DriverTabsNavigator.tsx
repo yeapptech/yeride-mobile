@@ -1,7 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
-import DriverActivityPlaceholderScreen from '@presentation/features/driver/screens/DriverActivityPlaceholderScreen';
+import DriverActivityScreen from '@presentation/features/driver/screens/DriverActivityScreen';
 import DriverEarningsScreen from '@presentation/features/driver/screens/DriverEarningsScreen';
 import DriverHomeScreen from '@presentation/features/driver/screens/DriverHomeScreen';
 
@@ -16,8 +16,8 @@ import type { DriverTabsParamList } from './types';
  * Turn 2 replaces `DriverHomePlaceholderScreen` with the real DriverHome
  * (map + ListAvailableRides). Phase 6 turn 4 swaps in the real
  * `DriverEarningsScreen` (Stripe Connect onboarding + balance + payouts).
- * The Activity tab stays as a placeholder until the driver-side activity
- * surface lands in a later phase.
+ * Phase 10 Turn 6 promotes `Activity` to the real driver-side
+ * `DriverActivityScreen` — recent-rides list mirroring the rider tab.
  *
  * Tab bar styling intentionally minimal here — visual design is a
  * follow-up turn once the legacy app's tab labels and icon set port
@@ -41,7 +41,7 @@ export function DriverTabsNavigator() {
       />
       <Tabs.Screen
         name="Activity"
-        component={DriverActivityPlaceholderScreen}
+        component={DriverActivityScreen}
         options={{ tabBarLabel: 'Activity' }}
       />
       <Tabs.Screen

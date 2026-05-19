@@ -9,13 +9,16 @@ import {
   orderBy,
   query,
   setDoc,
+  startAfter,
   where,
+  type QueryConstraint,
 } from '@react-native-firebase/firestore';
 
 import type { CancellationReason } from '@domain/entities/CancellationReason';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
+import { RideListCursor, type RidePage } from '@domain/entities/RideListCursor';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
 import type { TripEvent } from '@domain/entities/TripEvent';
@@ -44,6 +47,67 @@ const EVENTS = 'events';
 const PAYMENTS = 'payments';
 
 const DEFAULT_AVAILABLE_RADIUS_METERS = 80_467; // 50 mi (legacy)
+
+/**
+ * Decode a paginated-list cursor and return the ISO-string form for
+ * Firestore `startAfter`. Legacy + the rewrite both write
+ * `createdDateTime` as `new Date().toISOString()` (verified in
+ * `yeride/src/api/firebase/Trip.js` line 541 and `rideMapper.toDoc`),
+ * so comparing against an ISO string is lexicographically equivalent
+ * to chronological order on the indexed field.
+ *
+ * Returns `null` when no cursor was provided (caller treats as
+ * "first page").
+ */
+function cursorToIsoString(cursor: RideListCursor): Result<string, Error> {
+  const decoded = RideListCursor.decode(cursor);
+  if (!decoded.ok) return Result.err(decoded.error);
+  return Result.ok(new Date(decoded.value.createdAtMillis).toISOString());
+}
+
+/**
+ * Build a `RideListCursor` from the boundary doc's `createdDateTime`
+ * raw value (string or Firestore Timestamp) + doc id. Returns `null`
+ * if the boundary value can't be coerced to a millis timestamp — the
+ * caller then surfaces `nextCursor: null` (end-of-list). The "Timestamp
+ * object with toMillis()" branch is defensive — legacy yeride writes
+ * ISO strings exclusively, but Cloud Functions or backfills could
+ * surface a Timestamp.
+ */
+function buildCursor(
+  rawCreatedDateTime: unknown,
+  lastDocId: string,
+): RideListCursor | null {
+  const millis = (() => {
+    if (typeof rawCreatedDateTime === 'string') {
+      const ms = Date.parse(rawCreatedDateTime);
+      return Number.isFinite(ms) ? ms : null;
+    }
+    if (
+      rawCreatedDateTime !== null &&
+      typeof rawCreatedDateTime === 'object' &&
+      'toMillis' in rawCreatedDateTime &&
+      typeof (rawCreatedDateTime as { toMillis: unknown }).toMillis ===
+        'function'
+    ) {
+      try {
+        const ms = (
+          rawCreatedDateTime as { toMillis: () => number }
+        ).toMillis();
+        return Number.isFinite(ms) ? ms : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  })();
+  if (millis === null) return null;
+  const r = RideListCursor.create({
+    createdAtMillis: millis,
+    docId: lastDocId,
+  });
+  return r.ok ? r.value : null;
+}
 
 /**
  * Concrete `RideRepository` backed by `@react-native-firebase/firestore` +
@@ -175,26 +239,34 @@ export class FirestoreRideRepository implements RideRepository {
     passengerId: UserId;
     statuses?: readonly RideStatus[];
     limit?: number;
-  }): Promise<Result<readonly Ride[], NetworkError>> {
+    cursor?: RideListCursor;
+  }): Promise<Result<RidePage, NetworkError>> {
     try {
-      const baseQ = query(
-        collection(this.firestore, TRIPS),
+      const cursorIsoR = args.cursor
+        ? cursorToIsoString(args.cursor)
+        : Result.ok(null);
+      if (!cursorIsoR.ok) {
+        return Result.err(
+          new NetworkError({
+            code: 'ride_list_cursor_malformed',
+            message: 'RideListCursor could not be decoded',
+            cause: cursorIsoR.error,
+          }),
+        );
+      }
+      const clauses: QueryConstraint[] = [
         where('passenger.id', '==', String(args.passengerId)),
         orderBy('createdDateTime', 'desc'),
-      );
-      const q = args.limit ? query(baseQ, fsLimit(args.limit)) : baseQ;
+      ];
+      if (cursorIsoR.value !== null) {
+        clauses.push(startAfter(cursorIsoR.value));
+      }
+      if (args.limit) {
+        clauses.push(fsLimit(args.limit));
+      }
+      const q = query(collection(this.firestore, TRIPS), ...clauses);
       const snap = await getDocs(q);
-      const out: Ride[] = [];
-      snap.forEach((d) => {
-        const r = this.toDomainOrCorrupt(d.id, d.data());
-        if (!r.ok) return;
-        // Apply the optional status filter client-side. Firestore can't
-        // combine `passenger.id ==` + `status in` in one query without a
-        // composite index, and statuses is a client-defined slice anyway.
-        if (args.statuses && !args.statuses.includes(r.value.status)) return;
-        out.push(r.value);
-      });
-      return Result.ok(out);
+      return Result.ok(this.buildPage(snap, args.statuses, args.limit));
     } catch (e) {
       logger.warn('listByPassenger failed', { code: errCode(e) });
       return Result.err(
@@ -211,27 +283,38 @@ export class FirestoreRideRepository implements RideRepository {
     driverId: UserId;
     statuses?: readonly RideStatus[];
     limit?: number;
-  }): Promise<Result<readonly Ride[], NetworkError>> {
+    cursor?: RideListCursor;
+  }): Promise<Result<RidePage, NetworkError>> {
     try {
       // Mirrors listByPassenger: equality on `driver.id`, server-side
       // ordering by createdDateTime desc. Optional status filter applied
       // client-side to avoid a composite index requirement (legacy did
       // the same — keeps the rewrite query-pattern-compatible).
-      const baseQ = query(
-        collection(this.firestore, TRIPS),
+      const cursorIsoR = args.cursor
+        ? cursorToIsoString(args.cursor)
+        : Result.ok(null);
+      if (!cursorIsoR.ok) {
+        return Result.err(
+          new NetworkError({
+            code: 'ride_list_cursor_malformed',
+            message: 'RideListCursor could not be decoded',
+            cause: cursorIsoR.error,
+          }),
+        );
+      }
+      const clauses: QueryConstraint[] = [
         where('driver.id', '==', String(args.driverId)),
         orderBy('createdDateTime', 'desc'),
-      );
-      const q = args.limit ? query(baseQ, fsLimit(args.limit)) : baseQ;
+      ];
+      if (cursorIsoR.value !== null) {
+        clauses.push(startAfter(cursorIsoR.value));
+      }
+      if (args.limit) {
+        clauses.push(fsLimit(args.limit));
+      }
+      const q = query(collection(this.firestore, TRIPS), ...clauses);
       const snap = await getDocs(q);
-      const out: Ride[] = [];
-      snap.forEach((d) => {
-        const r = this.toDomainOrCorrupt(d.id, d.data());
-        if (!r.ok) return;
-        if (args.statuses && !args.statuses.includes(r.value.status)) return;
-        out.push(r.value);
-      });
-      return Result.ok(out);
+      return Result.ok(this.buildPage(snap, args.statuses, args.limit));
     } catch (e) {
       logger.warn('listByDriver failed', { code: errCode(e) });
       return Result.err(
@@ -242,6 +325,50 @@ export class FirestoreRideRepository implements RideRepository {
         }),
       );
     }
+  }
+
+  /**
+   * Convert a Firestore query snapshot into a RidePage. Applies the
+   * optional client-side status filter, then computes `nextCursor` from
+   * the last raw doc (BEFORE the status filter, so the cursor advances
+   * correctly even when the status filter shrinks the visible page —
+   * matches the legacy "client-side filter may shrink a page below the
+   * requested limit" pattern; the caller's `useInfiniteQuery` issues
+   * follow-up pages if it cares about a strict count).
+   */
+  private buildPage(
+    // typed loosely so we don't drag the modular SDK QuerySnapshot type
+    // through every method signature; the only operations we need are
+    // `size`, iteration, and `id` / `data()` on each doc.
+    snap: {
+      size: number;
+      forEach: (cb: (d: { id: string; data: () => unknown }) => void) => void;
+    },
+    statuses: readonly RideStatus[] | undefined,
+    limit: number | undefined,
+  ): RidePage {
+    const out: Ride[] = [];
+    let lastId: string | null = null;
+    let lastCreatedDateTime: unknown = null;
+    snap.forEach((d) => {
+      // Track the BOUNDARY doc regardless of status-filter outcome —
+      // see method docstring for why.
+      lastId = d.id;
+      const data = d.data();
+      if (data && typeof data === 'object' && 'createdDateTime' in data) {
+        lastCreatedDateTime = (data as { createdDateTime: unknown })
+          .createdDateTime;
+      }
+      const r = this.toDomainOrCorrupt(d.id, data);
+      if (!r.ok) return;
+      if (statuses && !statuses.includes(r.value.status)) return;
+      out.push(r.value);
+    });
+    const nextCursor =
+      limit !== undefined && snap.size === limit && lastId !== null
+        ? buildCursor(lastCreatedDateTime, lastId)
+        : null;
+    return { rides: out, nextCursor };
   }
 
   subscribeAvailableRides(args: {

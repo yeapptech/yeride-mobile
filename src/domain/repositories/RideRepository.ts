@@ -2,6 +2,7 @@ import type { CancellationReason } from '../entities/CancellationReason';
 import type { Coordinates } from '../entities/Coordinates';
 import type { Ride } from '../entities/Ride';
 import type { RideId } from '../entities/RideId';
+import type { RideListCursor, RidePage } from '../entities/RideListCursor';
 import type { RideServiceId } from '../entities/RideServiceId';
 import type { TripEvent } from '../entities/TripEvent';
 import type { TripPayment } from '../entities/TripPayment';
@@ -71,29 +72,51 @@ export interface RideRepository {
   >;
 
   /**
-   * Trips for the given passenger, optionally filtered to a status set.
-   * Used by the rider's history + in-progress lists.
+   * Trips for the given passenger, optionally filtered to a status set,
+   * capped at `limit`, and starting after the given `cursor`.
+   *
+   * Returns a `RidePage` carrying both the rows AND a `nextCursor`
+   * (`null` when the end has been reached). The cursor is opaque to
+   * callers — only this repository's adapter knows how to interpret it.
+   *
+   * Used by:
+   *   - `useInProgressRideQuery` — RiderHome resumption (`statuses:
+   *     [active]`, `limit: 1`), reads `page.rides[0]`.
+   *   - Activity tab (Turn 6) — paginated history via
+   *     `useInfiniteQuery` keyed on `nextCursor`.
+   *
+   * Note: the client-side `statuses` filter can shrink a page below the
+   * requested `limit`. Callers that need a strict count should issue
+   * follow-up pages — matches legacy behavior.
    */
   listByPassenger(args: {
     passengerId: UserId;
     statuses?: readonly Ride['status'][];
     limit?: number;
-  }): Promise<Result<readonly Ride[], NetworkError>>;
+    cursor?: RideListCursor;
+  }): Promise<Result<RidePage, NetworkError>>;
 
   /**
-   * Trips for the given driver, optionally filtered to a status set.
-   * Used by the driver's history + in-progress (DriverHome resumption).
+   * Trips for the given driver, optionally filtered to a status set,
+   * capped at `limit`, and starting after the given `cursor`.
    *
    * Rides with no driver yet (`driver === null`, the awaiting_driver
    * state) are excluded — this method is "rides this driver has accepted
    * or completed", not "rides this driver could accept" (that's
    * `subscribeAvailableRides`).
+   *
+   * Used by:
+   *   - `useInProgressDriverRideQuery` — DriverHome resumption
+   *     (`statuses: [active]`, `limit: 1`), reads `page.rides[0]`.
+   *   - Driver Activity tab (Turn 6) — paginated history via
+   *     `useInfiniteQuery` keyed on `nextCursor`.
    */
   listByDriver(args: {
     driverId: UserId;
     statuses?: readonly Ride['status'][];
     limit?: number;
-  }): Promise<Result<readonly Ride[], NetworkError>>;
+    cursor?: RideListCursor;
+  }): Promise<Result<RidePage, NetworkError>>;
 
   /**
    * Live "rides near me" subscription for drivers. The adapter is

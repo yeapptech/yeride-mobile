@@ -1,6 +1,6 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
 **Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
@@ -27,7 +27,7 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 closures:** **4 ❌ rows, 1 🟡 row, 0 ⚠️ rows**
+**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 closures:** **3 ❌ rows, 0 🟡 rows, 0 ⚠️ rows**
 block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
 highest-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js`
 to inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next
@@ -116,10 +116,16 @@ updatedAt` (with the DTO accepting BOTH the canonical flat shape
   12.1.0, a major-version bump past the patched 11.0.2) but needs a
   real Xcode 26 build to confirm — see §4 ⚠️ retained for this one.
 
-The biggest user-facing gaps remain **chat** and **activity / trip
-history** — both placeholder-only in the rewrite. **Scheduled
-rides** has its backend pieces and read-paths ported but is missing
-the rider-side creation UI.
+The biggest user-facing gap remaining is **chat** (placeholder-only
+in the rewrite). **Scheduled rides** has its backend pieces and
+read-paths ported but is missing the rider-side creation UI.
+**Activity / trip history** closed in Turn 6 (2026-05-19) — both
+rider and driver tabs now render the real `ActivityScreen` /
+`DriverActivityScreen` (paginated recent-rides + status-aware
+navigation) with terminal-status taps routing to a new role-
+agnostic `TripDetailScreen` carrying trip route, role-flipped
+party header, per-trip events, and the new `TripPaymentsList`
+component (per §3.6 fold-in). See `docs/PHASE_10_TURN_6.md`.
 
 The **delivery flow** (DeliverService / DeliverSelect /
 DeliverMonitor) is NOT a real gap — all three screens are
@@ -263,39 +269,65 @@ Phase 10.x turn required. Size: medium (~2-3 days).
 - Add new use case `ObserveScheduledRides` mirroring legacy's
   `subscribeToRiderScheduledRides`.
 
-### 3.3 Activity / trip history — ❌ both rider and driver
+### 3.3 Activity / trip history — ✅ closed in Turn 6 (2026-05-19)
 
 **Legacy:** Activity tab on BOTH rider and driver renders `TripHistory.js`,
-which composes:
+which renders `<RecentTrips/>` — a `useFocusEffect`-scoped
+`onSnapshot` subscription to
+`subscribeToPassengerRecentTrips` / `subscribeToDriverRecentTrips`
+(limit 10, `orderBy createdDateTime desc`). Row taps route to
+either `TripPreviewModal` (terminal-status trips) or
+`RideMonitor` / `DriverMonitor` (active trips). The audit v1
+framing of "TripHistory composes InProgressTrips + ScheduledTrips
 
-- `InProgressTrips.js` — active trips (subscribes via Firestore)
-- `ScheduledTrips.js` — scheduled but not-yet-started rides (rider only)
-- `RecentTrips.js` — completed trips, paginated
+- RecentTrips" was incorrect — `InProgressTrips.js` +
+  `ScheduledTrips.js` render on `RiderHome` / `DriverHome`, NOT on
+  Activity. Verified at Turn 6 kickoff.
 
-Plus `TripList.js`, `EventItem.js`, `Events.js` for the per-trip view.
+**Turn 6 (2026-05-19):** Replaced both placeholders with paginated
+recent-rides surfaces. Decisions captured in
+`docs/PHASE_10_TURN_6.md` §B:
 
-**Rewrite:** `ActivityPlaceholderScreen.tsx` (rider) +
-`DriverActivityPlaceholderScreen.tsx` (driver). Both are
-explicit placeholders.
+- **Decision 1 (a)** — Activity = recent-rides only (parity).
+- **Decision 2 (a)** — no in-progress section on Activity (the
+  rewrite auto-redirects via `useInProgressRideQuery` so a list
+  would be dead UI).
+- **Decision 3 (b)** — scheduled-rides section deferred to Turn 7
+  (alongside the rider-side creation UI).
+- **Decision 4 (b)** — new role-agnostic `TripDetailScreen` mounted
+  on both stacks (mirrors legacy `TripPreviewModal` symmetry).
+- **Decision 5 (a)** — extended `listByPassenger` / `listByDriver`
+  with optional `cursor: RideListCursor`; three callsite migrations
+  (`useInProgressRideQuery`, `useInProgressDriverRideQuery`,
+  `useRidesByPassengerQuery`).
+- **Decision 6 (a)** — `useInfiniteQuery` + focus-refetch (history
+  doesn't mutate after closure; cursor pagination is cleaner than
+  live `onSnapshot`).
 
-**Verdict:** ❌ — large user-facing gap. Users currently on the
-legacy app rely on the Activity tab to see past trips, receipts,
-and (rider only) scheduled rides. Phase 10.x turn required.
-Size: large (~3-5 days, possibly two turns: one per role).
+**Drift from kickoff item 4:** the rewrite's `rideMapper` collapses
+legacy `closed` / `passenger_canceled` / `driver_canceled` into
+domain `completed` / `cancelled`, and `payment_failed` stays on
+`RideMonitor` (PaymentFailedView lets the rider retry). So the
+terminal-for-nav-switch set is `['completed', 'cancelled']`, not
+the kickoff's five-status list. Documented in
+`docs/PHASE_10_TURN_6.md` §A.
 
-**Phase 10 turn scope:**
+**Patch shape:** new domain `RideListCursor` VO + `RidePage` type;
+`FirestoreRideRepository` paginated reads via `startAfter(<iso>)`;
+in-memory fake mirror; `ListRidesByPassenger` / `ListRidesByDriver`
+return `Result<RidePage, NetworkError>`; new components
+`TripCard`, `TripList`, `TripPaymentsList` (folded in per §3.6);
+new view-models `useActivityViewModel`, `useDriverActivityViewModel`,
+`useTripDetailViewModel`; new screens `ActivityScreen`,
+`DriverActivityScreen`, `TripDetailScreen` (in
+`src/presentation/features/shared/screens/`); tab-navigator swap
+on both stacks; `TripDetail: { rideId: string }` route added to
+both `RiderStackParamList` and `DriverStackParamList`. Placeholders
 
-- Build `ActivityScreen.tsx` + `DriverActivityScreen.tsx` to replace
-  placeholders.
-- Use-cases: `ObserveInProgressRides(role)`,
-  `ObserveScheduledRides(role)` (shared with §3.2),
-  `PaginateRecentRides(role, cursor)`.
-- View-model: per-screen `useActivityViewModel`,
-  `useDriverActivityViewModel`.
-- Per-trip detail view from the list (deep link into
-  `RideMonitorScreen` for active, `RideReceiptScreen` for completed).
-- Pagination strategy: TanStack Query `useInfiniteQuery` against
-  Firestore cursor-based pagination.
+- placeholder tests scheduled for git-tracked deletion at commit
+  time (sandbox unlink-EPERM workaround). ~66 new tests across all
+  four layers; zero regressions outside Turn 9's 21 carry-over
+  BG-geolocation failures.
 
 ### 3.4 Chat / messaging — ❌ deferred at Phase 3.5
 
@@ -405,7 +437,7 @@ yeride clients keep reading ETA correctly during cutover.
 See `docs/PHASE_10_TURN_5.md` for the patch shape, test counts,
 and full evidence chain.
 
-### 3.6 Wallet & per-trip TransactionHistory — 🟡 (Turn 1: re-characterized)
+### 3.6 Wallet & per-trip TransactionHistory — ✅ closed in Turn 6 (2026-05-19)
 
 **Verified Turn 1 — the v1 framing was misleading.** Legacy
 `TransactionHistory.js` is NOT a Wallet-level history. It's a
@@ -450,27 +482,17 @@ use cases (`GetDriverBalance`, `ListDriverPayouts`,
 `ListBalanceTransactions`) wired and the `DriverEarningsScreen`
 shipped in Phase 6 — ✅ at parity.
 
-**Verdict:** 🟡 — Wallet itself is at parity. The per-trip
-TransactionHistory list IS missing, but it belongs in the §3.3
-Activity-tab port (specifically the trip-detail view that Activity
-navigates to). The rewrite already has `ObserveTripPayments` use
-case + `tripPaymentMapper` shipped (Phase 9), so the data layer is
-ready; only the UI component needs to be built when §3.3 lands.
-
-**Phase 10 turn scope (folded into §3.3):**
-
-- Discovered data path: `subscribeToTripPayments(tripId, callback)`
-  → `trips/{tripId}/payments` subcollection → rewrite already
-  exposes this via `ObserveTripPayments` (callable as a use case)
-  - `tripPaymentMapper`.
-- UI work: when building the trip-detail view inside the §3.3
-  Activity-tab port, render a `TripPaymentsList` component that
-  consumes `ObserveTripPayments(tripId)`. Mirror legacy's payment-
-  type chips (fare / tip / refund / cancellation), status badges
-  (`succeeded` / `pending` / `failed` / `refunded`), and the
-  total-summed footer.
-- No new repository / use case needed — the wiring is already in
-  place from Phase 9.
+**Verdict:** ✅ closed in Turn 6 (2026-05-19) via the §3.3 fold-in.
+Wallet itself was already at parity. The per-trip
+TransactionHistory list shipped in Turn 6 as
+`TripPaymentsList` (`src/presentation/components/trip/`), consuming
+the already-shipped `ObserveTripPayments` use case + `tripPaymentMapper`.
+Composed into the new `TripDetailScreen`. Renders type chips
+(`fare` / `tip` / `refund`), status badges (`succeeded` / `failed` /
+`refunded`), per-row amount, and a total-summed footer
+(`succeeded` fare + tip − `succeeded` refund). Total math runs in
+`Money` minor units — no floats, no currency mixing. See
+`docs/PHASE_10_TURN_6.md`.
 
 ### 3.7 Trip preview — ✅ verified (Turn 1)
 
@@ -644,18 +666,18 @@ Cloud-Function-mediated writes):
 Turn 1 closed 2026-05-18 (this audit's verification pass + the
 one-line `audio` UIBackgroundMode restoration). Remaining turns:
 
-| #     | Turn                                                                                                                                                                                                                                                                                                                                                | Driver                                | Size                    | Blocked by                                                                          |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
-| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                        | small (1d)              | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                  |
-| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~      | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)             |
-| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                         | ~~**Production blocker — Android**~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)               |
-| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)               |
-| ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                        | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`) |
-| 6     | **Activity tab — rider + driver** (§3.3) — placeholder → real screen with InProgressTrips / ScheduledTrips / RecentTrips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).                                                                                                                             | Largest user-facing gap               | large (3-5d)            | —                                                                                   |
-| 7     | **Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.                                                                                                                                       | Existing feature regression risk      | medium (2-3d)           | partly (6) for the listing                                                          |
-| 8     | **Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.                                                                                                                                                                                                      | Existing feature regression risk      | medium (2-3d)           | —                                                                                   |
-| 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate       | small (1d)              | —                                                                                   |
-| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                             |
+| #     | Turn                                                                                                                                                                                                                                                                                                                                                | Driver                                | Size                    | Blocked by                                                                                                                                   |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                        | small (1d)              | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                                                                           |
+| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~      | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)                                                                      |
+| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                         | ~~**Production blocker — Android**~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)                                                                        |
+| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)                                                                        |
+| ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                        | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
+| ~~6~~ | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                           | ~~Largest user-facing gap~~           | ~~large (3-5d)~~        | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
+| 7     | **Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.                                                                                                                                       | Existing feature regression risk      | medium (2-3d)           | partly (6) for the listing                                                                                                                   |
+| 8     | **Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.                                                                                                                                                                                                      | Existing feature regression risk      | medium (2-3d)           | —                                                                                                                                            |
+| 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate       | small (1d)              | —                                                                                                                                            |
+| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                                                                                      |
 
 **Estimated total:** ~10-15 days of work before
 [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §6 staged
