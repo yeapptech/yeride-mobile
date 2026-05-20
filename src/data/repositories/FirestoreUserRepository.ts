@@ -15,6 +15,7 @@ import {
   ref as storageRef,
   getDownloadURL,
 } from '@react-native-firebase/storage';
+import { ZodError } from 'zod';
 
 import type { SavedPlace, SavedPlaceId } from '@domain/entities/SavedPlace';
 import type { User } from '@domain/entities/User';
@@ -250,9 +251,29 @@ export class FirestoreUserRepository implements UserRepository {
   ): Result<User, NotFoundError> {
     const parsed = parseUserDoc(raw);
     if (!parsed.ok) {
+      // Pull the underlying ZodError out of `cause` so we can log the
+      // exact issue path(s) — without this, every legacy field-shape
+      // mismatch surfaces as the same opaque "did not match expected
+      // shape" string and we can't tell which field is failing.
+      const cause = parsed.error.cause;
+      const issues =
+        cause instanceof ZodError
+          ? cause.issues.map((i) => ({
+              path: i.path.join('.'),
+              code: i.code,
+              message: i.message,
+              // `received` is present on most issue codes (zod 4) and is
+              // the cheapest hint as to what the raw doc looked like.
+              received:
+                'received' in i
+                  ? (i as { received?: unknown }).received
+                  : undefined,
+            }))
+          : [];
       logger.error('user doc failed schema validation', {
         userId: String(id),
         cause: parsed.error.message,
+        issues,
       });
       // Schema-invalid doc — surface as not_found rather than crashing the
       // session. Should never happen in practice; if it does, the user

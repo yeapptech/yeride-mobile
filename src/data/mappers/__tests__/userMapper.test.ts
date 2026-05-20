@@ -96,7 +96,11 @@ describe('parseUserDoc', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('rejects out-of-range coordinates', () => {
+  it('drops a savedPlaces entry with out-of-range coordinates rather than failing the whole doc', () => {
+    // Contract: a single malformed savedPlaces entry must not crash the
+    // whole user-doc parse — otherwise a legacy account with one bad
+    // entry can't log in. The bad entry is silently dropped; legitimate
+    // entries are preserved.
     const r = parseUserDoc({
       email: 'x@y.com',
       firstName: 'X',
@@ -108,12 +112,131 @@ describe('parseUserDoc', () => {
           place_id: 'home',
           label: 'Home',
           address: '1 Main St',
-          latitude: 91,
+          latitude: 91, // out of range — entry should be dropped
           longitude: 0,
+        },
+        {
+          place_id: 'work',
+          label: 'Work',
+          address: '2 Market St',
+          latitude: 37.78,
+          longitude: -122.4,
         },
       ],
     });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.savedPlaces).toHaveLength(1);
+      expect(r.value.savedPlaces[0]?.place_id).toBe('work');
+    }
+  });
+
+  it('normalizes a legacy raw-Google-Places savedPlaces entry to the canonical shape', () => {
+    // Legacy `yeride/src/rider/screens/RideRouteSearch.js:onSavePlace` writes
+    // the raw Google Places autocomplete object (`name`,
+    // `formatted_address`, `geometry.location.{lat,lng}`, `vicinity`,
+    // `description`, `types`) directly onto `users/{uid}.savedPlaces[]`.
+    // The DTO preprocessor must translate these to the canonical
+    // `{place_id, label, address, latitude, longitude}` shape so legacy
+    // riders can log in.
+    const r = parseUserDoc({
+      email: 'x@y.com',
+      firstName: 'X',
+      lastName: 'Y',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      savedPlaces: [
+        {
+          place_id: 'ChIJ_homE_123',
+          name: 'Home',
+          formatted_address: '1 Main St, Anytown, CA 94000, USA',
+          vicinity: '1 Main St',
+          description: 'Home',
+          geometry: { location: { lat: 37.4275, lng: -122.1697 } },
+          types: ['street_address'],
+        },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.savedPlaces).toHaveLength(1);
+      expect(r.value.savedPlaces[0]).toEqual({
+        place_id: 'ChIJ_homE_123',
+        label: 'Home',
+        address: '1 Main St, Anytown, CA 94000, USA',
+        latitude: 37.4275,
+        longitude: -122.1697,
+      });
+    }
+  });
+
+  it('falls back to vicinity / description on a legacy savedPlaces entry missing name and formatted_address', () => {
+    const r = parseUserDoc({
+      email: 'x@y.com',
+      firstName: 'X',
+      lastName: 'Y',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      savedPlaces: [
+        {
+          place_id: 'ChIJ_x',
+          description: 'Some Place',
+          vicinity: 'Vicinity Street',
+          geometry: { location: { lat: 1, lng: 2 } },
+        },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.savedPlaces[0]).toEqual({
+        place_id: 'ChIJ_x',
+        label: 'Some Place',
+        address: 'Vicinity Street',
+        latitude: 1,
+        longitude: 2,
+      });
+    }
+  });
+
+  it('accepts a Firestore Timestamp on createdDateTime and converts it to an ISO string', () => {
+    // Some legacy accounts were written with `serverTimestamp()` rather
+    // than `new Date().toISOString()`, so `createdDateTime` arrives as a
+    // Firestore `Timestamp` instance (has `.toDate()` method, no string
+    // type). The DTO preprocessor must convert.
+    const fakeTimestamp = {
+      seconds: Math.floor(FIXED_NOW.getTime() / 1000),
+      nanoseconds: 0,
+      toDate: () => FIXED_NOW,
+    };
+    const r = parseUserDoc({
+      email: 'x@y.com',
+      firstName: 'X',
+      lastName: 'Y',
+      role: 'rider',
+      createdDateTime: fakeTimestamp,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.createdDateTime).toBe(FIXED_NOW.toISOString());
+    }
+  });
+
+  it('accepts a Firestore Timestamp on updatedDateTime', () => {
+    const fakeTimestamp = {
+      toDate: () => FIXED_NOW,
+    };
+    const r = parseUserDoc({
+      email: 'x@y.com',
+      firstName: 'X',
+      lastName: 'Y',
+      role: 'rider',
+      createdDateTime: FIXED_NOW.toISOString(),
+      updatedDateTime: fakeTimestamp,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.updatedDateTime).toBe(FIXED_NOW.toISOString());
+    }
   });
 });
 
