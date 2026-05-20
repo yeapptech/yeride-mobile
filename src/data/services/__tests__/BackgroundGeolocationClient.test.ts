@@ -46,6 +46,23 @@ interface BgMock {
 
 const sdk = BackgroundGeolocation as unknown as BgMock;
 
+/**
+ * Helper: construct the adapter with the dev-mode short-circuit
+ * disabled so the native-path code runs against the SDK mock.
+ *
+ * Phase 10 Turn 9 — `BackgroundGeolocationClient`'s `__DEV__` short-
+ * circuits (Android-emulator `tslocationmanager:4.1.5` workaround)
+ * are gated on a constructor flag `skipNativeInDev` (default `true`).
+ * jest-expo's preset sets `__DEV__ === true`, so a bare
+ * `new BackgroundGeolocationClient()` would short-circuit every
+ * gated method and the SDK mock would never see a call. Tests that
+ * exercise the SDK mock construct via this helper instead. The
+ * default-flag (workaround-engagement) behavior is pinned by the
+ * `skipNativeInDev default` describe block below.
+ */
+const makeClient = (): BackgroundGeolocationClient =>
+  new BackgroundGeolocationClient({ skipNativeInDev: false });
+
 const validRideId = (): RideId => {
   const r = RideId.create('ride-abc-12345');
   if (!r.ok) throw new Error('test setup: bad rideId');
@@ -143,7 +160,7 @@ beforeEach(() => {
 describe('BackgroundGeolocationClient', () => {
   describe('init', () => {
     it('calls SDK ready with reset:true and the legacy config flags', async () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.init({ distanceFilter: 200 });
 
       expect(result.ok).toBe(true);
@@ -162,7 +179,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('is idempotent — second init is a no-op', async () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       await client.init({ distanceFilter: 200 });
       await client.init({ distanceFilter: 200 });
       expect(sdk.ready).toHaveBeenCalledTimes(1);
@@ -170,7 +187,7 @@ describe('BackgroundGeolocationClient', () => {
 
     it('returns NetworkError when ready throws', async () => {
       sdk.ready.mockRejectedValueOnce(new Error('native crash'));
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.init({ distanceFilter: 200 });
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -182,21 +199,21 @@ describe('BackgroundGeolocationClient', () => {
   describe('start / stop', () => {
     it('start no-ops when SDK reports already enabled', async () => {
       sdk.getState.mockResolvedValueOnce({ enabled: true, odometer: 0 });
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.start();
       expect(result.ok).toBe(true);
       expect(sdk.start).not.toHaveBeenCalled();
     });
 
     it('start invokes SDK start when disabled', async () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.start();
       expect(result.ok).toBe(true);
       expect(sdk.start).toHaveBeenCalledTimes(1);
     });
 
     it('stop calls the SDK and clears dedup keys', async () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.stop();
       expect(result.ok).toBe(true);
       expect(sdk.stop).toHaveBeenCalledTimes(1);
@@ -205,7 +222,7 @@ describe('BackgroundGeolocationClient', () => {
 
   describe('addPickupGeofence', () => {
     it('registers identifier "pickup" with extras.rideId and the supplied radius', async () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.addPickupGeofence({
         location: validCoords(),
         radiusMeters: 200,
@@ -225,7 +242,7 @@ describe('BackgroundGeolocationClient', () => {
 
     it('returns NetworkError when SDK throws', async () => {
       sdk.addGeofence.mockRejectedValueOnce(new Error('OS denied'));
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.addPickupGeofence({
         location: validCoords(),
         radiusMeters: 200,
@@ -240,7 +257,7 @@ describe('BackgroundGeolocationClient', () => {
 
   describe('subscribeToLocation', () => {
     it('registers exactly one SDK listener regardless of subscriber count', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const a = jest.fn();
       const b = jest.fn();
       const disposeA = client.subscribeToLocation(a);
@@ -251,7 +268,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('dedupes 3 multi-fires with the same (lat,lng,ts,odometer) to a single callback emission', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToLocation(cb);
 
@@ -271,7 +288,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('passes through distinct fires (different timestamp)', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToLocation(cb);
 
@@ -287,7 +304,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('returns a synchronous disposer that tears down the SDK listener when last subscriber leaves', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToLocation(cb);
 
@@ -307,7 +324,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('emits null speed when the SDK reports a negative speed sentinel', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToLocation(cb);
       sdk.__emitLocation(sampleSdkLocation({ speed: -1 }));
@@ -319,7 +336,7 @@ describe('BackgroundGeolocationClient', () => {
 
   describe('subscribeToGeofence', () => {
     it('dedupes consecutive identical (identifier,action,rideId) fires', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToGeofence(cb);
 
@@ -336,7 +353,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('treats ENTER and EXIT for the same rideId as distinct events', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToGeofence(cb);
 
@@ -348,7 +365,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('exposes rideId as null when extras are missing', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToGeofence(cb);
       sdk.__emitGeofence(sampleSdkGeofence({ rideId: null }));
@@ -358,7 +375,7 @@ describe('BackgroundGeolocationClient', () => {
     });
 
     it('ignores unknown actions (e.g. DWELL) without emitting', () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const cb = jest.fn();
       const dispose = client.subscribeToGeofence(cb);
       sdk.__emitGeofence({
@@ -373,14 +390,14 @@ describe('BackgroundGeolocationClient', () => {
   describe('odometer + permission', () => {
     it('getOdometer returns the SDK numeric value wrapped in Result.ok', async () => {
       sdk.getOdometer.mockResolvedValueOnce(5_432);
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
       const result = await client.getOdometer();
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.value).toBe(5_432);
     });
 
     it('requestAuthorizationIfNeeded maps SDK status enum to string union', async () => {
-      const client = new BackgroundGeolocationClient();
+      const client = makeClient();
 
       sdk.requestPermission.mockResolvedValueOnce(
         sdk.AUTHORIZATION_STATUS_ALWAYS,
@@ -432,7 +449,7 @@ describe('BackgroundGeolocationClient', () => {
       const transport = new CrashlyticsLogTransport(fakeCrash);
       LOG.addTransport(transport);
       try {
-        const client = new BackgroundGeolocationClient();
+        const client = makeClient();
         const cb = jest.fn();
         const dispose = client.subscribeToLocation(cb);
 
@@ -473,7 +490,7 @@ describe('BackgroundGeolocationClient', () => {
       const transport = new CrashlyticsLogTransport(fakeCrash);
       LOG.addTransport(transport);
       try {
-        const client = new BackgroundGeolocationClient();
+        const client = makeClient();
         const cb = jest.fn();
         const dispose = client.subscribeToLocation(cb);
 
@@ -498,7 +515,7 @@ describe('BackgroundGeolocationClient', () => {
       const transport = new CrashlyticsLogTransport(fakeCrash);
       LOG.addTransport(transport);
       try {
-        const client = new BackgroundGeolocationClient();
+        const client = makeClient();
         const cb = jest.fn();
         const dispose = client.subscribeToLocation(cb);
 
@@ -541,7 +558,7 @@ describe('BackgroundGeolocationClient', () => {
       const transport = new CrashlyticsLogTransport(fakeCrash);
       LOG.addTransport(transport);
       try {
-        const client = new BackgroundGeolocationClient();
+        const client = makeClient();
         const seededError = new Error('subscriber-bug');
         const throwingCb = jest.fn(() => {
           throw seededError;
@@ -577,7 +594,7 @@ describe('BackgroundGeolocationClient', () => {
       const transport = new CrashlyticsLogTransport(fakeCrash);
       LOG.addTransport(transport);
       try {
-        const client = new BackgroundGeolocationClient();
+        const client = makeClient();
         const seededError = new Error('geofence-subscriber-bug');
         const throwingCb = jest.fn(() => {
           throw seededError;
@@ -601,6 +618,32 @@ describe('BackgroundGeolocationClient', () => {
       } finally {
         LOG.removeTransport(transport);
       }
+    });
+  });
+
+  /**
+   * Phase 10 Turn 9 — pin the default-flag (workaround-engagement)
+   * behavior. With `skipNativeInDev` left default (`true`), the
+   * adapter must short-circuit every gated method without touching
+   * the SDK mock when jest-expo's `__DEV__ === true` is in effect.
+   * These two tests are the only thing exercising the dev-mode
+   * branch in jest — without them a future drive-by removal of the
+   * predicate would silently weaken the Android-emulator workaround
+   * (memory: `rn_bg_geolocation_v5_android_loop.md`).
+   */
+  describe('skipNativeInDev default (workaround engagement)', () => {
+    it('init with default opts does NOT call SDK ready and returns ok', async () => {
+      const client = new BackgroundGeolocationClient();
+      const result = await client.init({ distanceFilter: 200 });
+      expect(result.ok).toBe(true);
+      expect(sdk.ready).not.toHaveBeenCalled();
+    });
+
+    it('start with default opts does NOT call SDK start and returns ok', async () => {
+      const client = new BackgroundGeolocationClient();
+      const result = await client.start();
+      expect(result.ok).toBe(true);
+      expect(sdk.start).not.toHaveBeenCalled();
     });
   });
 });

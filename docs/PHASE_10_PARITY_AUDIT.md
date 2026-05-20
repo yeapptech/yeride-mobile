@@ -1,6 +1,6 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19 · Turn 7 closed 2026-05-19 · Turn 8 closed 2026-05-19
+**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19 · Turn 7 closed 2026-05-19 · Turn 8 closed 2026-05-19 · Turn 9 closed 2026-05-19
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
 **Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
@@ -27,7 +27,7 @@ follow before the gate is signed off.
 
 ## 1. Headline findings
 
-**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 + Turn 7 + Turn 8 closures:** **1 ❌ row, 0 🟡 rows, 0 ⚠️ rows**
+**v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 + Turn 7 + Turn 8 + Turn 9 closures:** **0 ❌ rows, 0 🟡 rows, 0 ⚠️ rows**
 block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
 highest-severity ❌ on 2026-05-18 by patching `withFirebasePodfileFix.js`
 to inject `$FirebaseSDKVersion = '12.12.0'`; Turn 3 closed the next
@@ -145,15 +145,17 @@ legacy wrappers point at functions that **don't exist on the
 server** — they're dead client code. The rewrite's narrower surface
 matches reality, not legacy.
 
-**Newly-discovered (Turn 1, §11):** a side-finding — 21 jest tests
-in `src/data/services/__tests__/BackgroundGeolocationClient.test.ts`
-fail at HEAD `f537773` due to the post-Phase-9 v5 SDK upgrade's
+**Newly-discovered (Turn 1, §11) — ✅ closed in Turn 9 (2026-05-19):**
+a side-finding — 21 jest tests in
+`src/data/services/__tests__/BackgroundGeolocationClient.test.ts`
+failed at HEAD `f537773` due to the post-Phase-9 v5 SDK upgrade's
 `__DEV__` short-circuit. Tests run with `__DEV__===true` (jest-expo
 default) and assert native paths were exercised — the short-circuit
-returns `Result.ok(true)` before reaching them. Not a parity
-regression, but **blocks cutover plan §3.1's "`npm run verify`
-green" gate** and must be resolved before the cutover SHA is
-selected.
+returned `Result.ok(true)` before reaching them. Turn 9 closed this
+via a constructor-flag path (`skipNativeInDev` defaults `true`;
+tests opt out with `false`). `npm run verify` is green at the
+post-Turn-9 SHA — cutover plan §3.1's gate clears. See §10.1 +
+`docs/PHASE_10_TURN_9.md`.
 
 ---
 
@@ -743,18 +745,18 @@ Cloud-Function-mediated writes):
 Turn 1 closed 2026-05-18 (this audit's verification pass + the
 one-line `audio` UIBackgroundMode restoration). Remaining turns:
 
-| #     | Turn                                                                                                                                                                                                                                                                                                                                                | Driver                                | Size                    | Blocked by                                                                                                                                   |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                           | Risk reduction                        | small (1d)              | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                                                                           |
-| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                               | ~~**Production blocker — iOS**~~      | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)                                                                      |
-| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                         | ~~**Production blocker — Android**~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)                                                                        |
-| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                          | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)                                                                        |
-| ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                        | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
-| ~~6~~ | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                           | ~~Largest user-facing gap~~           | ~~large (3-5d)~~        | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
-| ~~7~~ | ~~**Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.~~                                                                                                                                   | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (creation UI + listing + nav + native config; see `docs/PHASE_10_TURN_7.md`)                                        |
-| ~~8~~ | ~~**Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.~~                                                                                                                                                                                                  | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (ChatModal + ChatRepository + foreground suppression; see `docs/PHASE_10_TURN_8.md`)                                |
-| 9     | **Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path. | Unblocks cutover plan §3.1 gate       | small (1d)              | —                                                                                                                                            |
-| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                    | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                                                                                      |
+| #     | Turn                                                                                                                                                                                                                                                                                                                                                    | Driver                                | Size                    | Blocked by                                                                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                               | Risk reduction                        | small (1d)              | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                                                                           |
+| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                                   | ~~**Production blocker — iOS**~~      | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)                                                                      |
+| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                             | ~~**Production blocker — Android**~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)                                                                        |
+| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                              | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)                                                                        |
+| ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                            | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
+| ~~6~~ | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                               | ~~Largest user-facing gap~~           | ~~large (3-5d)~~        | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
+| ~~7~~ | ~~**Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.~~                                                                                                                                       | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (creation UI + listing + nav + native config; see `docs/PHASE_10_TURN_7.md`)                                        |
+| ~~8~~ | ~~**Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.~~                                                                                                                                                                                                      | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (ChatModal + ChatRepository + foreground suppression; see `docs/PHASE_10_TURN_8.md`)                                |
+| ~~9~~ | ~~**Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path.~~ | ~~Unblocks cutover plan §3.1 gate~~   | ~~small (1d)~~          | ✅ **CLOSED 2026-05-19** (constructor-flag path; see `docs/PHASE_10_TURN_9.md`)                                                              |
+| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                        | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                                                                                      |
 
 **Estimated total:** ~10-15 days of work before
 [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §6 staged
@@ -799,7 +801,7 @@ covered separately before §6 rollout:
 Items found while executing Turn 1's verification pass that weren't
 in the v1 audit and now block or accompany cutover.
 
-### 10.1 `BackgroundGeolocationClient` tests broken at HEAD — ❌
+### 10.1 `BackgroundGeolocationClient` tests broken at HEAD — ✅ closed in Turn 9 (2026-05-19)
 
 **Discovery:** `npm test` against HEAD `f537773` reports
 **21 failed / 1647 passed** across 188/189 suites. Every failure
@@ -816,13 +818,22 @@ short-circuit returns before reaching the SDK call.
 **Why it matters:** cutover plan §3.1 requires `npm run verify` green
 at the cutover SHA. Currently broken.
 
-**Verdict:** ❌ — scope Turn 9 (per §8). Likely fix shape: introduce
-a constructor flag `skipNativeInDev: boolean` and override it to
-`false` in the relevant test setup, OR replace the short-circuit
-with a dependency-injected "BG geolocation impl" seam (real / fake)
-that the tests already exercise via the existing
-`FakeBackgroundGeolocationClient`. Either approach restores native-
-path assertions without breaking the emulator workaround.
+**Closure (Turn 9, 2026-05-19):** Picked the constructor-flag path.
+`BackgroundGeolocationClient` now accepts an optional
+`constructor(opts?: { skipNativeInDev?: boolean })` with default
+`true`. The 9 `__DEV__` short-circuit sites (3 in-body workaround
+branches + 6 method-top early returns covering `init` / `start` /
+`stop` / `addPickupGeofence` / `removePickupGeofence` /
+`removeAllGeofences` / `subscribeToLocation` / `subscribeToGeofence`
+/ `requestAuthorizationIfNeeded`) flipped to
+`if (__DEV__ && this.skipNativeInDev)`. Test suite swapped every
+`new BackgroundGeolocationClient()` to a `makeClient()` helper that
+passes `false`; two new pin-tests guarantee the default-flag
+workaround stays engaged. Production / release builds run
+`__DEV__ === false` so the gate is unaffected there. Audit headline
+`1 ❌ → 0 ❌`; cutover plan §3.1 `npm run verify` green at
+post-Turn-9 SHA (1942 passing / 0 failing). See
+`docs/PHASE_10_TURN_9.md`.
 
 ### 10.2 NavSdk telemetry → live ETA never shipped — ✅ closed in Turn 5 (2026-05-18)
 

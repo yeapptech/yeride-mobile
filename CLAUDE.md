@@ -1,17 +1,24 @@
 # CLAUDE.md — AI Assistant Guide for YeRide-Next
 
-**Last updated:** 2026-05-11. Phase 9 closed (Turn 18 documented
-the SDK-seam vs. direct-consumption policy; Turn 17 shrank the
-ESLint `boundaries` override list from five entries to one; Turn 16
-shipped the receipt-PDF feature). One out-of-band chore landed on
-top of Phase 9: react-native-background-geolocation upgrade
-4.19.4 → 5.1.1 (resolves the v4 `rapidActivityLaunch` kill loop on
-the Android emulator; v5 introduces a separate
+**Last updated:** 2026-05-19. Phase 10 in flight — Turns 1-9 closed
+(audit-v2 verification + Firebase iOS SDK pin + Material theme +
+BGTaskScheduler retirement + rider live ETA + Activity tab + scheduled
+rides + chat + BG-geolocation test regression fix). Turn 10
+(audit-v3 + cutover sign-off) is the last remaining Phase 10 turn;
+`PHASE_10_CUTOVER_PLAN.md` §0 gate cleared pending its sign-off.
+Phase 9 closed (Turn 18 documented the SDK-seam vs. direct-consumption
+policy; Turn 17 shrank the ESLint `boundaries` override list from
+five entries to one; Turn 16 shipped the receipt-PDF feature). One
+out-of-band chore landed on top of Phase 9: react-native-background-geolocation
+upgrade 4.19.4 → 5.1.1 (resolves the v4 `rapidActivityLaunch` kill
+loop on the Android emulator; v5 introduces a separate
 `tslocationmanager:4.1.5` priority-translation regression which is
-sidestepped by the existing `__DEV__` short-circuit in the
-adapter — see `BackgroundGeolocationClient.ts` and the row in the
-Critical files table). Phase 10 (cutover from legacy yeride) is the
-next phase. See `docs/PHASE_*.md` for the per-turn record.
+sidestepped by the `__DEV__` short-circuit in the adapter, now
+gated on a `skipNativeInDev` constructor flag (default `true`) per
+Phase 10 Turn 9 so jest suites can opt out and exercise the
+native-path code — see `BackgroundGeolocationClient.ts` and the row
+in the Critical files table). See `docs/PHASE_*.md` for the
+per-turn record (latest: `PHASE_10_TURN_9.md`).
 
 **Codebase:** the clean-architecture rewrite of YeRide. New project
 at `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still
@@ -22,23 +29,23 @@ yet ported.
 
 ## Project status
 
-| Phase | Scope                                                                             | Status  |
-| ----- | --------------------------------------------------------------------------------- | ------- |
-| 0     | Tooling + scaffolding                                                             | ✅      |
-| 1     | Auth + user identity                                                              | ✅      |
-| 2     | Domain + data layer (service area, routes, ride, location, FareCalculator)        | ✅      |
-| 3     | Rider screens — RouteSearch / RouteSelect / RiderHome / RideMonitor / RideReceipt | ✅      |
-| 4     | Driver screens — DriverHome / DriverDispatch / DriverMonitor + cancel sheets      | ✅      |
-| 5     | Vehicle management — VehicleList / Registration / Photos / Details + NHTSA decode | ✅      |
-| 6     | Payments — Stripe SDK Wallet / Connect onboarding / tip flow                      | ✅      |
-| 7     | Background GPS — `BackgroundGeolocationClient` + `useGpsLifecycle` + geofence     | ✅      |
-| 8     | Driver in-app navigation — Google Navigation SDK                                  | ✅      |
-| 9     | Polish — push notifications, Crashlytics, telemetry, error boundary, receipt PDF  | ✅      |
-| 10    | Cutover from legacy yeride                                                        | Pending |
+| Phase | Scope                                                                             | Status |
+| ----- | --------------------------------------------------------------------------------- | ------ |
+| 0     | Tooling + scaffolding                                                             | ✅     |
+| 1     | Auth + user identity                                                              | ✅     |
+| 2     | Domain + data layer (service area, routes, ride, location, FareCalculator)        | ✅     |
+| 3     | Rider screens — RouteSearch / RouteSelect / RiderHome / RideMonitor / RideReceipt | ✅     |
+| 4     | Driver screens — DriverHome / DriverDispatch / DriverMonitor + cancel sheets      | ✅     |
+| 5     | Vehicle management — VehicleList / Registration / Photos / Details + NHTSA decode | ✅     |
+| 6     | Payments — Stripe SDK Wallet / Connect onboarding / tip flow                      | ✅     |
+| 7     | Background GPS — `BackgroundGeolocationClient` + `useGpsLifecycle` + geofence     | ✅     |
+| 8     | Driver in-app navigation — Google Navigation SDK                                  | ✅     |
+| 9     | Polish — push notifications, Crashlytics, telemetry, error boundary, receipt PDF  | ✅     |
+| 10    | Cutover from legacy yeride — Turns 1-9 closed; §0 gate cleared pending Turn 10    | 90%    |
 
 For the per-turn record (what shipped, why, test counts, rollback
 notes), read the most recent `docs/PHASE_*.md` before starting a
-turn. Latest is `docs/PHASE_9_TURN_18.md`.
+turn. Latest is `docs/PHASE_10_TURN_9.md`.
 
 ## Tech stack
 

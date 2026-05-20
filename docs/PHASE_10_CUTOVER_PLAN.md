@@ -1,12 +1,14 @@
 # Phase 10 — Cutover Plan
 
-**Status:** Draft v2 — runbook. **BLOCKED on feature-parity gate
-(§0)** as of 2026-05-18. Parity-audit Turn 1 closed 2026-05-18;
-Turns 2-9 still pending per `PHASE_10_PARITY_AUDIT.md` §8. Rollout
-(§6) does not begin until the parity audit clears.
+**Status:** Draft v2 — runbook. **§0 feature-parity gate cleared
+2026-05-19 pending Turn 10 sign-off.** Parity-audit Turns 1-9
+closed 2026-05-18 → 2026-05-19; Turn 10 (audit v3 re-run + sign-off)
+is the last remaining step before §6 staged rollout. See
+`PHASE_10_PARITY_AUDIT.md` §1 (headline `0 ❌ / 0 🟡 / 0 ⚠️`).
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
 **Drafted:** 2026-05-18 · revised 2026-05-18 with versioning +
-hotfix posture decisions · §0 status updated post-Turn-1 2026-05-18.
+hotfix posture decisions · §0 status updated post-Turn-1 2026-05-18 ·
+§0 gate cleared 2026-05-19 post-Turn-9.
 **Phase scope:** Half-sprint per REFACTOR_PLAN.md §6 — retire the
 legacy yeride app and ship the rewrite as the production binary.
 
@@ -19,9 +21,11 @@ this file as the prep work executes.
 
 ## 0. Pre-cutover gate — feature parity
 
-**Status: Turn 1 closed 2026-05-18 (verification pass + audit v2).
-Phase 10 rollout is still blocked on Turns 2-9 of the parity-audit
-turn plan (PHASE_10_PARITY_AUDIT.md §8).**
+**Status: GATE CLEARED 2026-05-19 pending Turn 10 audit-v3 sign-off.**
+Turns 1-9 of the parity-audit turn plan
+(`PHASE_10_PARITY_AUDIT.md` §8) all closed; headline is now
+**0 ❌ / 0 🟡 / 0 ⚠️**. Turn 10 (audit re-run + final sign-off)
+remains. When Turn 10 closes, §1 below takes over.
 
 The legacy app is in production and carries features that have not
 yet been ported to the rewrite. Until the rewrite reaches parity,
@@ -116,7 +120,12 @@ Connect / Play Console for review:
 ### 3.1 CI & verify gates
 
 - `npm run verify` (typecheck + lint + format + jest) green on
-  `main` at the cutover SHA.
+  `main` at the cutover SHA. **Status (2026-05-19, post-Turn-9):
+  verify green — 1942 passing / 0 failing. The §10.1 BG-geolocation
+  test regression is closed.** Only the 2 pre-existing
+  format-check warnings on out-of-scope files
+  (`docs/PHASE_10_TURN_7.md`, `RouteSelectScreen.tsx`) remain; not
+  blocking.
 - Detox `smoke`, `auth`, `rider`, `driver`, `screenshots` suites all
   green on iOS AND Android (REFACTOR_PLAN.md §8 DoD #2).
 - Use-case test coverage ≥ 100% for `app/usecases/*`

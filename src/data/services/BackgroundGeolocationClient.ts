@@ -125,6 +125,36 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   private geofenceCallbacks = new Set<(event: BgGeofenceEvent) => void>();
   private geofenceSubscription: { remove: () => void } | null = null;
 
+  /**
+   * When `true` (default), the adapter's `init` / `start` / `stop` /
+   * geofence / subscription / permission methods short-circuit to a
+   * benign `Result.ok` (or a callback-tracking no-op disposer for the
+   * subscribe methods) in dev builds (`__DEV__ === true`) without
+   * touching the native SDK. This dodges the
+   * `tslocationmanager:4.1.5` `setPriority(-1)` priority-translation
+   * crash on the Android emulator (memory:
+   * `rn_bg_geolocation_v5_android_loop.md`). Production / release
+   * builds run `__DEV__ === false` and are unaffected regardless of
+   * this flag's value.
+   *
+   * Test convention: jest suites that exercise the global SDK mock
+   * pass `false` to the constructor so the native-path calls (
+   * `sdk.ready`, `sdk.start`, `sdk.onLocation`, …) actually fire and
+   * can be asserted on. Production and dev builds leave the default
+   * (no constructor arg) and keep the emulator workaround engaged.
+   *
+   * The flag is intentionally NOT surfaced on the
+   * `BackgroundGeolocationService` interface — it's an implementation
+   * detail of this adapter, not part of the domain contract.
+   *
+   * See `docs/PHASE_10_TURN_9.md` for the regression backstory.
+   */
+  private readonly skipNativeInDev: boolean;
+
+  constructor(opts?: { skipNativeInDev?: boolean }) {
+    this.skipNativeInDev = opts?.skipNativeInDev ?? true;
+  }
+
   async init(
     args: BackgroundGeolocationClientInitArgs,
   ): Promise<Result<true, NetworkError>> {
@@ -166,7 +196,12 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
     //
     // To re-enable real init for testing on a real device: comment
     // out the early-return below.
-    if (__DEV__) {
+    //
+    // Phase 10 Turn 9: gated by `this.skipNativeInDev` so jest suites
+    // pass `false` and exercise the native-path code under the SDK
+    // mock. Default `true` preserves the emulator workaround for dev
+    // builds.
+    if (__DEV__ && this.skipNativeInDev) {
       this.initialized = true;
       logger.warn(
         'init: skipping native init in __DEV__ (Android emulator ' +
@@ -245,7 +280,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async start(): Promise<Result<true, NetworkError>> {
-    if (__DEV__) return Result.ok(true);
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       const state = (await BackgroundGeolocation.getState()) as SdkState;
       if (state.enabled) {
@@ -268,7 +304,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async stop(): Promise<Result<true, NetworkError>> {
-    if (__DEV__) return Result.ok(true);
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.stop();
       this.lastLocationKey = null;
@@ -292,7 +329,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
     radiusMeters: number;
     rideId: RideId;
   }): Promise<Result<true, NetworkError>> {
-    if (__DEV__) return Result.ok(true);
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.addGeofence({
         identifier: 'pickup',
@@ -322,7 +360,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async removePickupGeofence(): Promise<Result<true, NetworkError>> {
-    if (__DEV__) return Result.ok(true);
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.removeGeofence('pickup');
       logger.info('removePickupGeofence: removed');
@@ -340,7 +379,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async removeAllGeofences(): Promise<Result<true, NetworkError>> {
-    if (__DEV__) return Result.ok(true);
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.removeGeofences();
       logger.info('removeAllGeofences: cleared');
@@ -368,7 +408,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
    * the void.
    */
   subscribeToLocation(callback: (event: BgLocationEvent) => void): () => void {
-    if (__DEV__) {
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) {
       // No-op in dev — SDK is not initialized. Track the callback so the
       // disposer contract still holds, but never wire it to a real SDK
       // listener.
@@ -425,7 +466,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
    * the same `'pickup'` identifier still fan out their first fire each.
    */
   subscribeToGeofence(callback: (event: BgGeofenceEvent) => void): () => void {
-    if (__DEV__) {
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) {
       this.geofenceCallbacks.add(callback);
       return () => {
         this.geofenceCallbacks.delete(callback);
@@ -492,7 +534,8 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   async requestAuthorizationIfNeeded(): Promise<
     Result<BgPermissionStatus, AuthorizationError>
   > {
-    if (__DEV__) return Result.ok('always');
+    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
+    if (__DEV__ && this.skipNativeInDev) return Result.ok('always');
     try {
       const status = await BackgroundGeolocation.requestPermission();
       return Result.ok(this.mapAuthorizationStatus(status));
