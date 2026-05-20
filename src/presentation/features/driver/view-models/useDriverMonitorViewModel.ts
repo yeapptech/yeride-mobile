@@ -21,6 +21,7 @@ import {
   useUpdateLocationMutation,
 } from '@presentation/queries';
 import {
+  useChatLastReadAtForRide,
   useChatUiStore,
   useDriverStatusStore,
   useGpsCurrentLocation,
@@ -586,29 +587,43 @@ export function useDriverMonitorViewModel(
 
   // ── Chat (Phase 10 turn 8) ─────────────────────────────────────
   // Driver-side mirror of the rider chat wiring. Subscribe to the
-  // latest message for the unread dot; expose an `onPressChat` that
-  // opens the modal, flips `useChatUiStore.openRideId` (foreground
-  // push suppression signal), and fires `markMessagesRead({role:
-  // 'driver'})` on a best-effort basis. The `hasUnreadMessages` memo
-  // compares latest-message `createdAt` against the shared
-  // `useChatUiStore.lastReadAt` — the rider VM uses the same
-  // selector, but a given device only views chat from one role at a
-  // time, so the shared mirror works.
+  // latest message for the unread dot — GATED on an active trip
+  // status (Suggestion #7): post-cutover the screen redirects on
+  // terminal status, but the brief window before the redirect lands
+  // would otherwise drive `markMessagesRead` writes against a
+  // closed trip. Same review pulled `chatLastReadAt` onto a per-ride
+  // selector to avoid cross-ride bleed (Critical #2). `hasUnread` is
+  // gated by `currentUserId` so own outbound messages don't light
+  // the dot (Critical #1).
   const subscribeLatestMessage = useCallback(
-    (cb: (message: ChatMessage | null) => void) =>
-      useCases.observeLatestMessage.execute({ rideId, callback: cb }),
-    [useCases, rideId],
+    (cb: (message: ChatMessage | null) => void) => {
+      if (!isActiveTripStatus) {
+        // Emit null synchronously so the consumer state is correct;
+        // the noop unsubscribe satisfies the cleanup contract.
+        cb(null);
+        return () => undefined;
+      }
+      return useCases.observeLatestMessage.execute({ rideId, callback: cb });
+    },
+    [useCases, rideId, isActiveTripStatus],
   );
   const latestMessage = useFirestoreSubscription<ChatMessage | null>(
     subscribeLatestMessage,
     null,
   );
-  const chatLastReadAt = useChatUiStore((s) => s.lastReadAt);
+  const chatLastReadAt = useChatLastReadAtForRide(rideId);
+  const currentDriverUserId = useSessionStore((s) => s.userId);
   const hasUnreadMessages = useMemo(() => {
     if (!latestMessage) return false;
+    if (
+      currentDriverUserId !== null &&
+      String(latestMessage.senderId) === String(currentDriverUserId)
+    ) {
+      return false;
+    }
     if (!chatLastReadAt) return true;
     return latestMessage.createdAt.getTime() > chatLastReadAt.getTime();
-  }, [latestMessage, chatLastReadAt]);
+  }, [latestMessage, chatLastReadAt, currentDriverUserId]);
 
   const [chatOpen, setChatOpen] = useState(false);
   const openChatInStore = useChatUiStore((s) => s.open);
@@ -617,7 +632,7 @@ export function useDriverMonitorViewModel(
   const onPressChat = useCallback(() => {
     setChatOpen(true);
     openChatInStore(rideId);
-    markRead(new Date());
+    markRead(rideId, new Date());
     void useCases.markMessagesRead
       .execute({ rideId, role: 'driver' })
       .then((r) => {

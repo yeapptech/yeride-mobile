@@ -91,6 +91,11 @@ const MAX_TEXT_LENGTH = 1000;
  *   - `senderId` is a branded `UserId` (validated upstream).
  *   - `createdAt` is a valid `Date` (NaN-Date rejected).
  *   - `readAt` is `Date | null`; `markRead(at)` evolves immutably.
+ *   - `senderName` is the display name pulled off the doc's `user.name`
+ *     field (gifted-chat compatibility). `string | null`: trimmed on
+ *     the way in; null when missing on legacy docs. Not domain-
+ *     validated beyond non-empty after trim — display data the UI
+ *     surfaces directly for peer avatar/bubble labels.
  */
 export class ChatMessage {
   private constructor(
@@ -99,6 +104,7 @@ export class ChatMessage {
     public readonly text: string,
     public readonly createdAt: Date,
     public readonly readAt: Date | null,
+    public readonly senderName: string | null,
   ) {}
 
   static create(props: {
@@ -107,6 +113,7 @@ export class ChatMessage {
     text: string;
     createdAt: Date;
     readAt?: Date | null;
+    senderName?: string | null;
   }): Result<ChatMessage, ValidationError> {
     if (typeof props.text !== 'string') {
       return Result.err(
@@ -161,6 +168,13 @@ export class ChatMessage {
         }),
       );
     }
+    // Display-name normalization. `null` and empty-after-trim both
+    // collapse to `null` so the UI peer-name fallback has one branch.
+    let senderName: string | null = null;
+    if (typeof props.senderName === 'string') {
+      const trimmedName = props.senderName.trim();
+      senderName = trimmedName.length > 0 ? trimmedName : null;
+    }
     return Result.ok(
       new ChatMessage(
         props.id,
@@ -168,6 +182,7 @@ export class ChatMessage {
         trimmed,
         props.createdAt,
         readAt,
+        senderName,
       ),
     );
   }
@@ -185,7 +200,14 @@ export class ChatMessage {
       );
     }
     return Result.ok(
-      new ChatMessage(this.id, this.senderId, this.text, this.createdAt, at),
+      new ChatMessage(
+        this.id,
+        this.senderId,
+        this.text,
+        this.createdAt,
+        at,
+        this.senderName,
+      ),
     );
   }
 }

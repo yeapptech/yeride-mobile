@@ -86,12 +86,19 @@ export function toDomain(
   // the current client time so the optimistic UI inserts a valid Date;
   // the next snapshot will re-fire with the resolved server timestamp.
   const createdAt = doc.createdAt ?? now();
+  // Project the gifted-chat `user.name` onto the domain entity so the
+  // UI can surface real peer names (avatar fallback initial, bubble
+  // label). Falls back to null on legacy docs that omit `user`. The
+  // entity factory handles whitespace-only collapse and empty-string
+  // normalization downstream.
+  const senderName = doc.user?.name ?? null;
   return ChatMessage.create({
     id: idR.value,
     senderId: senderR.value,
     text: doc.text,
     createdAt,
     readAt: null,
+    senderName,
   });
 }
 

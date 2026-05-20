@@ -27,6 +27,7 @@ import {
   useGeofenceUiStore,
   useGpsStore,
 } from '@presentation/stores';
+import { useSessionStore } from '@presentation/stores/useSessionStore';
 import {
   InMemoryChatRepository,
   InMemoryLocationRepository,
@@ -460,7 +461,10 @@ describe('useRideMonitorViewModel', () => {
 
     expect(result.current.chatOpen).toBe(true);
     expect(String(useChatUiStore.getState().openRideId)).toBe(String(RIDE_ID));
-    expect(useChatUiStore.getState().lastReadAt).not.toBeNull();
+    // Per-ride lastReadAt stamped under this ride's key.
+    expect(
+      useChatUiStore.getState().lastReadAtByRide[String(RIDE_ID)],
+    ).toBeInstanceOf(Date);
     // markMessagesRead fired with role='rider' (async; let it settle).
     await waitFor(() => {
       expect(chatsRepo.getMarkReadCallsFor(RIDE_ID, 'rider')).toBe(1);
@@ -472,6 +476,67 @@ describe('useRideMonitorViewModel', () => {
     });
     expect(result.current.chatOpen).toBe(false);
     expect(useChatUiStore.getState().openRideId).toBe(null);
+  });
+
+  it('hasUnreadMessages is true for a peer-sent latestMessage', async () => {
+    useChatUiStore.getState().reset();
+    useSessionStore.getState().setSignedIn(PASSENGER_ID);
+    const ridesRepo = new InMemoryRideRepository();
+    await ridesRepo.create(makeAwaitingRide());
+    const chatsRepo = new InMemoryChatRepository();
+    const { result } = renderHook(
+      () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+      { wrapper: withTestContainer({ ridesRepo, chatsRepo }) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('awaiting_driver');
+    });
+    const driverUid = unwrap(UserId.create('driverxxxxxxxxxxxxxxxxxxxxxx'));
+    const driverName = unwrap(
+      PersonName.create({ first: 'Grace', last: 'Hopper' }),
+    );
+    await act(async () => {
+      await chatsRepo.send({
+        rideId: RIDE_ID,
+        sender: { id: driverUid, name: driverName },
+        text: 'on my way',
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.latestMessage).not.toBeNull();
+    });
+    expect(result.current.hasUnreadMessages).toBe(true);
+    useSessionStore.setState({ status: 'initializing', userId: null });
+  });
+
+  it('hasUnreadMessages is FALSE when the latest message is the local rider’s own send (Critical #1)', async () => {
+    useChatUiStore.getState().reset();
+    useSessionStore.getState().setSignedIn(PASSENGER_ID);
+    const ridesRepo = new InMemoryRideRepository();
+    await ridesRepo.create(makeAwaitingRide());
+    const chatsRepo = new InMemoryChatRepository();
+    const { result } = renderHook(
+      () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+      { wrapper: withTestContainer({ ridesRepo, chatsRepo }) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('awaiting_driver');
+    });
+    const riderName = unwrap(
+      PersonName.create({ first: 'Ada', last: 'Lovelace' }),
+    );
+    await act(async () => {
+      await chatsRepo.send({
+        rideId: RIDE_ID,
+        sender: { id: PASSENGER_ID, name: riderName },
+        text: 'be there in 2',
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.latestMessage).not.toBeNull();
+    });
+    expect(result.current.hasUnreadMessages).toBe(false);
+    useSessionStore.setState({ status: 'initializing', userId: null });
   });
 
   describe('pickup geofence banner (Phase 7 turn 3)', () => {

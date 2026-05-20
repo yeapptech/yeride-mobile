@@ -440,8 +440,10 @@ in Phase 10.
 - Optional read additions: `RideDocSchema` accepts
   `lastSeenByRiderAt` / `lastSeenByDriverAt` Timestamp / ISO / null
   for cross-app permissive parsing — not projected into the `Ride`
-  domain entity (chat unread-dot derives from
-  `useChatUiStore.lastReadAt`, not the parent-doc field).
+  domain entity (chat unread-dot derives from per-ride
+  `useChatLastReadAtForRide(rideId)`, not the parent-doc field).
+  See `docs/PHASE_10_TURN_8_REVIEW_FIXES.md` for the per-ride
+  refactor that replaced the original single-slot `lastReadAt`.
 - Server-side `onMessageCreated` Cloud Function was already
   deployed on both stage and prod — no functions work in scope.
 - ~120 new tests across all six layers; jest carries only the 21

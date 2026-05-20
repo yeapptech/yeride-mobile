@@ -1519,7 +1519,7 @@ describe('useDriverMonitorViewModel', () => {
       expect(result.current.hasUnreadMessages).toBe(false);
     });
 
-    it('derives hasUnreadMessages from latestMessage vs useChatUiStore.lastReadAt', async () => {
+    it('derives hasUnreadMessages from latestMessage vs per-ride lastReadAt', async () => {
       const setup = setupSeededState({ seedRide: makeDispatchedRide() });
       const chats = new InMemoryChatRepository();
       const { result } = renderHook(
@@ -1549,6 +1549,33 @@ describe('useDriverMonitorViewModel', () => {
       expect(result.current.hasUnreadMessages).toBe(true);
     });
 
+    it('does NOT light hasUnreadMessages when the latest message is the local driver’s own send', async () => {
+      // Critical #1 — own outbound message must not flag unread.
+      const setup = setupSeededState({ seedRide: makeDispatchedRide() });
+      const chats = new InMemoryChatRepository();
+      const { result } = renderHook(
+        () => useDriverMonitorViewModel({ rideId: RIDE_ID }),
+        { wrapper: withTestContainer(setup, { chats }) },
+      );
+      await waitFor(() => {
+        expect(result.current.ride).not.toBeNull();
+      });
+      const driverName = unwrap(
+        PersonName.create({ first: 'Grace', last: 'Hopper' }),
+      );
+      await act(async () => {
+        await chats.send({
+          rideId: RIDE_ID,
+          sender: { id: DRIVER_ID, name: driverName },
+          text: 'on my way',
+        });
+      });
+      await waitFor(() => {
+        expect(result.current.latestMessage).not.toBeNull();
+      });
+      expect(result.current.hasUnreadMessages).toBe(false);
+    });
+
     it('onPressChat flips chatOpen, sets openRideId, marks read, fires markMessagesRead', async () => {
       const setup = setupSeededState({ seedRide: makeDispatchedRide() });
       const chats = new InMemoryChatRepository();
@@ -1567,7 +1594,10 @@ describe('useDriverMonitorViewModel', () => {
       expect(String(useChatUiStore.getState().openRideId)).toBe(
         String(RIDE_ID),
       );
-      expect(useChatUiStore.getState().lastReadAt).not.toBeNull();
+      // Per-ride lastReadAt stamped under this ride's key.
+      expect(
+        useChatUiStore.getState().lastReadAtByRide[String(RIDE_ID)],
+      ).toBeInstanceOf(Date);
       await waitFor(() => {
         expect(chats.getMarkReadCallsFor(RIDE_ID, 'driver')).toBe(1);
       });

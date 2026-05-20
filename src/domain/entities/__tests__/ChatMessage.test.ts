@@ -177,6 +177,53 @@ describe('ChatMessage', () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('chat_message_invalid_read_at');
     });
+
+    it('defaults senderName to null when omitted', () => {
+      const r = ChatMessage.create({
+        id: msgId(),
+        senderId: uid(),
+        text: 'hi',
+        createdAt: new Date(),
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.senderName).toBe(null);
+    });
+
+    it('trims senderName and preserves it', () => {
+      const r = ChatMessage.create({
+        id: msgId(),
+        senderId: uid(),
+        text: 'hi',
+        createdAt: new Date(),
+        senderName: '  Ada Lovelace  ',
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.senderName).toBe('Ada Lovelace');
+    });
+
+    it('collapses empty / whitespace-only senderName to null', () => {
+      const r = ChatMessage.create({
+        id: msgId(),
+        senderId: uid(),
+        text: 'hi',
+        createdAt: new Date(),
+        senderName: '   ',
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.senderName).toBe(null);
+    });
+
+    it('accepts explicit null senderName', () => {
+      const r = ChatMessage.create({
+        id: msgId(),
+        senderId: uid(),
+        text: 'hi',
+        createdAt: new Date(),
+        senderName: null,
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.senderName).toBe(null);
+    });
   });
 
   describe('markRead', () => {

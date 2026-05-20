@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { GiftedChat, type IMessage } from 'react-native-gifted-chat';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
 
 import type { ChatMessage } from '@domain/entities/ChatMessage';
 import type { PersonName } from '@domain/entities/PersonName';
@@ -79,57 +80,29 @@ export function ChatModal({
   const markRead = useChatUiStore((s) => s.markRead);
 
   // gifted-chat consumes its own message shape; the adapter projects
-  // domain `ChatMessage` → `IMessage` once on every snapshot.
+  // domain `ChatMessage` → `IMessage` once on every snapshot. The
+  // projection is pure on `m` (peer name comes off the entity itself
+  // via `senderName`), so `userName` doesn't belong in the deps.
   const [messages, setMessages] = useState<readonly ChatMessage[]>([]);
   const giftedMessages = useMemo<IMessage[]>(
-    () => messages.map((m) => domainToGifted(m, userName)),
-    [messages, userName],
+    () => messages.map((m) => domainToGifted(m)),
+    [messages],
   );
 
-  // Subscribe / unsubscribe on visibility. The effect deps include
-  // `rideId` and the use-case container so a ride switch (rare — modal
-  // remounts) wires a fresh subscription. `markMessagesRead` fires
-  // both on initial open AND inside the snapshot callback so the
-  // OTHER party's badge clears on every new message arrival while the
-  // modal is open (legacy parity).
+  // ── openRideId mirror (narrow effect — Suggestion #4) ─────────────
+  // The previous shape mixed openRideId set/clear into the same effect
+  // as the subscription, keyed on `[visible, rideId, role, useCases,
+  // open, close, markRead]`. Any change to `useCases` (DI container
+  // re-render) would teardown → re-up the effect, briefly clearing
+  // `openRideId` to null — during which a push handler could miss the
+  // suppression match. Splitting it keeps openRideId stable through
+  // the entire `visible=true` window for a given rideId regardless of
+  // unrelated re-renders.
   useEffect(() => {
     if (!visible) return;
-    // Set the open-ride signal so the foreground push handler can
-    // match against it.
     open(rideId);
-    markRead(new Date());
-
-    // Best-effort initial markRead — repo write may fail under
-    // offline conditions, but the local store mirror already cleared
-    // the unread dot. Don't block / surface — just log.
-    void useCases.markMessagesRead.execute({ rideId, role }).then((r) => {
-      if (!r.ok) {
-        logger.warn('markMessagesRead (initial) failed', {
-          code: r.error.code,
-        });
-      }
-    });
-
-    const unsubscribe = useCases.observeChatMessages.execute({
-      rideId,
-      callback: (next) => {
-        setMessages(next);
-        // Mark read again on every snapshot — covers the case where a
-        // new message arrives while the modal is open. Same as legacy
-        // ChatModal.js:72-74.
-        void useCases.markMessagesRead.execute({ rideId, role }).then((r) => {
-          if (!r.ok) {
-            logger.warn('markMessagesRead (per-snapshot) failed', {
-              code: r.error.code,
-            });
-          }
-        });
-        markRead(new Date());
-      },
-    });
-
+    markRead(rideId, new Date());
     return () => {
-      unsubscribe();
       // Only clear openRideId if it still matches — legacy parity
       // guard against an open/close race wiping the next-opened ride.
       const current = useChatUiStore.getState().openRideId;
@@ -137,8 +110,60 @@ export function ChatModal({
         close();
       }
     };
-  }, [visible, rideId, role, useCases, open, close, markRead]);
+  }, [visible, rideId, open, close, markRead]);
 
+  // ── Subscription + per-snapshot markMessagesRead (deduped) ────────
+  // `markMessagesRead` fires on initial open AND when the snapshot
+  // delivers a NEWER message than the last call. The dedupe matters
+  // because every snapshot otherwise triggers a parent-trip-doc write
+  // (and a no-op `onTripUpdated` Cloud Function invocation). Tracks
+  // the latest-known createdAt in a ref so a snapshot carrying only
+  // older messages (re-render with same data) doesn't re-fire.
+  const lastMarkReadForCreatedAtMsRef = useRef<number>(0);
+  useEffect(() => {
+    if (!visible) return;
+    // Reset dedupe state on a fresh open / ride switch so the first
+    // snapshot always lands a markMessagesRead.
+    lastMarkReadForCreatedAtMsRef.current = 0;
+
+    const fireMarkMessagesRead = (label: 'initial' | 'per-snapshot') => {
+      void useCases.markMessagesRead.execute({ rideId, role }).then((r) => {
+        if (!r.ok) {
+          logger.warn(`markMessagesRead (${label}) failed`, {
+            code: r.error.code,
+          });
+        }
+      });
+    };
+
+    // Best-effort initial markRead — repo write may fail under offline
+    // conditions, but the local store mirror already cleared the
+    // unread dot. Don't block / surface — just log.
+    fireMarkMessagesRead('initial');
+
+    const unsubscribe = useCases.observeChatMessages.execute({
+      rideId,
+      callback: (next) => {
+        setMessages(next);
+        // Per-snapshot markRead — only fires when a NEWER message is
+        // present than any we've previously acknowledged for this
+        // open-window. Without this gate, an unchanged snapshot (e.g.
+        // adapter re-emits on re-subscribe, or `setMessages` triggers
+        // re-render that doesn't change the head) would burn a
+        // Firestore write per delivery.
+        const newestMs = next[0]?.createdAt.getTime() ?? 0;
+        if (newestMs > lastMarkReadForCreatedAtMsRef.current) {
+          lastMarkReadForCreatedAtMsRef.current = newestMs;
+          fireMarkMessagesRead('per-snapshot');
+          markRead(rideId, new Date());
+        }
+      },
+    });
+
+    return unsubscribe;
+  }, [visible, rideId, role, useCases, markRead]);
+
+  // ── Send (Suggestion #3: user-visible toast on failure) ───────────
   const handleSend = useCallback(
     (sentMessages: IMessage[] = []) => {
       // gifted-chat sends one message per onSend call in practice;
@@ -154,11 +179,25 @@ export function ChatModal({
           .then((r) => {
             if (!r.ok) {
               logger.warn('sendChatMessage failed', { code: r.error.code });
-              // VM-level toast is wired separately; here we only log.
-              // gifted-chat already inserted the message optimistically
-              // in its own list — when the next snapshot fires (without
-              // the failed message), the list rebuilds from server
-              // state.
+              // Surface a user-visible toast so the message-disappear
+              // (gifted-chat optimistically inserted, snapshot will
+              // rebuild without it) doesn't read as a silent drop.
+              // Validation errors come from the use case's
+              // empty/overlong guards — we already filter empty above,
+              // so a ValidationError here means an overlong paste;
+              // surface the friendlier copy. NetworkError is the
+              // common offline path.
+              const isValidation =
+                r.error.code === 'chat_message_text_too_long' ||
+                r.error.code === 'chat_message_empty_text' ||
+                r.error.code === 'chat_message_text_not_a_string';
+              Toast.show({
+                type: 'error',
+                text1: isValidation ? 'Message rejected' : 'Message not sent',
+                text2: isValidation
+                  ? 'That message is too long. Try a shorter one.'
+                  : 'Check your connection and try again.',
+              });
             }
           });
       }
@@ -214,6 +253,15 @@ export function ChatModal({
               renderAvatarOnTop
               keyboardShouldPersistTaps="handled"
             />
+            {/* Android-only second `KeyboardAvoidingView` is a
+                gifted-chat layout shim: the outer KAV uses `padding`
+                on Android (correct for the SafeAreaView wrap), but
+                the bottom-most input row inside gifted-chat
+                additionally needs an inert KAV sibling to reserve
+                the input bar height under the soft keyboard. Without
+                this, the input row collides with the keyboard on
+                Android API 30+. Empty children — its only purpose is
+                the KAV height-reservation effect. */}
             {Platform.OS === 'android' && (
               <KeyboardAvoidingView behavior="padding" />
             )}
@@ -230,27 +278,19 @@ export function ChatModal({
  * list arriving from the adapter (already in DESC order) lines up
  * 1:1 with gifted-chat's expectations.
  *
- * `_userName` is the LOCAL viewer's name — used to disambiguate the
- * `_id` self/peer comparison gifted-chat does at render time. We
- * don't try to project the peer's name onto inbound messages here
- * (legacy ChatModal didn't either); gifted-chat's `user.name` is
- * surfaced from the doc's `user.name` field via the wire shape.
+ * `senderName` is pulled off the entity, which the mapper sources from
+ * the doc's `user.name` field. Empty string fallback when the field
+ * is missing on a legacy doc — gifted-chat's avatar then surfaces its
+ * default initial.
  */
-function domainToGifted(m: ChatMessage, _userName: PersonName): IMessage {
+function domainToGifted(m: ChatMessage): IMessage {
   return {
     _id: String(m.id),
     text: m.text,
     createdAt: m.createdAt,
     user: {
       _id: String(m.senderId),
-      // Name is read off the doc via the wire shape; gifted-chat's
-      // peer-row renders use it for the avatar fallback initial. We
-      // pass an empty string when projecting from the domain because
-      // the entity doesn't carry the sender's display name — that's
-      // fine for the rider-side (the rider's own messages get their
-      // own name from the `user` prop on `<GiftedChat/>`), and the
-      // peer-side falls back to gifted-chat's "Anonymous" default.
-      name: '',
+      name: m.senderName ?? '',
     },
   };
 }

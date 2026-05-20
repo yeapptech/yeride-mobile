@@ -183,6 +183,10 @@ export class InMemoryChatRepository implements ChatRepository {
       text: args.text,
       createdAt: new Date(),
       readAt: null,
+      // Mirror FirestoreChatRepository.send — the optimistic insert
+      // carries the local user's display name so peer-rendering in
+      // gifted-chat sees a populated bubble label.
+      senderName: args.sender.name.full,
     });
     if (!msgR.ok) return msgR;
     const list = this.messages.get(String(args.rideId)) ?? [];

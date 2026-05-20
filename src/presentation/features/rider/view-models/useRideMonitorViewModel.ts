@@ -13,10 +13,12 @@ import { useFirestoreSubscription, useOpenSettings } from '@presentation/hooks';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useCancelRideAsRiderMutation } from '@presentation/queries';
 import {
+  useChatLastReadAtForRide,
   useChatUiStore,
   useGeofenceUiStore,
   useGpsLastGeofenceEvent,
   useGpsPermissionStatus,
+  useSessionStore,
 } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
@@ -161,12 +163,28 @@ export function useRideMonitorViewModel(args: {
     null,
   );
 
-  const lastReadAt = useChatUiStore((s) => s.lastReadAt);
+  // Per-review (Critical #1 + #2):
+  //   - Per-ride lastReadAt keyed by `rideId` — no cross-ride bleed
+  //     of the previous trip's read stamp.
+  //   - SenderId gate: an outbound message from THIS user must never
+  //     light the dot. Without the gate, a freshly-sent message's
+  //     resolved-server `createdAt` lands AFTER the chat-close
+  //     `markRead` stamp and the local user sees their own message
+  //     flagged unread until the next snapshot fires.
+  const lastReadAt = useChatLastReadAtForRide(rideId);
+  const currentUserId = useSessionStore((s) => s.userId);
   const hasUnreadMessages = useMemo(() => {
     if (!latestMessage) return false;
+    // Own outbound message never counts as unread.
+    if (
+      currentUserId !== null &&
+      String(latestMessage.senderId) === String(currentUserId)
+    ) {
+      return false;
+    }
     if (!lastReadAt) return true;
     return latestMessage.createdAt.getTime() > lastReadAt.getTime();
-  }, [latestMessage, lastReadAt]);
+  }, [latestMessage, lastReadAt, currentUserId]);
 
   const status = ride?.status ?? null;
 
@@ -267,7 +285,7 @@ export function useRideMonitorViewModel(args: {
   const onPressChat = useCallback(() => {
     setChatOpen(true);
     openChatInStore(rideId);
-    markRead(new Date());
+    markRead(rideId, new Date());
     void useCases.markMessagesRead
       .execute({ rideId, role: 'rider' })
       .then((r) => {

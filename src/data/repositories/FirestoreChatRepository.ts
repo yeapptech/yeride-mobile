@@ -209,6 +209,11 @@ export class FirestoreChatRepository implements ChatRepository {
       text: args.text,
       createdAt: now,
       readAt: null,
+      // Seed senderName from the caller-supplied PersonName so the
+      // optimistic insert renders with the local user's name in the
+      // gifted-chat bubble. The next snapshot's `doc.user.name` lands
+      // the same value back.
+      senderName: args.sender.name.full,
     });
     if (!msgR.ok) return msgR;
     const msg = msgR.value;

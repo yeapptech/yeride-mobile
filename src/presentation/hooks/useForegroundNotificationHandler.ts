@@ -1,10 +1,10 @@
-import type * as NotificationsTypes from 'expo-notifications';
+import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
 
 import { useChatUiStore } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
-type NotificationBehavior = NotificationsTypes.NotificationBehavior;
+type NotificationBehavior = Notifications.NotificationBehavior;
 
 const logger = LOG.extend('ForegroundNotif');
 
@@ -42,12 +42,10 @@ const logger = LOG.extend('ForegroundNotif');
  */
 export function useForegroundNotificationHandler(): void {
   useEffect(() => {
-    // Lazy-require so a unit test that imports a sibling hook doesn't
-    // pull in `expo-notifications` (its TurboModule registration
-    // breaks outside RN runtime unless mocked, and our jest mock is
-    // not autoresolved for arbitrary files).
-    const Notifications =
-      require('expo-notifications') as typeof NotificationsTypes;
+    // `expo-notifications` is statically imported at module top —
+    // sibling hooks (`usePushTokenRegistration`) already do the same,
+    // and the jest manual mock for the package covers any unit-test
+    // surface that imports this file transitively.
 
     const showBehavior: NotificationBehavior = {
       shouldShowBanner: true,

@@ -48,7 +48,22 @@ describe('chatMessageMapper.toDomain', () => {
       expect(r.value.text).toBe('hi'); // trimmed
       expect(r.value.createdAt).toEqual(createdAt);
       expect(r.value.readAt).toBe(null);
+      expect(r.value.senderName).toBe('Ada');
     }
+  });
+
+  it('returns null senderName when the doc omits user.name', () => {
+    const parsed = parseDoc({
+      text: 'hi',
+      senderId: SENDER_UID,
+      createdAt: new Date(),
+      // user omitted (legacy edge — accepted by schema as `.nullish()`)
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const r = toDomain(FRESH_DOC_ID, parsed.value);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.senderName).toBe(null);
   });
 
   it('substitutes the client clock when createdAt is null (server-timestamp local placeholder)', () => {

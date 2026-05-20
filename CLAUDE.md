@@ -309,10 +309,12 @@ Strict split, never mix:
   case args.
 - **Zustand stores** own _client/UI state_ only — the trip-draft a
   rider is composing pre-CreateRide (`useTripDraftStore`), chat
-  open/closed flag (`useChatUiStore`), geofence-warning banner
-  visibility (`useGeofenceUiStore`), session identity bag
-  (`useSessionStore`), the resolved active service area
-  (`useServiceAreaStore`), GPS-stream mirror (`useGpsStore`).
+  open/closed flag + per-ride local read stamp
+  (`useChatUiStore.{isOpen, openRideId, lastReadAtByRide}`),
+  geofence-warning banner visibility (`useGeofenceUiStore`),
+  session identity bag (`useSessionStore`), the resolved active
+  service area (`useServiceAreaStore`), GPS-stream mirror
+  (`useGpsStore`).
 
 Do not put server-fetched ride data in Zustand. Do not put pure UI
 flags in TanStack Query.
@@ -484,6 +486,9 @@ only the new app writes to it.
 | `src/presentation/hooks/useGpsLifecycle.ts`                                 | AppContent-only GPS lifecycle owner                                                                                                                                                                                                                             |
 | `src/presentation/hooks/useCrashReportingLifecycle.ts`                      | AppContent-only Crashlytics user-id / attribute / collection-flag mirror                                                                                                                                                                                        |
 | `src/presentation/hooks/usePushTokenRegistration.ts`                        | AppContent-only push-token registration with soft-ask UX                                                                                                                                                                                                        |
+| `src/presentation/hooks/useForegroundNotificationHandler.ts`                | AppContent-only foreground push policy — suppresses `chat_message` banners when `useChatUiStore.openRideId` matches the payload `tripId`                                                                                                                        |
+| `src/presentation/components/chat/ChatModal.tsx`                            | In-trip chat surface wrapping `react-native-gifted-chat`; effect split (openRideId mirror vs. subscription) + per-snapshot `markMessagesRead` dedupe + send-failure Toast — see `docs/PHASE_10_TURN_8_REVIEW_FIXES.md`                                          |
+| `src/presentation/stores/useChatUiStore.ts`                                 | Chat UI state. `lastReadAtByRide` is keyed per `RideId` (Critical-#2 fix); `openRideId` is the suppression signal read by `useForegroundNotificationHandler`                                                                                                    |
 | `src/shared/logger/Logger.ts`                                               | Multi-transport logger; `CompositeTransport`; `CrashlyticsLogTransport` rawMeta channel                                                                                                                                                                         |
 | `src/shared/pdf/buildReceiptHtml.ts`                                        | Pure HTML-template builder for the receipt-PDF feature                                                                                                                                                                                                          |
 | `src/shared/testing/TestContainerProvider.tsx`                              | Test-only container with override slots for every adapter / fake                                                                                                                                                                                                |
@@ -533,7 +538,7 @@ Live in `.env.development` / `.env.stage` / `.env.production`:
   SDK degrades to time-limited debug mode without. Must be the v5
   **JWT format** (starts with `eyJ...`, ~670 chars). The v4 32-char
   hex license format is rejected by the SDK with `LICENSE VALIDATION
-  FAILURE` since the 4.19.4 → 5.1.1 upgrade. Android and iOS use
+FAILURE` since the 4.19.4 → 5.1.1 upgrade. Android and iOS use
   DIFFERENT per-platform JWTs issued by Transistor's licensing
   portal. Wiring in `app.config.ts`: Android flows through the
   plugin block (`{ license: ... }`), iOS flows through

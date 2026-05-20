@@ -43,7 +43,7 @@ export {
 } from './useGpsStore';
 export {
   useChatIsOpen,
-  useChatLastReadAt,
+  useChatLastReadAtForRide,
   useChatOpenRideId,
   useChatUiStore,
 } from './useChatUiStore';

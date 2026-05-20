@@ -98,7 +98,13 @@ const ChatMessageCreatedAtSchema = z.preprocess((val) => {
 const ChatMessageUserSchema = z
   .object({
     _id: z.string().min(1),
-    name: z.string().min(1).max(160),
+    // Permissive on read — legacy / cross-app writers may have stored
+    // surprisingly long display names (org-prefixed handles, joined
+    // first/last with affiliations, etc.). We don't render the field
+    // as-is anyway: the mapper passes it through the entity, and
+    // gifted-chat clamps the visible bubble label. An empty name is
+    // the only edge that's never useful, so keep `min(1)`.
+    name: z.string().min(1),
   })
   .passthrough();
 

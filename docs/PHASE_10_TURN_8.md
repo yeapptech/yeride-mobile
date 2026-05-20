@@ -330,6 +330,37 @@ createdAt: serverTimestamp(), user: {_id, name}}` on send.
   the four out-of-scope files); jest carries only the 21
   pre-existing BG-geolocation failures.
 
+## Post-review follow-up (2026-05-19, same-day)
+
+A code review of 9a6e504 surfaced one high-severity correctness bug
+(self-message lighting the unread dot), one medium-severity bleed
+(`useChatUiStore.lastReadAt` carried across rides), and several
+quality items (peer-name projection, dedupe per-snapshot
+`markMessagesRead`, send-failure toast, effect-split race-window,
+driver `latestMessage` gating, static-imports). All landed
+same-day on top of this commit. See
+[`PHASE_10_TURN_8_REVIEW_FIXES.md`](PHASE_10_TURN_8_REVIEW_FIXES.md)
+for the per-item rationale, file list, and verify-gate results.
+
+**Behavioral deltas vs. the original Turn 8 shape — relevant to
+anyone reading downstream:**
+
+- `useChatUiStore.lastReadAt: Date | null` → `lastReadAtByRide:
+Readonly<Record<string, Date>>`. `markRead` now takes
+  `(rideId, at?)`. Selector renamed `useChatLastReadAt` →
+  `useChatLastReadAtForRide(rideId)`.
+- `ChatMessage` carries a new `senderName: string | null` field;
+  the mapper projects `doc.user?.name`. `ChatModal.domainToGifted`
+  uses it for peer bubble labels (no more empty-string fallback).
+- `hasUnreadMessages` in both rider/driver VMs gates on
+  `currentUserId` so own outbound messages never light the dot.
+- `ChatModal` splits the open-mirror effect from the subscription
+  effect to close the `useCases`-re-render race window on
+  `openRideId`.
+- `useForegroundNotificationHandler` static-imports
+  `expo-notifications` (previously lazy-required).
+- Driver `subscribeLatestMessage` no-ops when `!isActiveTripStatus`.
+
 ## Out of scope (deferred to later turns)
 
 - **BG-geolocation test regression** — Turn 9 (audit §10.1).
