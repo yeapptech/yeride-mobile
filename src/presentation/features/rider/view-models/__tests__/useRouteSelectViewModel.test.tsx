@@ -2,19 +2,30 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
 import { Coordinates } from '@domain/entities/Coordinates';
+import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
+import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
+import { PersonName } from '@domain/entities/PersonName';
+import { PhoneNumber } from '@domain/entities/PhoneNumber';
 import { RideService } from '@domain/entities/RideService';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { Route } from '@domain/entities/Route';
 import { ServiceArea } from '@domain/entities/ServiceArea';
 import { ServiceAreaId } from '@domain/entities/ServiceAreaId';
+import { StripeCustomerId } from '@domain/entities/StripeCustomerId';
+import { makeRider } from '@domain/entities/User';
+import type { UserId } from '@domain/entities/UserId';
 import { NetworkError, NotFoundError } from '@domain/errors';
 import { useServiceAreaStore } from '@presentation/stores/useServiceAreaStore';
+import { useSessionStore } from '@presentation/stores/useSessionStore';
 import { useTripDraftStore } from '@presentation/stores/useTripDraftStore';
 import {
   FakeRoutesService,
+  InMemoryAuthRepository,
+  InMemoryRideRepository,
   InMemoryServiceAreaRepository,
+  InMemoryUserRepository,
   TestContainerProvider,
 } from '@shared/testing';
 
@@ -111,15 +122,54 @@ function makeRoute(args: {
 function withTestContainer(opts: {
   serviceAreasRepo: InMemoryServiceAreaRepository;
   routesService: FakeRoutesService;
+  authRepo?: InMemoryAuthRepository;
+  usersRepo?: InMemoryUserRepository;
+  ridesRepo?: InMemoryRideRepository;
 }) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       serviceAreas={opts.serviceAreasRepo}
       routes={opts.routesService}
+      {...(opts.authRepo ? { auth: opts.authRepo } : {})}
+      {...(opts.usersRepo ? { users: opts.usersRepo } : {})}
+      {...(opts.ridesRepo ? { rides: opts.ridesRepo } : {})}
     >
       {children}
     </TestContainerProvider>
   );
+}
+
+/**
+ * Seed a rider into the auth/users repos with an optional default payment
+ * method, and set the session-store userId so `useCurrentUserQuery`'s
+ * `enabled` gate fires. Used by the confirm()-flow tests.
+ */
+async function seedRider(opts: {
+  authRepo: InMemoryAuthRepository;
+  usersRepo: InMemoryUserRepository;
+  defaultPaymentMethodId: PaymentMethodId | null;
+}): Promise<UserId> {
+  const email = 'rider@yeapp.tech';
+  opts.authRepo.seedAccount({ email, password: 'hunter22' });
+  await opts.authRepo.signIn({
+    email: unwrap(Email.create(email)),
+    password: 'hunter22',
+  });
+  const uid = (await opts.authRepo.currentUserId()) as UserId;
+  opts.usersRepo.seed(
+    makeRider({
+      id: uid,
+      email: unwrap(Email.create(email)),
+      name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+      phone: unwrap(PhoneNumber.create('+13055551234')),
+      createdAt: new Date('2026-04-29T12:00:00Z'),
+      updatedAt: new Date('2026-04-29T12:00:00Z'),
+      stripeCustomerId: unwrap(StripeCustomerId.create('cus_RiderTest001')),
+      defaultPaymentMethodId: opts.defaultPaymentMethodId,
+    }),
+  );
+  useSessionStore.getState().setSignedIn(uid);
+  return uid;
 }
 
 async function setupSeededState(): Promise<{
@@ -168,6 +218,9 @@ describe('useRouteSelectViewModel', () => {
     jest.useFakeTimers();
     useTripDraftStore.getState().reset();
     useServiceAreaStore.getState().reset();
+    // Reset session-store between tests so seedRider() in one test
+    // doesn't leak into another that doesn't seed a user.
+    useSessionStore.setState({ status: 'initializing', userId: null });
     mockNavigate.mockClear();
   });
 
@@ -383,6 +436,96 @@ describe('useRouteSelectViewModel', () => {
     });
     expect(result.current.scheduledPickupAt).toBeNull();
     expect(result.current.formattedSchedulePickupAt).toBeNull();
+  });
+
+  // Phase 10 turn 10 — confirm() hard-blocks when the rider has no default
+  // payment method. Without this gate the trip persists with
+  // `passenger.defaultPaymentMethod: null` and the server-side
+  // `processPaymentForTrip` rejects the fare/tip charge with an opaque
+  // `cf_*_internal` NetworkError the rider can't act on.
+  it('confirm() blocks when the rider has no default payment method', async () => {
+    const setup = await setupSeededState();
+    const authRepo = new InMemoryAuthRepository();
+    const usersRepo = new InMemoryUserRepository();
+    const ridesRepo = new InMemoryRideRepository();
+    await seedRider({
+      authRepo,
+      usersRepo,
+      defaultPaymentMethodId: null,
+    });
+    const route = makeRoute({ distanceMeters: 10_000, durationSeconds: 900 });
+    setup.routesService.seed([route]);
+
+    const { result } = renderHook(() => useRouteSelectViewModel(), {
+      wrapper: withTestContainer({
+        ...setup,
+        authRepo,
+        usersRepo,
+        ridesRepo,
+      }),
+    });
+    act(() => {
+      jest.advanceTimersByTime(400);
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.selectRideService(ECONOMY_ID);
+    });
+    expect(result.current.canConfirm).toBe(true);
+
+    let outcome: unknown = 'unset';
+    await act(async () => {
+      outcome = await result.current.confirm();
+    });
+
+    expect(outcome).toBeNull();
+    expect(result.current.submitError).toMatch(/payment method/i);
+    // No ride should have been persisted — the gate is the only thing
+    // that prevented the create call.
+    expect(ridesRepo.spies.create).toBe(0);
+  });
+
+  it('confirm() proceeds when the rider has a default payment method', async () => {
+    const setup = await setupSeededState();
+    const authRepo = new InMemoryAuthRepository();
+    const usersRepo = new InMemoryUserRepository();
+    const ridesRepo = new InMemoryRideRepository();
+    await seedRider({
+      authRepo,
+      usersRepo,
+      defaultPaymentMethodId: unwrap(PaymentMethodId.create('pm_RiderPM01')),
+    });
+    const route = makeRoute({ distanceMeters: 10_000, durationSeconds: 900 });
+    setup.routesService.seed([route]);
+
+    const { result } = renderHook(() => useRouteSelectViewModel(), {
+      wrapper: withTestContainer({
+        ...setup,
+        authRepo,
+        usersRepo,
+        ridesRepo,
+      }),
+    });
+    act(() => {
+      jest.advanceTimersByTime(400);
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.selectRideService(ECONOMY_ID);
+    });
+
+    let outcome: unknown = 'unset';
+    await act(async () => {
+      outcome = await result.current.confirm();
+    });
+
+    expect(result.current.submitError).toBeNull();
+    expect(outcome).not.toBeNull();
+    expect(ridesRepo.spies.create).toBe(1);
   });
 });
 

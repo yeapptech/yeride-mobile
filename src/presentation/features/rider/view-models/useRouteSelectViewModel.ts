@@ -338,20 +338,25 @@ export function useRouteSelectViewModel(): UseRouteSelectViewModel {
       return null;
     }
 
-    // Phase 9 turn 4: surface a soft warning at trip-creation when the
-    // rider has no default payment method on file. Without one, the
-    // server-side `processPaymentForTrip` will reject the fare charge
-    // (no `paymentMethodId` to pass to `/direct-charge`). Trip creation
-    // itself is allowed to proceed — the rider may have just signed up
-    // and intends to add a card before the driver arrives, and the
-    // legacy app has the same permissive UX.
+    // Phase 10 turn 10: hard-block trip creation when the rider has no
+    // default payment method. Without one, the server-side
+    // `processPaymentForTrip` calls `/direct-charge` with
+    // `paymentMethodId: undefined` and yeride-stripe-server returns 400.
+    // The failure surfaces to the rider as an opaque
+    // `cf_<op>_internal` NetworkError on `completeTrip` / `tipDriver`,
+    // long after they've taken the ride. Better to fail at the only
+    // moment where they can actually fix it. Earlier (Phase 9 turn 4)
+    // this was a soft `LOG.warn` for "legacy permissive UX" parity —
+    // production observation showed it was just hiding a class of
+    // payment failures the rider couldn't diagnose.
     if (user.role === 'rider' && user.defaultPaymentMethodId === null) {
-      logger.warn(
-        'confirm: rider has no default payment method — server-side ' +
-          'payment processing will fail. Rider should add a card before ' +
-          'requesting a trip.',
-        { userId: String(user.id) },
+      logger.warn('confirm: blocked — rider has no default payment method', {
+        userId: String(user.id),
+      });
+      setSubmitError(
+        'Add a payment method before requesting a trip — open Wallet to add a card.',
       );
+      return null;
     }
 
     const passengerR = PassengerSnapshot.create({
