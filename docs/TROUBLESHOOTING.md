@@ -76,6 +76,51 @@ re-runs `pod install` and the `patch-podfile.js` Podfile fixes). A
 native rebuild (`npm run ios`) is required either way — a JS reload
 won't pick up the plist change.
 
+## Driver / Rider home shows a stale location (or the world view) on a dev build
+
+Two related symptoms, same root cause area:
+
+**(a) Map centred on a previous trip's dropoff.** `<Map>` mounts with
+`initialRegion` from `useCurrentLocation`, which used to call
+`Location.getLastKnownPositionAsync()` with no `maxAge`. On a dev
+build the BG-geolocation native init is short-circuited in `__DEV__`
+(see `PHASE_10_TURN_9.md`), so no fresh `BgLocationEvent` ever lands
+in `useGpsStore` to correct the stale read. The OS returned whatever
+the FusedLocationProvider / CLLocationManager last cached — typically
+a previous-session dropoff coordinate.
+
+**(b) Map sits on the default Google Maps world view with a red
+"Current location is unavailable" overlay.** On a freshly booted
+simulator with no cached fix, the live `getCurrentPositionAsync` call
+throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` until the OS promotes a
+provider to a "current fix" — until then the camera had nothing to
+centre on, and `logger.error` triggered the LogBox red overlay.
+
+**Fix (already shipped — `docs/PHASE_10_OOB_DRIVER_HOME_STALE_LOCATION.md`):**
+
+- `useCurrentLocation` caps `getLastKnownPositionAsync` at
+  `maxAge: 120s` / `requiredAccuracy: 200m`.
+- Falls through to `getCurrentPositionAsync({ accuracy: Lowest })`.
+- If that throws, falls through ONCE MORE to an UNCAPPED
+  `getLastKnownPositionAsync` as a last-ditch source (a known-stale
+  fix beats no fix at all on the dev cold path).
+- `<Map>` follows post-mount `initialRegion` updates via a ref-driven
+  `animateToRegion` so the first non-null value after the cold-mount
+  null actually moves the camera (the native prop is one-shot).
+- Outer catch demoted from `LOG.error` to `LOG.warn` — user-recoverable
+  state, not a logic bug.
+
+If this returns: check the BG-geolocation `skipNativeInDev` flag (must
+stay `true` in dev — flipping `false` re-introduces the
+`tslocationmanager:4.1.5 setPriority(-1)` crash), and verify the
+simulator has a Custom Location set (iOS: **Features → Location →
+Custom Location…**; Android: Extended Controls → Location → SET
+LOCATION). On real-device release builds (`__DEV__ === false`)
+`useGpsLifecycle` streams fresh fixes into `useGpsStore`, but
+`useDriverHomeViewModel` / `useRiderHomeViewModel` don't read from it
+yet — the home-screen camera still centres off the foreground hook
+until that follow-up lands.
+
 ## iOS: `<RNMapsMapView>` placeholder pink screen
 
 Under Expo SDK 55 + RN 0.83.6 New Arch, the react-native-maps Apple

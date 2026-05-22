@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
 import MapView, {
   Marker,
+  type MapViewMethods,
   Polyline,
   PROVIDER_GOOGLE,
   type Region as RNRegion,
@@ -96,9 +97,17 @@ export interface MapRegion {
 
 export interface MapProps {
   /**
-   * Initial centre/zoom. Subsequent reads of this prop are ignored —
-   * `MapView` only consumes `initialRegion` once. To programmatically
-   * animate, use a ref + `animateToRegion` (not exposed here yet).
+   * Centre/zoom. The first non-null value lands on the native
+   * `initialRegion` prop (one-shot, used to place the camera at mount).
+   * Subsequent value changes are picked up internally and forwarded to
+   * `mapRef.animateToRegion(...)` so the camera follows updates after
+   * mount — required so a cold-start `null → non-null` transition
+   * doesn't leave the camera at the default world view, and so a fresh
+   * `useCurrentLocation` reading after a stale-cached one re-centres.
+   *
+   * Comparison is on lat/lng only (rounded), not object identity —
+   * call sites that build `initialRegion` as a fresh literal each
+   * render won't churn animations.
    */
   readonly initialRegion: MapRegion | null;
   /** Pickup pin. `null` to hide. */
@@ -133,6 +142,21 @@ const ALT_POLYLINE_SLOTS = 3;
 const HIDDEN_COORD = { latitude: 0, longitude: 0 } as const;
 
 /**
+ * `animateToRegion` duration in ms. Short enough to feel responsive on a
+ * cold-start null→non-null transition, long enough to not feel like a
+ * jump cut.
+ */
+const ANIMATE_TO_REGION_MS = 350;
+
+/**
+ * Rounded-precision threshold for the camera-follow effect. Two regions
+ * are treated as "the same place" when |Δlat| < 1e-5 AND |Δlng| < 1e-5
+ * (~1.1m at the equator). Stops floating-point churn from fresh literal
+ * objects on every render from triggering a re-animation.
+ */
+const REGION_EPSILON = 1e-5;
+
+/**
  * Color tokens — inlined hex with a `// --token` comment per the legacy
  * design-system convention (Tailwind classes don't reach into native map
  * primitives).
@@ -151,6 +175,53 @@ export function Map({
   alternativeRoutes,
   onRegionChangeComplete,
 }: MapProps) {
+  // Imperative ref into the native MapView. Used solely for
+  // `animateToRegion` (camera-follow effect below). The MapView's
+  // `initialRegion` prop is still the canonical placement for the
+  // first non-null value at mount; the ref kicks in for every change
+  // after that.
+  const mapRef = useRef<MapViewMethods>(null);
+
+  // Last region we actively applied — either via the native
+  // `initialRegion` prop (first non-null value at mount) or via a
+  // subsequent `animateToRegion` call. Used to dedupe so a fresh
+  // literal with the same lat/lng doesn't kick off an animation each
+  // render. `null` until the first non-null region is observed.
+  const lastAppliedRef = useRef<{
+    readonly latitude: number;
+    readonly longitude: number;
+  } | null>(initialRegion ? toLatLng(initialRegion) : null);
+
+  // Whether MapView mounted with a non-null `initialRegion`. When true,
+  // the native prop already placed the camera and the effect skips
+  // animating to the SAME value on first paint. When false (cold
+  // start with `initialRegion={null}`), the first non-null value will
+  // arrive via the effect and `animateToRegion` is the only path
+  // that moves the camera off the default world view.
+  const mountedWithInitialRegionRef = useRef<boolean>(initialRegion !== null);
+
+  useEffect(() => {
+    if (!initialRegion) return;
+    const next = toLatLng(initialRegion);
+    const last = lastAppliedRef.current;
+    if (last && approxSamePlace(last, next)) return;
+    lastAppliedRef.current = next;
+
+    // First-effect-pass exception: if the consumer passed a non-null
+    // `initialRegion` at mount, the native prop has already placed the
+    // camera. Don't double-animate to the same point.
+    if (last === null && mountedWithInitialRegionRef.current) {
+      return;
+    }
+
+    // Either (a) cold-start null → non-null transition, or (b) a real
+    // post-mount change in the centre. Either way, animate.
+    mapRef.current?.animateToRegion(
+      toRNRegion(initialRegion),
+      ANIMATE_TO_REGION_MS,
+    );
+  }, [initialRegion]);
+
   // Decode polylines once per change — react-native-maps wants
   // `Coordinates[]`, not encoded strings.
   const selectedCoords = useMemo<DecodedPoint[]>(
@@ -177,6 +248,7 @@ export function Map({
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
         showsCompass={true}
@@ -273,6 +345,20 @@ export function Map({
 
 function toCoord(c: Coordinates): { latitude: number; longitude: number } {
   return { latitude: c.latitude, longitude: c.longitude };
+}
+
+function toLatLng(r: MapRegion): { latitude: number; longitude: number } {
+  return { latitude: r.latitude, longitude: r.longitude };
+}
+
+function approxSamePlace(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): boolean {
+  return (
+    Math.abs(a.latitude - b.latitude) < REGION_EPSILON &&
+    Math.abs(a.longitude - b.longitude) < REGION_EPSILON
+  );
 }
 
 function toRNRegion(r: MapRegion): RNRegion {

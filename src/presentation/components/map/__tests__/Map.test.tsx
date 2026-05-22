@@ -1,5 +1,7 @@
 import { render } from '@testing-library/react-native';
 
+import { animateToRegionCalls, resetMapMockState } from 'react-native-maps';
+
 import { Map } from '../Map';
 
 /**
@@ -40,6 +42,10 @@ const baseProps = {
 } as const;
 
 describe('Map', () => {
+  beforeEach(() => {
+    resetMapMockState();
+  });
+
   it('passes PROVIDER_GOOGLE to MapView (Phase 9 turn 1 — iOS Apple Maps Fabric escape)', () => {
     const { getByTestId } = render(<Map {...baseProps} />);
     // The mocked MapView encodes the `provider` prop into its testID, so
@@ -62,5 +68,63 @@ describe('Map', () => {
     // with `opacity={0}` and a dummy coordinate.
     const { getAllByTestId } = render(<Map {...baseProps} />);
     expect(getAllByTestId('map-marker-opacity-0')).toHaveLength(3);
+  });
+
+  /**
+   * Camera-follow effect (the fix for the "driver home shows the last
+   * dropoff location" bug). Three invariants:
+   *   1. A non-null `initialRegion` at mount uses MapView's native
+   *      `initialRegion` prop — no `animateToRegion` call.
+   *   2. A `null → non-null` transition (cold start) animates so the
+   *      camera leaves the default world view.
+   *   3. A real value change (different lat/lng) animates.
+   *   4. A fresh literal with the SAME lat/lng does NOT animate —
+   *      otherwise call sites that build `initialRegion` inline on
+   *      every render would churn animations continuously.
+   */
+  describe('camera-follow effect', () => {
+    const region = (lat: number, lng: number) => ({
+      latitude: lat,
+      longitude: lng,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    });
+
+    it('does NOT animate when initialRegion is non-null on first render (native prop handles placement)', () => {
+      render(<Map {...baseProps} initialRegion={region(26.1, -80.2)} />);
+      expect(animateToRegionCalls).toHaveLength(0);
+    });
+
+    it('animates when initialRegion transitions null → non-null (cold start fix)', () => {
+      const { rerender } = render(<Map {...baseProps} initialRegion={null} />);
+      expect(animateToRegionCalls).toHaveLength(0);
+
+      rerender(<Map {...baseProps} initialRegion={region(26.1, -80.2)} />);
+      expect(animateToRegionCalls).toHaveLength(1);
+      expect(animateToRegionCalls[0]?.region.latitude).toBeCloseTo(26.1);
+      expect(animateToRegionCalls[0]?.region.longitude).toBeCloseTo(-80.2);
+    });
+
+    it('animates when initialRegion changes to a different lat/lng post-mount', () => {
+      const { rerender } = render(
+        <Map {...baseProps} initialRegion={region(26.1, -80.2)} />,
+      );
+      expect(animateToRegionCalls).toHaveLength(0);
+
+      rerender(<Map {...baseProps} initialRegion={region(26.2, -80.3)} />);
+      expect(animateToRegionCalls).toHaveLength(1);
+      expect(animateToRegionCalls[0]?.region.latitude).toBeCloseTo(26.2);
+      expect(animateToRegionCalls[0]?.region.longitude).toBeCloseTo(-80.3);
+    });
+
+    it('does NOT animate when initialRegion is a fresh literal with the same lat/lng', () => {
+      const { rerender } = render(
+        <Map {...baseProps} initialRegion={region(26.1, -80.2)} />,
+      );
+      // Re-render with a brand-new object literal at the same coords —
+      // approxSamePlace dedupe should suppress the animation.
+      rerender(<Map {...baseProps} initialRegion={region(26.1, -80.2)} />);
+      expect(animateToRegionCalls).toHaveLength(0);
+    });
   });
 });

@@ -42,7 +42,10 @@ export interface MapViewProps {
   onRegionChangeComplete?: (region: Region) => void;
   onPress?: (event: { nativeEvent: { coordinate: LatLng } }) => void;
   children?: ReactNode;
-  ref?: RefObject<MapViewMethods>;
+  // `useRef<MapViewMethods>(null)` yields `RefObject<MapViewMethods | null>`
+  // — accept that shape so consumer components can pass a ref straight
+  // through without a non-null assertion.
+  ref?: RefObject<MapViewMethods | null>;
 }
 
 export interface MapViewMethods {
@@ -92,3 +95,34 @@ export const Polyline: ComponentType<PolylineProps>;
 // `node_modules/react-native-maps/src/ProviderConstants.ts`.
 export const PROVIDER_GOOGLE: 'google';
 export const PROVIDER_DEFAULT: undefined;
+
+// ─────────────────────────────────────────────────────────────────────
+// Test-only mock exports (jest manual mock at `__mocks__/react-native-maps.tsx`)
+// ─────────────────────────────────────────────────────────────────────
+//
+// These exports DON'T exist on the real package at runtime — they're
+// surfaced ONLY by the jest auto-discovered manual mock so consumer
+// tests can assert that `<Map>` called the camera-follow imperative
+// (`animateToRegion`). Declaring them here keeps test imports
+// type-checking under our strict tsconfig without forcing tests to
+// reach into `__mocks__/` via a fragile relative path.
+//
+// At production build time these are unreferenced; nothing ships. If
+// the shim is removed in the future, also remove these declarations
+// (and update the mock to expose the spies via a different channel —
+// e.g. a global symbol — if tests still need them).
+
+/**
+ * Per-render capture of every `animateToRegion` call made through a
+ * MapView ref. Append-only inside the mock; tests should reset via
+ * `resetMapMockState()` in `beforeEach`.
+ */
+export const animateToRegionCalls: Array<{
+  region: Region;
+  durationMs?: number;
+}>;
+
+/**
+ * Truncates `animateToRegionCalls` to length 0. Call from `beforeEach`.
+ */
+export function resetMapMockState(): void;
