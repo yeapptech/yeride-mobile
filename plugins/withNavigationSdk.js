@@ -472,6 +472,34 @@ function withNavigationSdkRnMapsPatches(config) {
         changed = true;
       }
 
+      // 3-pre. `onCreate(LifecycleOwner)` NPE swallow — production
+      //    Crashlytics (yeapp-prod, build 247) showed nt.ct.b NPE
+      //    thrown synchronously from MapView.<init> when
+      //    LifecycleRegistry.addObserver dispatches CREATED to the
+      //    freshly-registered observer. super.onCreate routes into the
+      //    Nav SDK's rerouted GMS MapView delegate before it has been
+      //    initialized for this instance.
+      const createObserverOriginal =
+        '    public void onCreate(LifecycleOwner owner) {\n' +
+        '        super.onCreate(null);\n' +
+        '    }';
+      const createObserverPatched =
+        '    public void onCreate(LifecycleOwner owner) {\n' +
+        '        try { super.onCreate(null); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }\n' +
+        '    }';
+      if (
+        content.includes(createObserverOriginal) &&
+        !content.includes(
+          'try { super.onCreate(null); } catch (NullPointerException e) { /* Nav SDK + RN Maps coexistence NPE */ }',
+        )
+      ) {
+        content = content.replace(
+          createObserverOriginal,
+          createObserverPatched,
+        );
+        changed = true;
+      }
+
       // 3a. `onStart(LifecycleOwner)` NPE swallow — defensive. Same
       //    family of NPE can fire on `super.onStart()` during the same
       //    background→foreground transition as onResume. The activity

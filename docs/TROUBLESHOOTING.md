@@ -134,6 +134,31 @@ correctly. `npm run prebuild` + a fresh `pod install` + a clean
 Xcode build are required after touching either the plugin or
 `react-native-maps`.
 
+## Android: `NullPointerException` in `libraries.navigation.internal.agf.*` on MapView lifecycle
+
+`@googlemaps/react-native-navigation-sdk` globally reroutes every
+`com.google.android.gms.maps.MapView` lifecycle method through its
+internal delegate. If a `react-native-maps` MapView is in a
+partially-initialized state when the Activity transitions (image
+picker / camera opens, app goes background, view constructed while
+the Activity is already in CREATED+ state, etc.), the super-chained
+lifecycle call dereferences the null delegate and takes the whole
+Activity transaction down.
+
+Production Crashlytics on the legacy app saw three variants of this
+NPE family — `agf.df.aE` on `onPause`, `agf.fm.j` on `onStop`,
+`nt.ct.b` on `MapView.<init>` (via the lifecycle observer
+synchronously dispatching `onCreate`). All three are covered by
+`plugins/withNavigationSdk.js`, which patches the
+`onCreate` / `onStart` / `onResume` / `onPause` / `onStop` /
+`onDestroy` lifecycle observer methods in
+`node_modules/react-native-maps/.../MapView.java` to swallow
+`NullPointerException` around every super-chained call.
+
+If a new variant surfaces in Crashlytics from a method not yet
+patched, extend the plugin the same way. Requires `npm run prebuild`
+after touching the plugin.
+
 ## Android: `Could not find com.transistorsoft:tsbackgroundfetch:1.0.4`
 
 Modern npm hoists `react-native-background-fetch` to top-level
