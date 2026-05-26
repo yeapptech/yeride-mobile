@@ -209,6 +209,7 @@ export function makeRideAt(
         cancellation: requested.cancellation,
         routePreference: requested.routePreference,
         schedulePickupAt: requested.schedulePickupAt,
+        paymentFailure: requested.paymentFailure,
       }),
     );
   }

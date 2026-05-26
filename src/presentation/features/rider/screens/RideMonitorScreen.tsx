@@ -221,7 +221,16 @@ function RideMonitorContent({ rideId }: { rideId: RideId }) {
               }
             />
           ) : ride.status === 'payment_failed' ? (
-            <PaymentFailedView ride={ride} />
+            <PaymentFailedView
+              ride={ride}
+              onPressOpenWallet={() =>
+                // Open the Wallet tab so the rider can add or update
+                // a card. Tab navigation goes through `RiderTabs` —
+                // we navigate, not replace, so the back-stack lands
+                // the rider here again after they update Wallet.
+                navigation.navigate('RiderTabs', { screen: 'Wallet' })
+              }
+            />
           ) : (
             // 'cancelled' should never render here — the view-model
             // redirects on that status — but if React commits a frame

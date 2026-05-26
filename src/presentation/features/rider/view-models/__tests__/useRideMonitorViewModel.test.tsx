@@ -11,6 +11,7 @@ import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
 import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import { PaymentFailure } from '@domain/entities/PaymentFailure';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
 import { Ride } from '@domain/entities/Ride';
@@ -158,6 +159,7 @@ function makeDispatchedRide(): Ride {
       cancellation: null,
       routePreference: null,
       schedulePickupAt: null,
+      paymentFailure: null,
     }),
   );
 }
@@ -393,6 +395,7 @@ describe('useRideMonitorViewModel', () => {
         cancellation: null,
         routePreference: null,
         schedulePickupAt: null,
+        paymentFailure: null,
       }),
     );
     await ridesRepo.update(completed);
@@ -428,6 +431,7 @@ describe('useRideMonitorViewModel', () => {
         cancellation: null,
         routePreference: null,
         schedulePickupAt: null,
+        paymentFailure: null,
       }),
     );
     await ridesRepo.update(failed);
@@ -437,6 +441,60 @@ describe('useRideMonitorViewModel', () => {
 
     expect(mockReplace).not.toHaveBeenCalled();
     expect(mockReset).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Phase 10 Turn 10.5 — when a `payment_failed` ride carries a
+   * `paymentFailure` (synchronous-error path), the view-model passes
+   * it straight through on `vm.ride`. The screen-level status-router
+   * picks the `PaymentFailedView`, which renders code-driven copy.
+   * No transform here — just a smoke that the field survives the
+   * Firestore-subscription → state plumbing.
+   */
+  it('surfaces ride.paymentFailure to consumers (sync-error path)', async () => {
+    const ridesRepo = new InMemoryRideRepository();
+    const initial = makeAwaitingRide();
+    await ridesRepo.create(initial);
+
+    const { result } = renderHook(
+      () => useRideMonitorViewModel({ rideId: RIDE_ID }),
+      { wrapper: withTestContainer({ ridesRepo }) },
+    );
+
+    const failureR = PaymentFailure.create({
+      code: 'trip_missing_payment_method',
+      message: 'passenger.defaultPaymentMethod.id is missing',
+      occurredAt: new Date('2026-05-26T12:00:00Z'),
+    });
+    if (!failureR.ok) throw failureR.error;
+
+    const failed = unwrap(
+      Ride.fromProps({
+        id: RIDE_ID,
+        status: 'payment_failed',
+        passenger: initial.passenger,
+        driver: null,
+        rideService: initial.rideService,
+        pickup: initial.pickup,
+        dropoff: initial.dropoff,
+        createdAt: initial.createdAt,
+        pickupTiming: initial.pickupTiming,
+        dropoffTiming: initial.dropoffTiming,
+        cancellation: null,
+        routePreference: null,
+        schedulePickupAt: null,
+        paymentFailure: failureR.value,
+      }),
+    );
+    await ridesRepo.update(failed);
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('payment_failed');
+    });
+    expect(result.current.ride?.paymentFailure?.code).toBe(
+      'trip_missing_payment_method',
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it('onPressChat opens the chat modal, sets openRideId, and fires markMessagesRead', async () => {
@@ -660,6 +718,7 @@ describe('useRideMonitorViewModel', () => {
           cancellation: null,
           routePreference: null,
           schedulePickupAt: null,
+          paymentFailure: null,
         }),
       );
       await ridesRepo.update(started);
@@ -838,6 +897,7 @@ describe('useRideMonitorViewModel', () => {
           cancellation: null,
           routePreference: null,
           schedulePickupAt: null,
+          paymentFailure: null,
         }),
       );
     }

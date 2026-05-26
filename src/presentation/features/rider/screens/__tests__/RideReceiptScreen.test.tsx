@@ -137,6 +137,7 @@ function makeCompletedRide(): Ride {
       cancellation: null,
       routePreference: null,
       schedulePickupAt: null,
+      paymentFailure: null,
     }),
   );
 }
@@ -166,8 +167,11 @@ const baseScreenProps = {
   },
   // Done now calls `reset` (not `popToTop`) so the rider always lands
   // back on RiderTabs regardless of how they reached the receipt.
+  // `replace` is wired for Phase 10 Turn 10.5's payment_failed
+  // redirect to `RideMonitor`.
   navigation: {
     reset: jest.fn(),
+    replace: jest.fn(),
   } as unknown as Parameters<typeof RideReceiptScreen>[0]['navigation'],
 };
 
@@ -576,6 +580,7 @@ describe('RideReceiptScreen — Phase 9 Turn 16 share-receipt CTA', () => {
         cancellation: null,
         routePreference: null,
         schedulePickupAt: null,
+        paymentFailure: null,
       }),
     );
     mockUseRideReceiptViewModel.mockReturnValue({
@@ -598,5 +603,145 @@ describe('RideReceiptScreen — Phase 9 Turn 16 share-receipt CTA', () => {
       <RideReceiptScreen {...baseScreenProps} />,
     );
     expect(queryByTestId('receipt-share-cta')).toBeNull();
+  });
+});
+
+/* ─── Phase 10 Turn 10.5 — payment_failed redirect ───────────── */
+
+describe('RideReceiptScreen — Phase 10 Turn 10.5 payment_failed redirect', () => {
+  beforeEach(() => {
+    mockUseRideReceiptViewModel.mockReset();
+    mockUseTipFlowViewModel.mockReset();
+    mockUseGenerateReceiptPdfViewModel.mockReset();
+    mockUseTipFlowViewModel.mockReturnValue({ state: { kind: 'hidden' } });
+    mockUseGenerateReceiptPdfViewModel.mockReturnValue({
+      state: { kind: 'idle', onShare: () => undefined },
+    });
+  });
+
+  function makePaymentFailedRide(): Ride {
+    const passenger = unwrap(
+      PassengerSnapshot.create({
+        id: unwrap(UserId.create('aaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
+        name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+        email: unwrap(Email.create('rider@yeapp.tech')),
+        phoneNumber: unwrap(PhoneNumber.create('+14155550123')),
+        pushToken: null,
+        avatarUrl: null,
+        stripeCustomerId: null,
+        defaultPaymentMethod: null,
+      }),
+    );
+    const tier = unwrap(
+      RideServiceSnapshot.create({
+        id: unwrap(RideServiceId.create('economy')),
+        name: 'Economy',
+        baseFare: usd(2.5),
+        minimumFare: usd(5),
+        cancelationFee: usd(2),
+        costPerKm: usd(1.25),
+        costPerMinute: usd(0.2),
+        seatCapacity: 4,
+      }),
+    );
+    return unwrap(
+      Ride.fromProps({
+        id: RIDE_ID,
+        status: 'payment_failed',
+        passenger,
+        driver: null,
+        rideService: tier,
+        pickup: unwrap(
+          Endpoint.create({
+            location: unwrap(Coordinates.create(25.7617, -80.1918)),
+            address: 'Bayfront Park',
+            placeName: 'Bayfront Park',
+            directions: null,
+          }),
+        ),
+        dropoff: unwrap(
+          Endpoint.create({
+            location: unwrap(Coordinates.create(26.1224, -80.1373)),
+            address: '1 Las Olas Blvd',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        createdAt: new Date('2026-04-28T10:00:00Z'),
+        pickupTiming: {
+          startedAt: new Date('2026-04-28T10:00:00Z'),
+          completedAt: new Date('2026-04-28T10:05:00Z'),
+          odometerMeters: 0,
+          elapsedSeconds: 300,
+        },
+        dropoffTiming: {
+          startedAt: new Date('2026-04-28T10:05:00Z'),
+          completedAt: new Date('2026-04-28T10:30:00Z'),
+          odometerMeters: 10_000,
+        },
+        cancellation: null,
+        routePreference: null,
+        schedulePickupAt: null,
+        paymentFailure: null,
+      }),
+    );
+  }
+
+  it('replaces with RideMonitor when the live ride flips to payment_failed', () => {
+    const failed = makePaymentFailedRide();
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: failed,
+      payments: [],
+      fareTotal: null,
+      farePayment: null,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
+      isLoading: false,
+      error: null,
+    });
+
+    const replace = jest.fn();
+    const props = {
+      ...baseScreenProps,
+      navigation: {
+        reset: jest.fn(),
+        replace,
+      } as unknown as Parameters<typeof RideReceiptScreen>[0]['navigation'],
+    };
+    render(<RideReceiptScreen {...props} />);
+
+    expect(replace).toHaveBeenCalledWith('RideMonitor', {
+      rideId: String(RIDE_ID),
+    });
+  });
+
+  it('does NOT redirect on a completed ride (the normal happy path)', () => {
+    const completed = makeCompletedRide();
+    mockUseRideReceiptViewModel.mockReturnValue({
+      ride: completed,
+      payments: [],
+      fareTotal: null,
+      farePayment: null,
+      tipPayment: null,
+      refundPayment: null,
+      paymentBrand: null,
+      paymentLast4: null,
+      isLoading: false,
+      error: null,
+    });
+
+    const replace = jest.fn();
+    const props = {
+      ...baseScreenProps,
+      navigation: {
+        reset: jest.fn(),
+        replace,
+      } as unknown as Parameters<typeof RideReceiptScreen>[0]['navigation'],
+    };
+    render(<RideReceiptScreen {...props} />);
+
+    expect(replace).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,7 @@ import type { CancellationReason } from './CancellationReason';
 import type { DriverSnapshot } from './DriverSnapshot';
 import type { Endpoint } from './Endpoint';
 import type { PassengerSnapshot } from './PassengerSnapshot';
+import type { PaymentFailure } from './PaymentFailure';
 import type { RideId } from './RideId';
 import type { RideServiceSnapshot } from './RideServiceSnapshot';
 import type { RideStatus } from './RideStatus';
@@ -112,6 +113,27 @@ export interface RideProps {
    * re-schedule, the rider cancels and creates a new ride.
    */
   readonly schedulePickupAt: Date | null;
+  /**
+   * Phase 10 Turn 10.5 — structured payment failure detail. Non-null
+   * when the synchronous payment path (yeride-functions
+   * `processPayment` → yeride-stripe-server `/direct-charge`) errored
+   * before a Stripe `PaymentIntent` was created. The trigger-side
+   * catch block flips `status` to `'payment_failed'` AND writes
+   * `paymentError: {code, message, occurredAt}` in the same Firestore
+   * update — both fields move together. Carries a typed `code` so
+   * `PaymentFailedView` can surface actionable copy (e.g. "Add a
+   * payment method" vs. "Your card was declined") instead of a
+   * generic error.
+   *
+   * Distinct from the Stripe-async failure path: when a
+   * `PaymentIntent` IS created but the charge later fails, the
+   * Stripe webhook flips status to `'payment_failed'` WITHOUT
+   * writing this field (the webhook server is purposely thin on
+   * structured-error context — the existing `payment.decline_code`
+   * pattern is what surfaces there). On both paths the view falls
+   * back to a generic message when `paymentFailure === null`.
+   */
+  readonly paymentFailure: PaymentFailure | null;
 }
 
 /**
@@ -181,6 +203,7 @@ export class Ride {
         cancellation: null,
         routePreference: args.routePreference ?? null,
         schedulePickupAt: null,
+        paymentFailure: null,
       }),
     );
   }
@@ -275,6 +298,7 @@ export class Ride {
         cancellation: null,
         routePreference: args.routePreference ?? null,
         schedulePickupAt: args.schedulePickupAt,
+        paymentFailure: null,
       }),
     );
   }
@@ -319,6 +343,9 @@ export class Ride {
   }
   get schedulePickupAt(): Date | null {
     return this.props.schedulePickupAt;
+  }
+  get paymentFailure(): PaymentFailure | null {
+    return this.props.paymentFailure;
   }
 
   /* ────────── transitions ────────── */

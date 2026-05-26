@@ -38,6 +38,13 @@ export {
   type PaymentMethodExpiry,
   type PaymentMethodProps,
 } from './PaymentMethod';
+export {
+  PaymentFailure,
+  KNOWN_PAYMENT_FAILURE_CODES,
+  isKnownPaymentFailureCode,
+  type KnownPaymentFailureCode,
+  type PaymentFailureProps,
+} from './PaymentFailure';
 export { Payout, type PayoutStatus, type PayoutProps } from './Payout';
 export {
   BalanceTransaction,

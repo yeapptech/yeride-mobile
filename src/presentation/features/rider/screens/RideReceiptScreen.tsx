@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -80,6 +81,31 @@ function RideReceiptContent({
   readonly navigation: RiderStackNavigation;
 }) {
   const vm = useRideReceiptViewModel({ rideId });
+
+  // Phase 10 Turn 10.5 — receipt-side payment_failed redirect.
+  //
+  // The receipt screen's normal landing is `payment_requested` →
+  // `completed` via `useRideMonitorViewModel.replace`. But if the
+  // synchronous-error path on the Cloud Function flips a trip
+  // FROM `'completed'` (set by the `completeTrip` callable's
+  // transaction) directly TO `'payment_failed'` (set by
+  // `processPayment` catch in the same Cloud-Function invocation),
+  // and the rider was already on `RideReceipt` by then, the
+  // receipt's "Trip complete" UI is misleading — the charge
+  // didn't actually clear. Redirect back to `RideMonitor` so the
+  // rider sees the actionable `PaymentFailedView`.
+  //
+  // Same defensive-ref pattern as `useRideMonitorViewModel`'s
+  // terminal redirect — once dispatched, the ref blocks re-fire
+  // on a re-render with the same status.
+  const redirectedRef = useRef(false);
+  useEffect(() => {
+    if (vm.ride === null) return;
+    if (vm.ride.status !== 'payment_failed') return;
+    if (redirectedRef.current) return;
+    redirectedRef.current = true;
+    navigation.replace('RideMonitor', { rideId: String(rideId) });
+  }, [vm.ride, navigation, rideId]);
 
   // Tip flow lives in its own VM so the receipt VM stays read-only.
   // We feed in the live `ride` + `tipPayment` so the selector hides the

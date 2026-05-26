@@ -12,6 +12,7 @@ import {
   PassengerSnapshot,
   type PassengerPaymentMethod,
 } from '@domain/entities/PassengerSnapshot';
+import { PaymentFailure } from '@domain/entities/PaymentFailure';
 import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
@@ -45,6 +46,7 @@ import {
   type RideServiceEmbeddedDoc as LegacyRideServiceEmbeddedDoc,
   type VehicleSnapshotDoc as LegacyVehicleSnapshotDoc,
   type LegacyPlaceAddress,
+  type PaymentErrorDoc,
   type PickupEndpointDoc,
   type RideDoc,
   type RoutePreferenceDoc,
@@ -159,6 +161,17 @@ export function toDomain(
     }
   })();
 
+  // Phase 10 Turn 10.5 — structured payment-failure detail. The
+  // trigger-side `processPayment` catch block writes this on
+  // synchronous-error paths; the Stripe-async path doesn't, so a
+  // `'payment_failed'` ride may legitimately carry `null` here (the
+  // view falls back to a generic message in that branch). Malformed
+  // on-disk shapes degrade to null with a logger.error rather than
+  // crashing the trip read — same defensive treatment as
+  // `stripeCustomerId` / `defaultPaymentMethod.id` on the passenger
+  // snapshot.
+  const paymentFailure = paymentFailureFromDoc(doc.paymentError ?? null);
+
   return Ride.fromProps({
     id: idR.value,
     status: normalizedStatus,
@@ -176,7 +189,46 @@ export function toDomain(
     // Firestore Timestamp / ISO-string variants to a `Date | null`.
     // Undefined (missing field) folds to null at the domain boundary.
     schedulePickupAt: doc.schedulePickupAt ?? null,
+    paymentFailure,
   });
+}
+
+/**
+ * Project the DTO `paymentError` field into the domain
+ * `PaymentFailure` value object. Returns `null` when:
+ *
+ *   - the field is absent / null on disk (legacy trip docs, the
+ *     Stripe-async-failure path that doesn't write it)
+ *   - `occurredAt` failed the Firestore-Timestamp duck-type check
+ *     (DTO preprocess returned null) — we'd rather degrade to null
+ *     than fabricate a timestamp
+ *   - the `PaymentFailure.create` factory rejects (corrupted
+ *     on-disk shape that snuck past the DTO's broad bounds)
+ *
+ * Per Phase 9 turn 11's `logger.error` policy on similar mapper-side
+ * corruption (see passenger snapshot's malformed stripeCustomerId
+ * branch above), a `PaymentFailure.create` rejection is an
+ * unrecoverable on-disk shape problem worth a Crashlytics
+ * non-fatal — but the trip read continues with `paymentFailure:
+ * null` so the rider isn't blocked from seeing their trip.
+ */
+function paymentFailureFromDoc(
+  raw: PaymentErrorDoc | null,
+): PaymentFailure | null {
+  if (raw === null) return null;
+  if (!(raw.occurredAt instanceof Date)) return null;
+  const r = PaymentFailure.create({
+    code: raw.code,
+    message: raw.message,
+    occurredAt: raw.occurredAt,
+  });
+  if (!r.ok) {
+    logger.error('paymentFailureFromDoc: malformed paymentError on trip doc', {
+      error: new Error(`trip_doc_malformed_payment_error: ${r.error.code}`),
+    });
+    return null;
+  }
+  return r.value;
 }
 
 function passengerToDomain(
@@ -659,6 +711,24 @@ export function toDoc(ride: Ride): RideDoc {
     ...(ride.schedulePickupAt !== null
       ? { schedulePickupAt: ride.schedulePickupAt }
       : {}),
+    // Phase 10 Turn 10.5 — symmetric write of `paymentError`. The
+    // server-side (yeride-functions `processPayment` catch) is the
+    // canonical writer of this field; the rewrite's `toDoc` only
+    // emits it on a round-trip from a Ride that already has one
+    // (e.g. legacy → domain → write-back to merge with another
+    // unrelated update). Same omit-when-null pattern as
+    // schedulePickupAt to avoid `undefined` Firestore writes.
+    ...(ride.paymentFailure !== null
+      ? { paymentError: paymentFailureToDoc(ride.paymentFailure) }
+      : {}),
+  };
+}
+
+function paymentFailureToDoc(f: PaymentFailure): PaymentErrorDoc {
+  return {
+    code: f.code,
+    message: f.message,
+    occurredAt: f.occurredAt,
   };
 }
 

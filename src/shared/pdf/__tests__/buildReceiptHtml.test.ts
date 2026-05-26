@@ -127,6 +127,7 @@ function makeCompletedRide(opts: { withDriver?: boolean } = {}): Ride {
       cancellation: null,
       routePreference: null,
       schedulePickupAt: null,
+      paymentFailure: null,
     }),
   );
 }
@@ -423,6 +424,7 @@ describe('buildReceiptHtml', () => {
         cancellation: null,
         routePreference: null,
         schedulePickupAt: null,
+        paymentFailure: null,
       }),
     );
     const html = buildReceiptHtml({

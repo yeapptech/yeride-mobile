@@ -439,6 +439,84 @@ const RoutePreferenceDocSchema = z.object({
   routeToken: z.string().nullish(),
 });
 
+/**
+ * `paymentError.occurredAt` accepter.
+ *
+ * The server-side write uses `admin.firestore.FieldValue.serverTimestamp()`,
+ * which resolves to a Firestore `Timestamp` instance on read — same shape
+ * handling as `SchedulePickupAtSchema`. We additionally tolerate ISO
+ * strings (for client-side parity with legacy emitters) and `null` /
+ * missing (where the schema falls back to a `null`-tolerant
+ * `paymentFailure` on the domain).
+ *
+ * Mirrors the duck-type detection in `SchedulePickupAtSchema` — the
+ * Firestore `Timestamp` class is identified by the combined
+ * `toDate()` method + numeric `seconds` field rather than an
+ * `instanceof` check, so the DTO doesn't pull
+ * `@react-native-firebase/firestore` into module-load time.
+ */
+const PaymentErrorOccurredAtSchema = z.preprocess((val) => {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    return Number.isNaN(val.getTime()) ? null : val;
+  }
+  if (typeof val === 'string') {
+    if (val.length === 0) return null;
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (
+    typeof val === 'object' &&
+    val !== null &&
+    'toDate' in val &&
+    typeof (val as { toDate: unknown }).toDate === 'function' &&
+    'seconds' in val &&
+    typeof (val as { seconds: unknown }).seconds === 'number'
+  ) {
+    try {
+      const d = (val as { toDate: () => Date }).toDate();
+      return Number.isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}, z.date().nullable());
+
+/**
+ * Phase 10 Turn 10.5 — structured payment-failure detail written by
+ * `yeride-functions/lib/payments.js` `processPayment` catch block on
+ * synchronous-error paths (validation failure, expired card at
+ * request-time, Stripe microservice network error before a
+ * `PaymentIntent` is created).
+ *
+ * The same Firestore `update()` call sets `status: 'payment_failed'`
+ * AND this field — they move together. Distinct from the
+ * Stripe-async failure path, which flips status via the webhook
+ * server WITHOUT writing this field (the webhook is purposely thin
+ * on structured-error context — the existing `payment.decline_code`
+ * is what surfaces there).
+ *
+ * The on-disk shape is intentionally narrow:
+ *   - `code` (string)         — domain-level code from
+ *                                `pickDomainCodeForValidation` OR a
+ *                                resolved Stripe error code (the
+ *                                rewrite's catalog is in
+ *                                `KnownPaymentFailureCode`).
+ *   - `message` (string)      — raw server-side message (possibly
+ *                                empty when the server emits a
+ *                                sparse error).
+ *   - `occurredAt` (Timestamp) — `admin.firestore.FieldValue
+ *                                .serverTimestamp()` at write time;
+ *                                see `PaymentErrorOccurredAtSchema`
+ *                                JSDoc for the duck-type accepter.
+ */
+const PaymentErrorDocSchema = z.object({
+  code: z.string().min(1).max(128),
+  message: z.string().max(1024).default(''),
+  occurredAt: PaymentErrorOccurredAtSchema,
+});
+
 export const RideDocSchema = z.object({
   passenger: PassengerDocSchema,
   driver: DriverDocOrNullishSchema,
@@ -517,6 +595,11 @@ export const RideDocSchema = z.object({
   // share the on-disk Firestore Timestamp shape.
   lastSeenByRiderAt: SchedulePickupAtSchema.optional(),
   lastSeenByDriverAt: SchedulePickupAtSchema.optional(),
+  // Phase 10 Turn 10.5 — structured payment-failure detail. See
+  // `PaymentErrorDocSchema` JSDoc above. Optional + nullish so legacy
+  // trip docs (and the Stripe-async-failure path that doesn't write
+  // this field) parse as `paymentFailure: null` on the domain.
+  paymentError: PaymentErrorDocSchema.nullish(),
 });
 
 export type RideDoc = z.infer<typeof RideDocSchema>;
@@ -531,3 +614,4 @@ export type CancellationDoc = z.infer<typeof CancellationDocSchema>;
 export type RoutePreferenceDoc = z.infer<typeof RoutePreferenceDocSchema>;
 export type EndpointAddressField = z.infer<typeof EndpointAddressFieldSchema>;
 export type LegacyPlaceAddress = z.infer<typeof LegacyPlaceAddressSchema>;
+export type PaymentErrorDoc = z.infer<typeof PaymentErrorDocSchema>;

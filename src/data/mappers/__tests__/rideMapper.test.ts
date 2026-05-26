@@ -8,6 +8,7 @@ import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
 import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
+import { PaymentFailure } from '@domain/entities/PaymentFailure';
 import { PaymentMethodId } from '@domain/entities/PaymentMethodId';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
@@ -1400,5 +1401,194 @@ describe('schedulePickupAt — scheduled-ride field', () => {
     const parsed = unwrap(parseRideDoc(doc));
     const round = unwrap(toDomain('test-id', parsed));
     expect(round.schedulePickupAt).toBeNull();
+  });
+});
+
+/**
+ * Phase 10 Turn 10.5 — paymentError DTO round-trip + mapper coverage.
+ *
+ * Legacy docs (and the Stripe-async-failure path on the rewrite)
+ * don't write the field; reads must surface `paymentFailure: null`
+ * without throwing. The synchronous-error path on the rewrite
+ * Cloud Function writes `paymentError: {code, message, occurredAt}`
+ * alongside the `status: 'payment_failed'` flip; reads must project
+ * that into a `PaymentFailure` value object on the domain.
+ */
+describe('paymentError DTO ↔ domain (Phase 10 Turn 10.5)', () => {
+  function baseDoc() {
+    return {
+      passenger: {
+        id: String(PASSENGER.id),
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@yeapp.tech',
+        phoneNumber: '+14155551111',
+      },
+      rideService: {
+        id: 'economy',
+        name: 'Economy',
+        baseFare: 2.5,
+        minimumFare: 5,
+        cancelationFee: 2,
+        costPerKm: 1.25,
+        costPerMinute: 0.2,
+        seat: 4,
+      },
+      createdDateTime: T_CREATED.toISOString(),
+      pickup: { latitude: 25.7617, longitude: -80.1918, address: 'A' },
+      dropoff: { latitude: 26.1224, longitude: -80.1373, address: 'B' },
+    };
+  }
+
+  it('legacy doc without paymentError reads as paymentFailure: null', () => {
+    const doc = { ...baseDoc(), status: 'completed' as const };
+    const parsed = unwrap(parseRideDoc(doc));
+    const ride = unwrap(toDomain('legacy-id', parsed));
+    expect(ride.paymentFailure).toBeNull();
+  });
+
+  it('new doc with paymentError reads as PaymentFailure value object', () => {
+    const occurredAt = new Date('2026-05-26T15:00:00Z');
+    const doc = {
+      ...baseDoc(),
+      status: 'payment_failed' as const,
+      paymentError: {
+        code: 'trip_missing_payment_method',
+        message: 'passenger.defaultPaymentMethod.id is missing',
+        occurredAt,
+      },
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    const ride = unwrap(toDomain('failed-id', parsed));
+    expect(ride.paymentFailure).not.toBeNull();
+    expect(ride.paymentFailure?.code).toBe('trip_missing_payment_method');
+    expect(ride.paymentFailure?.message).toBe(
+      'passenger.defaultPaymentMethod.id is missing',
+    );
+    expect(ride.paymentFailure?.occurredAt.getTime()).toBe(
+      occurredAt.getTime(),
+    );
+    expect(ride.paymentFailure?.isKnown()).toBe(true);
+  });
+
+  it('accepts a Firestore Timestamp-shaped paymentError.occurredAt', () => {
+    // Duck-typed Firestore Timestamp — `toDate()` + numeric `seconds`.
+    const ts = {
+      seconds: 1748275200, // 2026-05-26T16:00:00Z
+      nanoseconds: 0,
+      toDate: () => new Date(1748275200 * 1000),
+    };
+    const doc = {
+      ...baseDoc(),
+      status: 'payment_failed' as const,
+      paymentError: {
+        code: 'card_declined',
+        message: 'Your card was declined.',
+        occurredAt: ts,
+      },
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    const ride = unwrap(toDomain('failed-id', parsed));
+    expect(ride.paymentFailure?.code).toBe('card_declined');
+    expect(ride.paymentFailure?.occurredAt.getTime()).toBe(1748275200 * 1000);
+  });
+
+  it('accepts an unknown future code (forward compat)', () => {
+    const doc = {
+      ...baseDoc(),
+      status: 'payment_failed' as const,
+      paymentError: {
+        code: 'future_server_code_not_in_catalog',
+        message: 'something happened',
+        occurredAt: new Date('2026-05-26T17:00:00Z'),
+      },
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    const ride = unwrap(toDomain('failed-id', parsed));
+    expect(ride.paymentFailure?.code).toBe('future_server_code_not_in_catalog');
+    expect(ride.paymentFailure?.isKnown()).toBe(false);
+  });
+
+  it('treats paymentError.occurredAt: null as paymentFailure: null', () => {
+    // The DTO preprocess coerces a bad timestamp shape to null; the
+    // mapper then degrades to null rather than fabricating a date.
+    const doc = {
+      ...baseDoc(),
+      status: 'payment_failed' as const,
+      paymentError: {
+        code: 'card_declined',
+        message: 'x',
+        occurredAt: null,
+      },
+    };
+    const parsed = unwrap(parseRideDoc(doc));
+    const ride = unwrap(toDomain('failed-id', parsed));
+    expect(ride.paymentFailure).toBeNull();
+  });
+
+  it('rejects paymentError with an empty code at parse time', () => {
+    const doc = {
+      ...baseDoc(),
+      status: 'payment_failed' as const,
+      paymentError: {
+        code: '',
+        message: 'x',
+        occurredAt: new Date(),
+      },
+    };
+    const parsed = parseRideDoc(doc);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error.code).toBe('ride_doc_invalid_shape');
+  });
+
+  it('round-trips a ride with paymentFailure through toDoc → parse → toDomain', () => {
+    // Construct a ride via fromProps (the entity doesn't expose a
+    // synthetic transition to `payment_failed` from `completed`).
+    const occurredAt = new Date('2026-05-26T18:00:00Z');
+    const ride = freshRide();
+    const r = PaymentFailure.create({
+      code: 'expired_card',
+      message: 'Your card expired.',
+      occurredAt,
+    });
+    if (!r.ok) throw new Error('test setup: PaymentFailure.create failed');
+    const failed = unwrap(
+      Ride.fromProps({
+        id: ride.id,
+        status: 'payment_failed',
+        passenger: ride.passenger,
+        driver: ride.driver,
+        rideService: ride.rideService,
+        pickup: ride.pickup,
+        dropoff: ride.dropoff,
+        createdAt: ride.createdAt,
+        pickupTiming: ride.pickupTiming,
+        dropoffTiming: ride.dropoffTiming,
+        cancellation: null,
+        routePreference: ride.routePreference,
+        schedulePickupAt: null,
+        paymentFailure: r.value,
+      }),
+    );
+    const doc = toDoc(failed);
+    expect(doc.paymentError).toEqual({
+      code: 'expired_card',
+      message: 'Your card expired.',
+      occurredAt,
+    });
+    const parsed = unwrap(parseRideDoc(doc));
+    const round = unwrap(toDomain(String(ride.id), parsed));
+    expect(round.status).toBe('payment_failed');
+    expect(round.paymentFailure?.code).toBe('expired_card');
+    expect(round.paymentFailure?.message).toBe('Your card expired.');
+    expect(round.paymentFailure?.occurredAt.getTime()).toBe(
+      occurredAt.getTime(),
+    );
+  });
+
+  it('omits paymentError on toDoc when ride has no paymentFailure', () => {
+    const ride = freshRide();
+    const doc = toDoc(ride);
+    expect('paymentError' in doc).toBe(false);
   });
 });
