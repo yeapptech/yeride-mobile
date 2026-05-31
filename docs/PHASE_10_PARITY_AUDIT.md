@@ -1,8 +1,8 @@
 # Phase 10 — Parity Audit (Legacy yeride ↔ yeride-mobile rewrite)
 
-**Status:** v2 — verified 2026-05-18 (Phase 10 Turn 1) · Turn 2 closed 2026-05-18 · Turn 3 closed 2026-05-18 · Turn 4 closed 2026-05-18 · Turn 5 closed 2026-05-18 · Turn 6 closed 2026-05-19 · Turn 7 closed 2026-05-19 · Turn 8 closed 2026-05-19 · Turn 9 closed 2026-05-19
+**Status:** v3 — Turn 10 closed 2026-05-30 at HEAD `d0c3603` (yeride-mobile) / `343e668` (yeride-functions) / `8a81d87` (yeride). All Phase 10.x turns closed. v2 closures preserved · Turn 10.5 (2026-05-26) annotated as a rewrite-ahead 🟡 (§3.8) · §5 `tipDriver` cell corrected (legacy never called it) · 2 pre-existing prettier nits fixed inline · stale §1/§2/§2.4 rows brought into sync with §3 closure verdicts. **§0 of `PHASE_10_CUTOVER_PLAN.md` flipped to GATE CLEARED 2026-05-30.**
 **Owner:** Hernando Sierra (hernando.sierra@yeapp.tech)
-**Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18.
+**Drafted:** 2026-05-18 · revised v2 2026-05-18 with Turn 1 verification findings · Turn 2 + Turn 3 + Turn 4 closures annotated 2026-05-18 · v3 re-walk shipped 2026-05-30 (Turn 10 closed).
 **Blocks:** [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 — the
 cutover rollout (§6) cannot begin until every ❌ row below is
 resolved or explicitly de-scoped.
@@ -26,6 +26,8 @@ follow before the gate is signed off.
 ---
 
 ## 1. Headline findings
+
+**v3 (Turn 10 close, 2026-05-30):** **0 ❌ rows, 2 🟡 rows, 0 ⚠️ rows.** Both 🟡 rows are intentional, not parity gaps: §3.8 captures the Turn 10.5 synchronous-error PaymentFailure surface that the rewrite ships ahead of legacy (legacy still silently completes the trip on the same path), and §4's `withFmtFix` retirement is pending Xcode-26 build confirmation but RN 0.83.6 has already moved past the fmt 11.0.2 bug the plugin patched. The Turn-10 verify-gate sweep cleaned up two pre-existing prettier nits inline (`docs/PHASE_10_TURN_7.md`, `RouteSelectScreen.tsx`) so `npm run verify` exits 0 cleanly at the cutover SHA. §0 of `PHASE_10_CUTOVER_PLAN.md` is **GATE CLEARED 2026-05-30**. See §12 for the full Turn 10 audit-walk record.
 
 **v2 (post-Turn-1) + Turn 2 + Turn 3 + Turn 4 + Turn 5 + Turn 6 + Turn 7 + Turn 8 + Turn 9 closures:** **0 ❌ rows, 0 🟡 rows, 0 ⚠️ rows**
 block the rollout (down from 7 ❌ / 2 🟡 at v2 — Turn 2 closed the
@@ -116,16 +118,20 @@ updatedAt` (with the DTO accepting BOTH the canonical flat shape
   12.1.0, a major-version bump past the patched 11.0.2) but needs a
   real Xcode 26 build to confirm — see §4 ⚠️ retained for this one.
 
-The biggest user-facing gap remaining is **chat** (placeholder-only
-in the rewrite). **Scheduled rides** has its backend pieces and
-read-paths ported but is missing the rider-side creation UI.
+All user-facing surfaces are now at parity or rewrite-ahead.
 **Activity / trip history** closed in Turn 6 (2026-05-19) — both
-rider and driver tabs now render the real `ActivityScreen` /
+rider and driver tabs render the real `ActivityScreen` /
 `DriverActivityScreen` (paginated recent-rides + status-aware
 navigation) with terminal-status taps routing to a new role-
 agnostic `TripDetailScreen` carrying trip route, role-flipped
-party header, per-trip events, and the new `TripPaymentsList`
-component (per §3.6 fold-in). See `docs/PHASE_10_TURN_6.md`.
+party header, per-trip events, and `TripPaymentsList` (per §3.6
+fold-in; see `docs/PHASE_10_TURN_6.md`). **Scheduled rides**
+closed end-to-end in Turn 7 (2026-05-19) — rider-side creation UI
+(`ScheduleDatetimePicker` + `RideScheduledConfirmation`) plus
+listing + nav wiring (`docs/PHASE_10_TURN_7.md`). **Chat** closed
+in Turn 8 (2026-05-19) — `ChatModal` wrapping
+`react-native-gifted-chat@2.8.1`, full `ChatRepository`,
+foreground-banner suppression (`docs/PHASE_10_TURN_8.md`).
 
 The **delivery flow** (DeliverService / DeliverSelect /
 DeliverMonitor) is NOT a real gap — all three screens are
@@ -173,41 +179,41 @@ post-Turn-9 SHA — cutover plan §3.1's gate clears. See §10.1 +
 
 ### 2.2 Rider stack & tabs
 
-| Legacy screen                  | Rewrite screen                        | Status | Notes                                                                               |
-| ------------------------------ | ------------------------------------- | ------ | ----------------------------------------------------------------------------------- |
-| `RiderHome.js`                 | `RiderHomeScreen.tsx`                 | ✅     |                                                                                     |
-| `RideRouteSearch.js`           | `RouteSearchScreen.tsx`               | ✅     |                                                                                     |
-| `RideSelect.js`                | `RouteSelectScreen.tsx`               | ✅     |                                                                                     |
-| `RideMonitor.js`               | `RideMonitorScreen.tsx`               | ✅     |                                                                                     |
-| `RideScheduledConfirmation.js` | `RideScheduledConfirmationScreen.tsx` | ✅     | Phase 10 Turn 7 — port + nav wiring + tests. See §3.2.                              |
-| `Wallet.js`                    | `WalletScreen.tsx`                    | 🟡     | Wallet screen ported, but rewrite has no `TransactionHistory` equivalent. See §3.6. |
-| `PaymentMethod.js`             | `AddPaymentMethodScreen.tsx`          | ✅     | Renamed; same purpose.                                                              |
-| `PaymentMethodItem.js`         | —                                     | ✅     | Legacy file is a sub-component, not a routed screen.                                |
-| `TripHistory` (Activity tab)   | `ActivityPlaceholderScreen.tsx`       | ❌     | Placeholder only — see §3.3.                                                        |
-| `DeliverService.js`            | —                                     | ✅     | Legacy is a `<Text>RequestDeliver</Text>` stub. Not a real feature.                 |
-| `DeliverSelect.js`             | —                                     | ✅     | Same — stub.                                                                        |
-| `DeliverMonitor.js`            | —                                     | ✅     | Same — stub.                                                                        |
+| Legacy screen                  | Rewrite screen                        | Status | Notes                                                                                                                                                                                                                                |
+| ------------------------------ | ------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RiderHome.js`                 | `RiderHomeScreen.tsx`                 | ✅     |                                                                                                                                                                                                                                      |
+| `RideRouteSearch.js`           | `RouteSearchScreen.tsx`               | ✅     |                                                                                                                                                                                                                                      |
+| `RideSelect.js`                | `RouteSelectScreen.tsx`               | ✅     |                                                                                                                                                                                                                                      |
+| `RideMonitor.js`               | `RideMonitorScreen.tsx`               | ✅     |                                                                                                                                                                                                                                      |
+| `RideScheduledConfirmation.js` | `RideScheduledConfirmationScreen.tsx` | ✅     | Phase 10 Turn 7 — port + nav wiring + tests. See §3.2.                                                                                                                                                                               |
+| `Wallet.js`                    | `WalletScreen.tsx`                    | ✅     | Wallet at parity — legacy Wallet renders payment methods only (recent-payments section disabled per legacy GitHub issue #110). Per-trip TransactionHistory shipped Turn 6 as `TripPaymentsList` inside `TripDetailScreen`. See §3.6. |
+| `PaymentMethod.js`             | `AddPaymentMethodScreen.tsx`          | ✅     | Renamed; same purpose.                                                                                                                                                                                                               |
+| `PaymentMethodItem.js`         | —                                     | ✅     | Legacy file is a sub-component, not a routed screen.                                                                                                                                                                                 |
+| `TripHistory` (Activity tab)   | `ActivityScreen.tsx`                  | ✅     | Closed Turn 6 (2026-05-19) — paginated recent-rides + status-aware navigation + Scheduled section (Turn 7). See §3.3 + §3.2.                                                                                                         |
+| `DeliverService.js`            | —                                     | ✅     | Legacy is a `<Text>RequestDeliver</Text>` stub. Not a real feature.                                                                                                                                                                  |
+| `DeliverSelect.js`             | —                                     | ✅     | Same — stub.                                                                                                                                                                                                                         |
+| `DeliverMonitor.js`            | —                                     | ✅     | Same — stub.                                                                                                                                                                                                                         |
 
 ### 2.3 Driver stack & tabs
 
-| Legacy screen                | Rewrite screen                        | Status | Notes                                  |
-| ---------------------------- | ------------------------------------- | ------ | -------------------------------------- |
-| `DriverHome.js`              | `DriverHomeScreen.tsx`                | ✅     |                                        |
-| `DriverDispatch.js`          | `DriverDispatchScreen.tsx`            | ✅     |                                        |
-| `DriverMonitor.js`           | `DriverMonitorScreen.tsx`             | ✅     | Phase 8 status-router pattern.         |
-| `DriverNavigation.js`        | `DriverNavigationScreen.tsx`          | ✅     | Phase 8 Nav SDK integration.           |
-| `Earnings.js`                | `DriverEarningsScreen.tsx`            | ✅     |                                        |
-| `VehicleList.js`             | `VehicleListScreen.tsx`               | ✅     | Phase 5.                               |
-| `VehicleRegistration.js`     | `VehicleRegistrationScreen.tsx`       | ✅     |                                        |
-| `VehicleDetails.js`          | `VehicleDetailsScreen.tsx`            | ✅     |                                        |
-| `VehiclePhotos.js`           | `VehiclePhotosScreen.tsx`             | ✅     |                                        |
-| `TripHistory` (Activity tab) | `DriverActivityPlaceholderScreen.tsx` | ❌     | Same as rider — placeholder. See §3.3. |
+| Legacy screen                | Rewrite screen                  | Status | Notes                                                                                                                                            |
+| ---------------------------- | ------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DriverHome.js`              | `DriverHomeScreen.tsx`          | ✅     |                                                                                                                                                  |
+| `DriverDispatch.js`          | `DriverDispatchScreen.tsx`      | ✅     |                                                                                                                                                  |
+| `DriverMonitor.js`           | `DriverMonitorScreen.tsx`       | ✅     | Phase 8 status-router pattern.                                                                                                                   |
+| `DriverNavigation.js`        | `DriverNavigationScreen.tsx`    | ✅     | Phase 8 Nav SDK integration.                                                                                                                     |
+| `Earnings.js`                | `DriverEarningsScreen.tsx`      | ✅     |                                                                                                                                                  |
+| `VehicleList.js`             | `VehicleListScreen.tsx`         | ✅     | Phase 5.                                                                                                                                         |
+| `VehicleRegistration.js`     | `VehicleRegistrationScreen.tsx` | ✅     |                                                                                                                                                  |
+| `VehicleDetails.js`          | `VehicleDetailsScreen.tsx`      | ✅     |                                                                                                                                                  |
+| `VehiclePhotos.js`           | `VehiclePhotosScreen.tsx`       | ✅     |                                                                                                                                                  |
+| `TripHistory` (Activity tab) | `DriverActivityScreen.tsx`      | ✅     | Closed Turn 6 (2026-05-19) — same paginated recent-rides surface as the rider tab; shared `TripDetailScreen` for terminal-status taps. See §3.3. |
 
 ### 2.4 Modals / shared screens
 
-| Legacy                | Rewrite                             | Status |
-| --------------------- | ----------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `TripPreviewModal.js` | RideReceiptScreen (Phase 9 Turn 16) | 🟡     | Rewrite ships a different surface — `RideReceiptScreen` is a receipt view, not the legacy "trip preview" modal. Confirm in manual smoke that the rider trip preview flow has an equivalent path. |
+| Legacy                | Rewrite                                                            | Status | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TripPreviewModal.js` | `TripDetailScreen.tsx` (post-trip) + `RideReceiptScreen` (receipt) | ✅     | V1 mis-classified `TripPreviewModal` as a pre-confirm surface; §3.7 verification confirmed it is the POST-trip details surface (entered from Activity / RiderHome / DriverHome / Earnings row taps). Replaced by role-agnostic `TripDetailScreen` (Turn 6) wired with `TripPaymentsList` (§3.6 fold-in). `RideReceiptScreen` is the post-completion receipt PDF surface (Phase 9 Turn 16) — separate concern. See §3.7 + §3.3 + §3.6. |
 
 ---
 
@@ -573,6 +579,42 @@ Composed into the new `TripDetailScreen`. Renders type chips
 `Money` minor units — no floats, no currency mixing. See
 `docs/PHASE_10_TURN_6.md`.
 
+### 3.8 Synchronous-error payment failure surface — 🟡 rewrite-ahead (Turn 10.5, 2026-05-26)
+
+**Legacy:** When the Firestore-trigger `processPayment` in
+`yeride-functions/lib/payments.js` synchronously errors against the
+Stripe microservice (validation failure, expired card, network blip
+during `/direct-charge`), the catch block writes a
+`payment_processing_error` trip-event and returns. The trip stays at
+`'completed'` (set by `completeTrip`'s transaction before the trigger
+fires). The rider sees the receipt UI as if the charge went through;
+no PaymentIntent was created, no Stripe webhook will ever fire, and
+no money moved. Legacy yeride is **unchanged** at HEAD `8a81d87` —
+this silent-failure path is still present in the production app.
+
+**Rewrite (post-Turn-10.5):** The trigger-side `processPayment` catch
+now flips `status: 'payment_failed'` and writes a structured
+`paymentError: {code, message, occurredAt}` on the trip doc. The
+rewrite carries the field end-to-end (DTO → `rideMapper` →
+`PaymentFailure` value object on `Ride` → `PaymentFailedView` switch
+on `code` against `KnownPaymentFailureCode`). `RideReceiptScreen`
+redirects to `RideMonitor` when a trip flips to `'payment_failed'`
+post-redirect, so the rider sees the actionable surface, not the
+misleading "Trip complete" receipt. See
+[PHASE_10_TURN_10.5.md](PHASE_10_TURN_10.5.md).
+
+The new `paymentError` field is additive on `trips/{id}` and
+`null`-tolerant — legacy yeride reads the trip doc through its own
+DTO that ignores unknown fields, so this is safe under the
+shared-Firestore co-existence model (REFACTOR_PLAN.md §7 Decision 6).
+
+**Verdict:** 🟡 rewrite-ahead — not a missing port. The rewrite ships
+a UX correctness fix legacy doesn't have. Acceptable to ship: the
+rewrite is what's about to roll out, legacy will be retired
+post-cutover. If a P0 lands in legacy during the rollout window that
+requires the legacy code path to flip status, the legacy hotfix slot
+(`PHASE_10_CUTOVER_PLAN.md` §1 Decision 5) is reserved.
+
 ### 3.7 Trip preview — ✅ verified (Turn 1)
 
 **Verified 2026-05-18.** The v1 framing of `TripPreviewModal.js` as
@@ -675,16 +717,16 @@ and the two are NOT competing surfaces.
 The deployed `yeride-functions` surface is documented in legacy
 `yeride-functions/CLAUDE.md`:
 
-| Function                  | Trigger                 | Used by legacy client? | Used by rewrite client?  |
-| ------------------------- | ----------------------- | ---------------------- | ------------------------ |
-| `cancelTrip`              | callable                | ✅                     | ✅                       |
-| `completeTrip`            | callable                | ✅                     | ✅                       |
-| `tipDriver`               | callable                | ✅                     | ✅                       |
-| `onScheduledNotification` | HTTP POST (Cloud Tasks) | (server-only)          | (server-only)            |
-| `onTripCreated`           | Firestore onCreate      | (server-only)          | (server-only)            |
-| `onTripEventCreated`      | Firestore onCreate      | (server-only)          | (server-only)            |
-| `onTripUpdated`           | Firestore onUpdate      | (server-only)          | (server-only)            |
-| `sendPushNotification`    | HTTP POST               | ✅ (via legacy proxy)  | ✅ (via Cloud Functions) |
+| Function                  | Trigger                 | Used by legacy client?                                                                                                                                                  | Used by rewrite client?  |
+| ------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `cancelTrip`              | callable                | ✅                                                                                                                                                                      | ✅                       |
+| `completeTrip`            | callable                | ✅                                                                                                                                                                      | ✅                       |
+| `tipDriver`               | callable                | ❌ (v3 correction — legacy `TipSelector.js` calls `processTipPayment` direct to the Stripe microservice, NOT the `tipDriver` callable). Not a parity gap — see §5 note. | ✅                       |
+| `onScheduledNotification` | HTTP POST (Cloud Tasks) | (server-only)                                                                                                                                                           | (server-only)            |
+| `onTripCreated`           | Firestore onCreate      | (server-only)                                                                                                                                                           | (server-only)            |
+| `onTripEventCreated`      | Firestore onCreate      | (server-only)                                                                                                                                                           | (server-only)            |
+| `onTripUpdated`           | Firestore onUpdate      | (server-only)                                                                                                                                                           | (server-only)            |
+| `sendPushNotification`    | HTTP POST               | ✅ (via legacy proxy)                                                                                                                                                   | ✅ (via Cloud Functions) |
 
 **Phantom-export legacy callables that don't exist on the server:**
 
@@ -704,6 +746,18 @@ callable wrappers are dead code.
 **Verdict:** ✅ The rewrite correctly mirrors the actually-deployed
 surface (`completeTrip`, `cancelTrip`, `tipDriver` callables; the
 trigger-based functions need no client). No action needed.
+
+**v3 note on `tipDriver` (2026-05-30):** The v2 cell asserting legacy
+calls `tipDriver` was wrong. Legacy's `src/components/TipSelector.js`
+calls `processTipPayment` from `api/stripe/paymentProcessor.js`,
+which posts directly to the Stripe microservice's `/charges-create`
+endpoint — bypassing the `tipDriver` Cloud Function entirely. The
+rewrite's `ProcessTip` use case (Phase 6 turn 2) routes through the
+`tipDriver` Cloud Function callable, which produces typed
+`failed-precondition + details.code` errors via Turn 10.5's catalog.
+Not a parity regression — both paths reach Stripe and charge the
+rider — but the rewrite path is more standardized and benefits from
+the unified error catalog established in Turn 10.5.
 
 ---
 
@@ -745,18 +799,19 @@ Cloud-Function-mediated writes):
 Turn 1 closed 2026-05-18 (this audit's verification pass + the
 one-line `audio` UIBackgroundMode restoration). Remaining turns:
 
-| #     | Turn                                                                                                                                                                                                                                                                                                                                                    | Driver                                | Size                    | Blocked by                                                                                                                                   |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| ~~1~~ | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                               | Risk reduction                        | small (1d)              | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                                                                           |
-| ~~2~~ | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                                   | ~~**Production blocker — iOS**~~      | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)                                                                      |
-| ~~3~~ | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                             | ~~**Production blocker — Android**~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)                                                                        |
-| ~~4~~ | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                              | ~~Latent BGTaskScheduler misconfig~~  | ~~tiny (½d)~~           | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)                                                                        |
-| ~~5~~ | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                            | ~~User-visible regression vs legacy~~ | ~~small-medium (1-2d)~~ | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
-| ~~6~~ | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                               | ~~Largest user-facing gap~~           | ~~large (3-5d)~~        | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
-| ~~7~~ | ~~**Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.~~                                                                                                                                       | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (creation UI + listing + nav + native config; see `docs/PHASE_10_TURN_7.md`)                                        |
-| ~~8~~ | ~~**Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.~~                                                                                                                                                                                                      | ~~Existing feature regression risk~~  | ~~medium (2-3d)~~       | ✅ **CLOSED 2026-05-19** (ChatModal + ChatRepository + foreground suppression; see `docs/PHASE_10_TURN_8.md`)                                |
-| ~~9~~ | ~~**Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path.~~ | ~~Unblocks cutover plan §3.1 gate~~   | ~~small (1d)~~          | ✅ **CLOSED 2026-05-19** (constructor-flag path; see `docs/PHASE_10_TURN_9.md`)                                                              |
-| 10    | **Audit v3 + sign-off** — re-run audit; confirm all rows ✅ / 🟡 / explicitly de-scoped; flip cutover plan §0 gate to "cleared."                                                                                                                                                                                                                        | Closes Phase 10 cutover prep          | small (½d)              | (2)-(9)                                                                                                                                      |
+| #        | Turn                                                                                                                                                                                                                                                                                                                                                    | Driver                                           | Size                     | Blocked by                                                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~1~~    | ~~**Verification pass**~~                                                                                                                                                                                                                                                                                                                               | Risk reduction                                   | small (1d)               | ✅ **CLOSED 2026-05-18** (this doc v2 + `app.config.ts` audio fix)                                                                           |
+| ~~2~~    | ~~**Firebase iOS SDK pin** (§4 `withFirebaseSdkVersion`) — port the legacy plugin OR inline `$FirebaseSDKVersion = '12.12.0'` into `withFirebasePodfileFix.js`. iOS release-mode Cloud-Function-callable crash fix.~~                                                                                                                                   | ~~**Production blocker — iOS**~~                 | ~~tiny (½d)~~            | ✅ **CLOSED 2026-05-18** (Path b inline; see `docs/PHASE_10_TURN_2.md`)                                                                      |
+| ~~3~~    | ~~**Material Components Android theme** (§4 `withMaterialTheme`) — port the plugin so Stripe `CardForm` renders on Android without crash.~~                                                                                                                                                                                                             | ~~**Production blocker — Android**~~             | ~~tiny (½d)~~            | ✅ **CLOSED 2026-05-18** (Path a port; see `docs/PHASE_10_TURN_3.md`)                                                                        |
+| ~~4~~    | ~~**`processing` UIBackgroundMode reconciliation** (§4) — either re-add `processing` OR drop `com.transistorsoft.customtask` from `BGTaskSchedulerPermittedIdentifiers`. Pick after a one-line Transistor v5 docs check.~~                                                                                                                              | ~~Latent BGTaskScheduler misconfig~~             | ~~tiny (½d)~~            | ✅ **CLOSED 2026-05-18** (Path B drop; see `docs/PHASE_10_TURN_4.md`)                                                                        |
+| ~~5~~    | ~~**Rider live ETA** (§3.5) — NavSdk telemetry → Firestore → rider subscription. Replaces legacy `distanceTrackingService` Distance Matrix polling with SDK-driven values.~~                                                                                                                                                                            | ~~User-visible regression vs legacy~~            | ~~small-medium (1-2d)~~  | ✅ **CLOSED 2026-05-18** (NavSdk telemetry pipeline; see `docs/PHASE_10_TURN_5.md`)                                                          |
+| ~~6~~    | ~~**Activity tab — rider + driver** (§3.3) — placeholder → real screen with recent-trips composition + per-trip detail navigation (where the §3.6 per-trip `TransactionHistory` lives).~~                                                                                                                                                               | ~~Largest user-facing gap~~                      | ~~large (3-5d)~~         | ✅ **CLOSED 2026-05-19** (paginated recent-rides + role-agnostic TripDetailScreen + TripPaymentsList fold-in; see `docs/PHASE_10_TURN_6.md`) |
+| ~~7~~    | ~~**Scheduled rides creation UI** (§3.2) — port `ScheduleDatetimePicker` + `RideScheduledConfirmation` + `ObserveScheduledRides`. Also adds `@react-native-community/datetimepicker` plugin to `app.config.ts`.~~                                                                                                                                       | ~~Existing feature regression risk~~             | ~~medium (2-3d)~~        | ✅ **CLOSED 2026-05-19** (creation UI + listing + nav + native config; see `docs/PHASE_10_TURN_7.md`)                                        |
+| ~~8~~    | ~~**Chat** (§3.4) — port `ChatModal` + `react-native-gifted-chat` integration + `ChatRepository` + foreground-banner suppression for open chats.~~                                                                                                                                                                                                      | ~~Existing feature regression risk~~             | ~~medium (2-3d)~~        | ✅ **CLOSED 2026-05-19** (ChatModal + ChatRepository + foreground suppression; see `docs/PHASE_10_TURN_8.md`)                                |
+| ~~9~~    | ~~**Pre-cutover BG-geolocation test regression fix** (Turn 1 §11 newly-discovered) — resolve the 21 jest failures in `BackgroundGeolocationClient.test.ts` so `npm run verify` is green at cutover SHA. Either gate the `__DEV__` short-circuit behind a test-injection seam or update the assertions to reflect the `__DEV__===true` execution path.~~ | ~~Unblocks cutover plan §3.1 gate~~              | ~~small (1d)~~           | ✅ **CLOSED 2026-05-19** (constructor-flag path; see `docs/PHASE_10_TURN_9.md`)                                                              |
+| ~~10.5~~ | ~~**Synchronous-error PaymentFailure surfacing** (interstitial P1 between Turn 10 and §1 of `PHASE_10_CUTOVER_PLAN.md`) — flip status to `payment_failed` and write structured `paymentError` on the trip doc when `processPayment` synchronously errors. Rewrite-ahead vs legacy.~~                                                                    | ~~UX correctness — silent payment-failure path~~ | ~~small-to-medium (1d)~~ | ✅ **CLOSED 2026-05-26** (see [`PHASE_10_TURN_10.5.md`](PHASE_10_TURN_10.5.md))                                                              |
+| ~~10~~   | ~~**Audit v3 + sign-off** — re-walk audit at post-10.5 SHA; capture Turn 10.5 rewrite-ahead delta; surface any new findings; flip cutover plan §0 gate to "cleared" if all gates green.~~                                                                                                                                                               | ~~Closes Phase 10 cutover prep~~                 | ~~small (½d)~~           | ✅ **CLOSED 2026-05-30** (audit v3 + inline prettier fix + §0 gate flip; see `docs/PHASE_10_TURN_10.md`)                                     |
 
 **Estimated total:** ~10-15 days of work before
 [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §6 staged
@@ -951,19 +1006,189 @@ whitelist AND the `processing` background mode together).
 
 Mark complete when:
 
-- [ ] Every ❌ row has a Phase 10.x turn shipped or explicit
-      de-scope decision recorded.
+- [x] Every ❌ row has a Phase 10.x turn shipped or explicit
+      de-scope decision recorded. (All ❌ rows closed via Turns 2-9.)
 - [x] Every ⚠️ row has been verified and re-marked ✅ / 🟡 / ❌.
       (Closed Turn 1, 2026-05-18.)
-- [ ] Every 🟡 row has been validated as acceptable diff vs legacy.
+- [x] Every 🟡 row has been validated as acceptable diff vs legacy.
+      (v3, Turn 10 close: §3.8 Turn 10.5 rewrite-ahead row signed
+      off as intentional ahead-of-legacy UX fix; §4 `withFmtFix`
+      retirement signed off — RN 0.83.6 pulls fmt 12.1.0 past the
+      patched 11.0.2; first Xcode 26 prebuild will confirm
+      empirically. Re-add the plugin only if `FMT_USE_CONSTEVAL`
+      redefinition errors recur.)
 - [ ] Manual two-device smoke against `yeapp-stage` shows rider +
-      driver flows reach equivalent end-states as legacy.
-- [x] Audit doc v2 produced (this doc, Turn 1).
-- [ ] Audit doc v3 produced after Turns 2-9 close.
-- [ ] [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 gate
-      flipped to "cleared."
+      driver flows reach equivalent end-states as legacy. (Covered
+      by `PHASE_10_CUTOVER_PLAN.md` §3.2 — not gated by this audit.)
+- [x] Audit doc v2 produced (Turn 1).
+- [x] Audit doc v3 produced (this doc, Turn 10, 2026-05-30).
+- [x] [PHASE_10_CUTOVER_PLAN.md](PHASE_10_CUTOVER_PLAN.md) §0 gate
+      flipped to "GATE CLEARED 2026-05-30. Phase 10 complete."
 
 ---
 
-**End of PHASE_10_PARITY_AUDIT.md.** Re-run on a v2 pass once
-Phase 10.x turns ship.
+## 12. Turn 10 re-walk findings (2026-05-30)
+
+### 12.1 Verify-gate state at HEAD `d0c3603` (yeride-mobile)
+
+| Gate                               | Status       | Notes                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx tsc --noEmit`                 | ✅ exit 0    | Clean.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `npx eslint .`                     | ✅ exit 0    | Clean.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `npx prettier --check .`           | ✅ exit 0    | Clean **after Turn 10 inline cleanup commit** — see §12.2. Pre-fix state was exit 1 against `docs/PHASE_10_TURN_7.md` + `RouteSelectScreen.tsx`.                                                                                                                                                                                                                                                                      |
+| `npx jest` (partitioned, 5 shards) | ✅ all green | **213 suites / 1986 tests** — exact match with Turn 10.5's baseline (no test code changed between Turn 10.5 close `d0c3603` and Turn 10 close). Shards: `src/domain/` 41/486 · `src/app/` 55/268 · `src/data/` 24/389 · `src/presentation/features/` 45/383 · `src/{shared,presentation/{components,stores,hooks}}/` 48/460. Two "worker process force-exited" warnings during teardown — pre-existing, non-blocking. |
+
+`yeride-functions` at HEAD `343e668`:
+
+| Gate           | Status      | Notes                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`     | ✅ 21/21    | Includes the Turn 10.5 `processPayment — synchronous-error path` (5 tests) and `processPayment — policy boundary (webhook authority preserved)` (2 tests) suites.                                                                                                                                                                                                       |
+| `npm run lint` | ❌ 3 errors | All three pre-existing per Turn 10.5 (`handlers/complete-trip.js:130` `quote-props`; `lib/notifications.js:45` `padded-blocks`; `lib/notifications.js:76` `no-unused-vars 'response'`). Turn 10.5 punted explicitly; per kickoff Decision 4 carried forward to this turn (these require human judgment, unlike the prettier nits). No new errors introduced. See §12.6. |
+
+`yeride-stripe-server` at HEAD `cea1aad`: not part of this audit's
+scope (covered by §9 "out of scope" — backend-shared, no parity
+work). Last commit predates Turn 10.5 and is unrelated.
+
+### 12.2 Finding (fixed in Turn 10) — prettier format-check failures
+
+`npx prettier --check .` against the post-10.5 SHA failed on two
+pre-existing files:
+
+```
+[warn] docs/PHASE_10_TURN_7.md
+[warn] src/presentation/features/rider/screens/RouteSelectScreen.tsx
+[warn] Code style issues found in 2 files. Run Prettier with --write to fix.
+```
+
+Both files last touched 2026-05-19 in commit `8d883df` (Turn 7
+code-review follow-up). The violations had existed since then —
+Turn 10.5's close-doc claim "`format:check ✓ prettier --check clean
+(after one --write pass for new files)`" was checking only the new
+files Turn 10.5 itself touched, not the full repo.
+
+**The diff was mechanical:**
+
+- `docs/PHASE_10_TURN_7.md` lines 449-450: a code-block continuation
+  inside a numbered-list item used a 3-space block indent that
+  prettier rewrote to flush-left.
+- `src/presentation/features/rider/screens/RouteSelectScreen.tsx`
+  lines 237-238: an object-property value spanned two lines where
+  prettier fit it on one (the line came in under the print-width
+  ceiling once the surrounding context tightened).
+
+**Why this had to land in Turn 10:** `PHASE_10_CUTOVER_PLAN.md`
+§3.1 requires `npm run verify` green at the cutover SHA. `npm run
+verify` chains `typecheck && lint && format:check && test` — the
+`format:check` step exited non-zero, so the chain failed. Without
+fixing this in-turn, the §3.1 gate would not have ticked at the
+cutover SHA, blocking §6 rollout.
+
+**Resolution (Turn 10):** ran `npx prettier --write` on the two
+files. Both diffs are pure whitespace / line-folding (no semantic
+change). `npm run verify` now exits 0 cleanly at Turn 10 close
+SHA. The cutover plan §3.1 note about "2 pre-existing format-check
+warnings ... not blocking" is updated as part of this turn to
+reflect the cleaned-up state.
+
+**Departure from kickoff Decision 4:** the kickoff said "Turn 10 is
+verification, not cleanup" for the yeride-functions lint errors.
+Hernando signed off on an inline prettier fix at audit time
+because (a) the diff is mechanical with no judgment required,
+(b) leaving it unfixed would block §3.1 of the cutover plan and
+require a Turn 10.6 anyway, (c) the kickoff framing was about
+human-judgment lint errors (the unused `response` parameter), not
+formatter nits. The yeride-functions lint errors stay punted per
+Decision 4 — see §12.6.
+
+### 12.3 New finding — §5 `tipDriver` cell was incorrect (corrected in v3)
+
+Documented inline in §5's "v3 note on `tipDriver`" annotation above.
+Not a parity gap; the v2 cell was just factually wrong about which
+client uses the callable. Legacy bypasses `tipDriver` entirely and
+calls the Stripe microservice directly via `processTipPayment`. The
+rewrite uses `tipDriver`. Both reach Stripe.
+
+### 12.4 New finding — `@react-native-firebase/auth` plugin missing from rewrite
+
+Legacy's `app.config.js` lists `@react-native-firebase/auth` in the
+plugin array. The rewrite does not. The plugin's only effect is
+configuring iOS reCAPTCHA URL types for phone-auth (verified by
+reading `node_modules/@react-native-firebase/auth/plugin/build/index.js`
+and `ios/urlTypes.js`).
+
+Neither app uses phone auth — both use email/password
+(`signInWithEmailAndPassword`, no `signInWithPhoneNumber` /
+`verifyPhoneNumber` / `PhoneAuthProvider` grep matches on either
+side). The legacy plugin entry has been dead code since the YeRide
+auth flow was finalized as email-only. Safe to leave the rewrite
+without it.
+
+**Verdict:** ✅ — non-issue. Captured as a v3 note so the cutover
+on-call engineer doesn't see the missing plugin and assume an iOS
+auth-flow break.
+
+### 12.5 Stale-row cleanup (resolved in Turn 10)
+
+The v2 audit's §2.2 / §2.4 tables carried row-level statuses that
+were never updated as Turns 6-8 closed the underlying gaps — the
+§3.x closure annotations rolled into the §1 headline directly, but
+the per-row table cells went stale:
+
+- §2.2 rider `TripHistory (Activity tab)` — was `ActivityPlaceholderScreen.tsx | ❌`; updated to `ActivityScreen.tsx | ✅` (Turn 6).
+- §2.2 driver `TripHistory (Activity tab)` — was `DriverActivityPlaceholderScreen.tsx | ❌`; updated to `DriverActivityScreen.tsx | ✅` (Turn 6).
+- §2.2 `Wallet.js` — was `🟡` with a "no TransactionHistory equivalent" note; updated to `✅` with a citation to §3.6 (per-trip `TripPaymentsList` shipped via `TripDetailScreen` in Turn 6; Wallet itself was already at parity since legacy disabled its recent-payments section per upstream issue #110).
+- §2.4 `TripPreviewModal.js` — was `🟡` framing a missing modal; updated to `✅` citing §3.7 (the modal was the POST-trip details surface, replaced by role-agnostic `TripDetailScreen` in Turn 6) and §3.6 (per-trip transactions inline).
+
+The §1 narrative paragraph claiming "the biggest user-facing gap
+remaining is chat" was likewise stale (Turn 8 closed chat); replaced
+with a roll-up of the Turn 6 / Turn 7 / Turn 8 closures.
+
+No new ❌/🟡 rows surfaced from the §2 spot-check beyond what the
+table-row cleanup describes. The §1 headline (0 ❌ / 2 🟡 / 0 ⚠️)
+is now consistent with the table cells.
+
+### 12.6 Deferred — pre-existing yeride-functions lint errors
+
+Three errors persist at `343e668`:
+
+1. `functions/handlers/complete-trip.js:130` — `quote-props`
+   inconsistent property quoting around `'status'`. Auto-fixable.
+2. `functions/lib/notifications.js:45` — `padded-blocks` blank-line
+   inside a function block. Auto-fixable.
+3. `functions/lib/notifications.js:76` — `no-unused-vars` `response`
+   parameter is assigned but never read. Requires human judgment —
+   either delete the binding (loses the variable for any future
+   debug-logging slot) or prefix with underscore (`_response`) to
+   silence the rule.
+
+Per kickoff Decision 4, Turn 10 does not fix these — the third one
+in particular needs a human call. Recommended landing path: a
+single Turn 10.6 cleanup commit on yeride-functions before the
+backend deploy in `PHASE_10_CUTOVER_PLAN.md` §3.4. None block the
+cutover gate (yeride-functions lint is informational; it's not
+chained into the §3.1 `npm run verify` gate which only covers
+yeride-mobile).
+
+### 12.7 Cutover-plan §0 status — GATE CLEARED 2026-05-30
+
+All sign-off prerequisites resolved:
+
+- §12.2 prettier finding fixed inline in this turn.
+- §12.3 `tipDriver` cell corrected in §5 + v3 note added.
+- §12.4 `@react-native-firebase/auth` plugin difference verified
+  as a non-issue (no phone auth on either side).
+- §12.5 stale §2.2 / §2.4 / §1 rows brought into sync with §3.
+- §12.6 yeride-functions lint deferred per Decision 4 — not gating.
+- §11 sign-off checklist re-ticked.
+
+§0 of `PHASE_10_CUTOVER_PLAN.md` flipped from "GATE CLEARED
+2026-05-19 pending Turn 10 audit-v3 sign-off" to "GATE CLEARED
+2026-05-30. Phase 10 complete." as part of this turn. The cutover
+plan's §1 (Locked decisions) → §3 (Pre-cutover gates) → §6 (Staged
+rollout) chain is now the active workstream.
+
+---
+
+**End of PHASE_10_PARITY_AUDIT.md.** v3 final, Turn 10 closed
+2026-05-30. Any further revisions land as v4 against the cutover
+SHA if the rollout window surfaces new findings.

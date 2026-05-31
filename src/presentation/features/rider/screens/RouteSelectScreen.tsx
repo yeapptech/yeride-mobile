@@ -235,8 +235,7 @@ export default function RouteSelectScreen() {
                   // `vm.*` that would resolve to null after the mutation
                   // settled.
                   navigation.replace('RideScheduledConfirmation', {
-                    formattedSchedulePickupAt:
-                      result.formattedSchedulePickupAt,
+                    formattedSchedulePickupAt: result.formattedSchedulePickupAt,
                     pickupAddress: result.pickupAddress,
                   });
                 } else {

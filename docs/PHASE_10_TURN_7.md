@@ -446,8 +446,8 @@ edge-case correctness and remove a fragile stale-closure pattern.
 1. **`confirm()` return narrowed to a discriminated union.** Was
    `Promise<{rideId, isScheduled: boolean} | null>` (Decision 5
    above); now `Promise<{rideId, isScheduled: false} | {rideId,
-   isScheduled: true, formattedSchedulePickupAt: string,
-   pickupAddress: string | null} | null>`. The view-model captures
+isScheduled: true, formattedSchedulePickupAt: string,
+pickupAddress: string | null} | null>`. The view-model captures
    the formatted datetime + pickup address BEFORE `reset()` clears
    the trip-draft store, so `RouteSelectScreen` reads from the
    typed result instead of relying on a stale-closure trick over
