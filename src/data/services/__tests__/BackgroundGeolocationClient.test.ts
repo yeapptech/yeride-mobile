@@ -47,21 +47,15 @@ interface BgMock {
 const sdk = BackgroundGeolocation as unknown as BgMock;
 
 /**
- * Helper: construct the adapter with the dev-mode short-circuit
- * disabled so the native-path code runs against the SDK mock.
- *
- * Phase 10 Turn 9 — `BackgroundGeolocationClient`'s `__DEV__` short-
- * circuits (Android-emulator `tslocationmanager:4.1.5` workaround)
- * are gated on a constructor flag `skipNativeInDev` (default `true`).
- * jest-expo's preset sets `__DEV__ === true`, so a bare
- * `new BackgroundGeolocationClient()` would short-circuit every
- * gated method and the SDK mock would never see a call. Tests that
- * exercise the SDK mock construct via this helper instead. The
- * default-flag (workaround-engagement) behavior is pinned by the
- * `skipNativeInDev default` describe block below.
+ * Helper: construct the adapter. The former `__DEV__` short-circuit
+ * (and its `skipNativeInDev` constructor flag) was removed 2026-06-01
+ * once the rapidActivityLaunch loop fix let the native path run safely
+ * in dev — the native path now runs unconditionally against the SDK
+ * mock, so no constructor argument is needed. Kept as a helper so the
+ * call sites below read uniformly.
  */
 const makeClient = (): BackgroundGeolocationClient =>
-  new BackgroundGeolocationClient({ skipNativeInDev: false });
+  new BackgroundGeolocationClient();
 
 const validRideId = (): RideId => {
   const r = RideId.create('ride-abc-12345');
@@ -159,7 +153,7 @@ beforeEach(() => {
 
 describe('BackgroundGeolocationClient', () => {
   describe('init', () => {
-    it('calls SDK ready with reset:true and the legacy config flags', async () => {
+    it('calls SDK ready with reset:true and the WhenInUse loop-fix config flags', async () => {
       const client = makeClient();
       const result = await client.init({ distanceFilter: 200 });
 
@@ -173,7 +167,14 @@ describe('BackgroundGeolocationClient', () => {
       const app = passed['app'] as Record<string, unknown>;
       expect(passed['reset']).toBe(true);
       expect(geo['distanceFilter']).toBe(200);
-      expect(geo['locationAuthorizationRequest']).toBe('Always');
+      // rapidActivityLaunch loop fix (2026-06-01): 'WhenInUse' (not
+      // 'Always') + disableLocationAuthorizationAlert + no
+      // backgroundPermissionRationale, so the v5 SDK stops auto-launching
+      // TSLocationManagerActivity. See memory
+      // rn_bg_geolocation_v5_android_loop.md.
+      expect(geo['locationAuthorizationRequest']).toBe('WhenInUse');
+      expect(geo['disableLocationAuthorizationAlert']).toBe(true);
+      expect(app['backgroundPermissionRationale']).toBeUndefined();
       expect(app['stopOnTerminate']).toBe(true);
       expect(app['startOnBoot']).toBe(false);
     });
@@ -618,32 +619,6 @@ describe('BackgroundGeolocationClient', () => {
       } finally {
         LOG.removeTransport(transport);
       }
-    });
-  });
-
-  /**
-   * Phase 10 Turn 9 — pin the default-flag (workaround-engagement)
-   * behavior. With `skipNativeInDev` left default (`true`), the
-   * adapter must short-circuit every gated method without touching
-   * the SDK mock when jest-expo's `__DEV__ === true` is in effect.
-   * These two tests are the only thing exercising the dev-mode
-   * branch in jest — without them a future drive-by removal of the
-   * predicate would silently weaken the Android-emulator workaround
-   * (memory: `rn_bg_geolocation_v5_android_loop.md`).
-   */
-  describe('skipNativeInDev default (workaround engagement)', () => {
-    it('init with default opts does NOT call SDK ready and returns ok', async () => {
-      const client = new BackgroundGeolocationClient();
-      const result = await client.init({ distanceFilter: 200 });
-      expect(result.ok).toBe(true);
-      expect(sdk.ready).not.toHaveBeenCalled();
-    });
-
-    it('start with default opts does NOT call SDK start and returns ok', async () => {
-      const client = new BackgroundGeolocationClient();
-      const result = await client.start();
-      expect(result.ok).toBe(true);
-      expect(sdk.start).not.toHaveBeenCalled();
     });
   });
 });

@@ -125,89 +125,11 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   private geofenceCallbacks = new Set<(event: BgGeofenceEvent) => void>();
   private geofenceSubscription: { remove: () => void } | null = null;
 
-  /**
-   * When `true` (default), the adapter's `init` / `start` / `stop` /
-   * geofence / subscription / permission methods short-circuit to a
-   * benign `Result.ok` (or a callback-tracking no-op disposer for the
-   * subscribe methods) in dev builds (`__DEV__ === true`) without
-   * touching the native SDK. This dodges the
-   * `tslocationmanager:4.1.5` `setPriority(-1)` priority-translation
-   * crash on the Android emulator (memory:
-   * `rn_bg_geolocation_v5_android_loop.md`). Production / release
-   * builds run `__DEV__ === false` and are unaffected regardless of
-   * this flag's value.
-   *
-   * Test convention: jest suites that exercise the global SDK mock
-   * pass `false` to the constructor so the native-path calls (
-   * `sdk.ready`, `sdk.start`, `sdk.onLocation`, …) actually fire and
-   * can be asserted on. Production and dev builds leave the default
-   * (no constructor arg) and keep the emulator workaround engaged.
-   *
-   * The flag is intentionally NOT surfaced on the
-   * `BackgroundGeolocationService` interface — it's an implementation
-   * detail of this adapter, not part of the domain contract.
-   *
-   * See `docs/PHASE_10_TURN_9.md` for the regression backstory.
-   */
-  private readonly skipNativeInDev: boolean;
-
-  constructor(opts?: { skipNativeInDev?: boolean }) {
-    this.skipNativeInDev = opts?.skipNativeInDev ?? true;
-  }
-
   async init(
     args: BackgroundGeolocationClientInitArgs,
   ): Promise<Result<true, NetworkError>> {
     if (this.initialized) {
       logger.info('init: already initialized — no-op');
-      return Result.ok(true);
-    }
-    // 2026-05-07 — Android-emulator workaround, v2.
-    //
-    // Background:
-    //   v4.19.4's `rapidActivityLaunch` kill loop is gone in v5 (the
-    //   v5.0.2 SDK changelog refactored Android Activity-lifecycle
-    //   management to be SDK-internal). HOWEVER, v5 ships
-    //   `tslocationmanager:4.1.5` which has a SEPARATE regression:
-    //   `buildLocationRequest` passes the SDK's internal
-    //   `DesiredAccuracy` sentinel (`-1` for `High`) directly to GMS's
-    //   `LocationRequest.setPriority()` instead of translating it into
-    //   `Priority.PRIORITY_HIGH_ACCURACY` (100). On
-    //   `play-services-location:21.x`, `setPriority` strictly validates
-    //   and throws `IllegalArgumentException: priority -1 must be a
-    //   Priority.PRIORITY_* constant` from `TSLocationManagerActivity.onCreate`,
-    //   killing the app the first time `start()` triggers a settings refine.
-    //
-    //   We attempted three workarounds: (1) `ext { tslocationmanagerVersion =
-    //   "4.1.4" }` — Gradle still resolved 4.1.5; (2) `subprojects {
-    //   configurations.all { resolutionStrategy.force ... } }` — same
-    //   outcome; (3) directly patching the SDK's own android/build.gradle
-    //   to hard-code `'4.1.4'` — STILL resolved 4.1.5 in the merged-
-    //   manifest report. Something in the Expo SDK 55 build graph
-    //   (likely `expoAutolinking.useExpoVersionCatalog()`) overrides
-    //   our pin in a way we couldn't reach. File an issue with
-    //   Transistor about the 4.1.5 priority-translation regression.
-    //
-    // Mitigation: skip native init in __DEV__. The kill loop's gone
-    // (real win from v5), but `start()` would still crash on the
-    // priority bug if the SDK actually initialized. Production
-    // builds — different keystore + obfuscation map — should be
-    // tested on a real device; if 4.1.5 ships there too, escalate.
-    //
-    // To re-enable real init for testing on a real device: comment
-    // out the early-return below.
-    //
-    // Phase 10 Turn 9: gated by `this.skipNativeInDev` so jest suites
-    // pass `false` and exercise the native-path code under the SDK
-    // mock. Default `true` preserves the emulator workaround for dev
-    // builds.
-    if (__DEV__ && this.skipNativeInDev) {
-      this.initialized = true;
-      logger.warn(
-        'init: skipping native init in __DEV__ (Android emulator ' +
-          'tslocationmanager:4.1.5 setPriority(-1) crash workaround). ' +
-          'GPS/geofence features disabled until tested on a real device.',
-      );
       return Result.ok(true);
     }
     try {
@@ -227,7 +149,24 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
           // How long the SDK waits before declaring the device stationary
           // (5s = legacy default).
           stopTimeout: 5,
-          locationAuthorizationRequest: 'Always',
+          // 2026-06-01 — rapidActivityLaunch loop fix. With v5 on Android,
+          // `locationAuthorizationRequest: 'Always'` puts the SDK on its
+          // background-permission elevation path, which auto-launches the
+          // internal `TSLocationManagerActivity` ('locationsettings') on
+          // start EVEN when permission is already granted. The activity
+          // opens over MainActivity, dismisses, AppState fires 'active',
+          // the permission re-poll relaunches it → tight loop → Android's
+          // rapidActivityLaunch watchdog SIGKILLs the process after ~5-7
+          // launches in ~1.3s. `'WhenInUse'` drops the elevation path and
+          // `disableLocationAuthorizationAlert: true` suppresses the SDK's
+          // auto-launch of the permission activity. Trade-off: no
+          // background-always tracking until Transistor fixes the elevation
+          // loop (or the tech.yeapp.yeridenext Transistor license is
+          // provisioned so we can move off the app.yeride.dev bundle).
+          // See memory rn_bg_geolocation_v5_android_loop.md + bg-crash.log
+          // (06-01 20:25:27 "Killing …: rapidActivityLaunch").
+          locationAuthorizationRequest: 'WhenInUse',
+          disableLocationAuthorizationAlert: true,
         },
         activity: {
           // Disable the SDK's internal MotionActivityCheck loop. On the
@@ -242,14 +181,14 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
           disableStopDetection: true,
         },
         app: {
-          backgroundPermissionRationale: {
-            title:
-              'Allow YeRide Next to access your location even when the app is in the background.',
-            message:
-              'YeRide Next uses location data to track trips, estimate arrival times, and calculate distances traveled. This data is required for the trip-tracking and pickup-area features.',
-            positiveAction: 'Enable "{backgroundPermissionOptionLabel}"',
-            negativeAction: 'Cancel',
-          },
+          // `backgroundPermissionRationale` intentionally omitted (2026-06-01):
+          // while present, it keeps the v5 SDK looking for a background-
+          // permission elevation opportunity, which re-arms the
+          // TSLocationManagerActivity launch behind the rapidActivityLaunch
+          // SIGKILL loop. Restore it together with
+          // `locationAuthorizationRequest: 'Always'` only once Transistor's
+          // elevation loop is fixed. See memory
+          // rn_bg_geolocation_v5_android_loop.md.
           // CRITICAL: stop tracking when the user force-quits the app, and
           // do NOT auto-start on device boot. Matches legacy contract.
           stopOnTerminate: true,
@@ -280,8 +219,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async start(): Promise<Result<true, NetworkError>> {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       const state = (await BackgroundGeolocation.getState()) as SdkState;
       if (state.enabled) {
@@ -304,8 +241,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async stop(): Promise<Result<true, NetworkError>> {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.stop();
       this.lastLocationKey = null;
@@ -329,8 +264,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
     radiusMeters: number;
     rideId: RideId;
   }): Promise<Result<true, NetworkError>> {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.addGeofence({
         identifier: 'pickup',
@@ -360,8 +293,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async removePickupGeofence(): Promise<Result<true, NetworkError>> {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.removeGeofence('pickup');
       logger.info('removePickupGeofence: removed');
@@ -379,8 +310,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   }
 
   async removeAllGeofences(): Promise<Result<true, NetworkError>> {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) return Result.ok(true);
     try {
       await BackgroundGeolocation.removeGeofences();
       logger.info('removeAllGeofences: cleared');
@@ -408,16 +337,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
    * the void.
    */
   subscribeToLocation(callback: (event: BgLocationEvent) => void): () => void {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) {
-      // No-op in dev — SDK is not initialized. Track the callback so the
-      // disposer contract still holds, but never wire it to a real SDK
-      // listener.
-      this.locationCallbacks.add(callback);
-      return () => {
-        this.locationCallbacks.delete(callback);
-      };
-    }
     this.locationCallbacks.add(callback);
     if (!this.locationSubscription) {
       this.locationSubscription = BackgroundGeolocation.onLocation(
@@ -466,13 +385,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
    * the same `'pickup'` identifier still fan out their first fire each.
    */
   subscribeToGeofence(callback: (event: BgGeofenceEvent) => void): () => void {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) {
-      this.geofenceCallbacks.add(callback);
-      return () => {
-        this.geofenceCallbacks.delete(callback);
-      };
-    }
     this.geofenceCallbacks.add(callback);
     if (!this.geofenceSubscription) {
       this.geofenceSubscription = BackgroundGeolocation.onGeofence(
@@ -534,8 +446,6 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
   async requestAuthorizationIfNeeded(): Promise<
     Result<BgPermissionStatus, AuthorizationError>
   > {
-    // Phase 10 Turn 9: dev-build short-circuit gated for test access.
-    if (__DEV__ && this.skipNativeInDev) return Result.ok('always');
     try {
       const status = await BackgroundGeolocation.requestPermission();
       return Result.ok(this.mapAuthorizationStatus(status));

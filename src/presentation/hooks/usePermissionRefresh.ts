@@ -101,53 +101,81 @@ export function usePermissionRefresh(args: UsePermissionRefreshArgs): void {
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
 
+  // Synchronous in-flight guard. Android can deliver several
+  // 'change' → 'active' events in quick succession; without this,
+  // overlapping requestAuthorizationIfNeeded() calls stack, and on
+  // v5/Android each can drive the TSLocationManagerActivity launch
+  // behind the rapidActivityLaunch SIGKILL loop. Set BEFORE the await,
+  // cleared in finally. See memory rn_bg_geolocation_v5_android_loop.md.
+  const inFlightRef = useRef(false);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next !== 'active') return;
+      // Skip-when-already-granted: once a granted level has been
+      // observed, never re-poll on subsequent foregrounds. The poll
+      // calls the SDK's requestPermission(), which on v5/Android can
+      // re-launch TSLocationManagerActivity; re-launching it while we
+      // already hold a grant is the trigger for the rapidActivityLaunch
+      // SIGKILL loop. Denied → granted recovery is unaffected:
+      // previousStatusRef stays non-granted until the user actually
+      // grants, so polling continues until then. (A later revocation is
+      // surfaced by the SDK's own provider/location errors, not here —
+      // re-polling to detect it is exactly what re-arms the loop.)
+      const known = previousStatusRef.current;
+      if (known !== null && isGranted(known)) return;
+      // In-flight guard, set synchronously BEFORE the await so
+      // re-entrant 'active' events don't stack overlapping requests.
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       void (async () => {
-        const r = await bgGeolocation.requestAuthorizationIfNeeded();
-        if (!r.ok) {
-          // Stays warn — this is a probe, not a chain-fatal path.
-          // The next AppState 'active' or the lifecycle hook's own
-          // request-on-enable will retry.
-          logger.warn('requestAuthorizationIfNeeded failed', r.error);
-          return;
-        }
-        const newStatus = r.value;
-        const prev = previousStatusRef.current;
-        previousStatusRef.current = newStatus;
-
-        // Push to the store unconditionally so view-models always
-        // see the latest. Zustand bails on `===` per field, so a
-        // no-op write is free.
-        setPermissionStatus(newStatus);
-
-        // Edge-detection: only act on a transition from a
-        // non-granted state to a granted state. Skip the
-        // initial-mount poll (prev === null) so a fresh launch
-        // doesn't surface a toast for a permission the user
-        // granted in a prior session.
-        const flippedToGranted =
-          prev !== null && !isGranted(prev) && isGranted(newStatus);
-        if (!flippedToGranted) return;
-
-        Toast.show({
-          type: 'success',
-          text1: 'Location access enabled — thanks!',
-          visibilityTime: 2500,
-        });
-
-        if (enabledRef.current) {
-          // Start the SDK now — useGpsLifecycle's effect won't
-          // re-fire on a store-only permissionStatus change (its
-          // deps don't include permissionStatus, and adding it
-          // would create a feedback loop since the effect itself
-          // writes the field). Adapter's `start()` is idempotent —
-          // a no-op if already running.
-          const startR = await bgGeolocation.start();
-          if (!startR.ok) {
-            logger.warn('start after grant failed', startR.error);
+        try {
+          const r = await bgGeolocation.requestAuthorizationIfNeeded();
+          if (!r.ok) {
+            // Stays warn — this is a probe, not a chain-fatal path.
+            // The next AppState 'active' or the lifecycle hook's own
+            // request-on-enable will retry.
+            logger.warn('requestAuthorizationIfNeeded failed', r.error);
+            return;
           }
+          const newStatus = r.value;
+          const prev = previousStatusRef.current;
+          previousStatusRef.current = newStatus;
+
+          // Push to the store unconditionally so view-models always
+          // see the latest. Zustand bails on `===` per field, so a
+          // no-op write is free.
+          setPermissionStatus(newStatus);
+
+          // Edge-detection: only act on a transition from a
+          // non-granted state to a granted state. Skip the
+          // initial-mount poll (prev === null) so a fresh launch
+          // doesn't surface a toast for a permission the user
+          // granted in a prior session.
+          const flippedToGranted =
+            prev !== null && !isGranted(prev) && isGranted(newStatus);
+          if (!flippedToGranted) return;
+
+          Toast.show({
+            type: 'success',
+            text1: 'Location access enabled — thanks!',
+            visibilityTime: 2500,
+          });
+
+          if (enabledRef.current) {
+            // Start the SDK now — useGpsLifecycle's effect won't
+            // re-fire on a store-only permissionStatus change (its
+            // deps don't include permissionStatus, and adding it
+            // would create a feedback loop since the effect itself
+            // writes the field). Adapter's `start()` is idempotent —
+            // a no-op if already running.
+            const startR = await bgGeolocation.start();
+            if (!startR.ok) {
+              logger.warn('start after grant failed', startR.error);
+            }
+          }
+        } finally {
+          inFlightRef.current = false;
         }
       })();
     });

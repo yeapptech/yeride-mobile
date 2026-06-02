@@ -208,25 +208,33 @@ describe('usePermissionRefresh', () => {
     expect(bg.spies.startCalls).toBe(0);
   });
 
-  it('does not toast when the status stays granted across polls', async () => {
+  it('skips the SDK poll on subsequent "active" once already granted', async () => {
     const bg = new FakeBackgroundGeolocationClient();
     bg.seedAuthorization('always');
     renderHook(() => usePermissionRefresh({ enabled: true }), {
       wrapper: makeWrapper(bg),
     });
 
+    // First 'active': previousStatusRef is null, so we poll once and
+    // observe 'always'.
     await act(async () => {
       registeredHandler?.('active');
       await Promise.resolve();
     });
+    await waitFor(() => {
+      expect(useGpsStore.getState().permissionStatus).toBe('always');
+    });
+
+    // Second 'active': skip-when-already-granted short-circuits BEFORE
+    // the SDK poll. Re-launching the v5 permission activity while we
+    // already hold a grant is the rapidActivityLaunch loop trigger, so
+    // the poll count stays at 1.
     await act(async () => {
       registeredHandler?.('active');
       await Promise.resolve();
     });
 
-    await waitFor(() => {
-      expect(bg.spies.requestAuthorizationCalls).toBe(2);
-    });
+    expect(bg.spies.requestAuthorizationCalls).toBe(1);
     expect(mockToastShow).not.toHaveBeenCalled();
   });
 });
