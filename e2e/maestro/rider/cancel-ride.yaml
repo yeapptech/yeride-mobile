@@ -1,0 +1,16 @@
+appId: app.yeride.dev
+# Cancels the active ride from the rider "awaiting driver" monitor (reason: changed mind).
+---
+- assertVisible:
+    id: 'awaiting-cancel'
+- tapOn:
+    id: 'awaiting-cancel'
+- tapOn:
+    id: 'cancel-reason-changed_mind'
+- tapOn:
+    id: 'cancel-reason-confirm'
+- extendedWaitUntil:
+    notVisible: 'Cancel ride'
+    timeout: 12000
+- waitForAnimationToEnd
+- takeScreenshot: rider-after-cancel

@@ -1,0 +1,51 @@
+appId: app.yeride.dev
+# Driver static-surface sweep: every tab + nested read-only screens, with screenshots.
+# Assumes already signed in as a driver. Does NOT mutate data (no Save / Delete / Submit).
+# Tab taps go through ../_lib/tap-tab.yaml so this runs on Android AND iOS.
+---
+- runFlow: ../auth/dismiss-soft-asks.yaml
+- assertVisible:
+    id: 'driver-home-online-toggle'
+- takeScreenshot: driver-home
+# Activity tab + a trip detail
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Activity'
+      TAB_POINT: '37%,96%'
+- takeScreenshot: driver-activity
+- tapOn:
+    text: 'Trip with.*'
+    index: 0
+- assertVisible:
+    id: 'trip-detail-screen'
+- takeScreenshot: driver-trip-detail
+- back
+# Earnings tab
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Earnings'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: 'earnings-loading-spinner'
+    timeout: 10000
+    optional: true
+- takeScreenshot: driver-earnings
+# Profile -> My vehicles -> vehicle detail -> register screen
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Profile'
+      TAB_POINT: '87%,96%'
+- takeScreenshot: driver-profile
+- tapOn: 'My vehicles'
+- assertVisible:
+    id: 'vehicle-list'
+- takeScreenshot: driver-vehicle-list
+- tapOn:
+    id: 'vehicle-list-add'
+- takeScreenshot: driver-register-vehicle
+- back
+- back

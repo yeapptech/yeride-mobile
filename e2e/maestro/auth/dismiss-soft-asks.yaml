@@ -1,0 +1,13 @@
+appId: app.yeride.dev
+# Dismisses the dev-client launcher + the push-notification soft-ask sheet if present.
+# Safe to run at the start of any post-login flow.
+---
+- tapOn:
+    text: 'Continue'
+    optional: true
+- runFlow:
+    when:
+      visible: 'Not now'
+    commands:
+      - tapOn: 'Not now'
+- waitForAnimationToEnd

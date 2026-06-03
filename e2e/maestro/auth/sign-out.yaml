@@ -1,0 +1,9 @@
+appId: app.yeride.dev
+# Signs out from any tabbed surface (driver or rider). Lands on "Welcome back".
+# NOTE: a rider with an ACTIVE ride is auto-routed to the ride monitor and has no
+# tab bar — cancel or complete the ride first, otherwise "Profile" is unreachable.
+---
+- tapOn: 'Profile'
+- assertVisible: 'Sign out'
+- tapOn: 'Sign out'
+- assertVisible: 'Welcome back'
