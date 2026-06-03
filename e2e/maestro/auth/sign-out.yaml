@@ -1,9 +1,14 @@
 appId: app.yeride.dev
 # Signs out from any tabbed surface (driver or rider). Lands on "Welcome back".
 # NOTE: a rider with an ACTIVE ride is auto-routed to the ride monitor and has no
-# tab bar — cancel or complete the ride first, otherwise "Profile" is unreachable.
+# tab bar — cancel or complete the ride first, otherwise Profile is unreachable.
+# Profile is tapped via ../_lib/tap-tab.yaml so this works on Android AND iOS.
 ---
-- tapOn: 'Profile'
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Profile'
+      TAB_POINT: '87%,96%'
 - assertVisible: 'Sign out'
 - tapOn: 'Sign out'
 - assertVisible: 'Welcome back'

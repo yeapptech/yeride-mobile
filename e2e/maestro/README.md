@@ -1,9 +1,11 @@
 # Maestro UI flows
 
 Automated driver + rider UI walkthroughs for the YeRide-Next dev client,
-driven with [Maestro](https://maestro.mobile.dev). They tap real `testID`s
-(not coordinates) so they run identically on the Android emulator and the
-iOS simulator.
+driven with [Maestro](https://maestro.mobile.dev). They prefer real `testID`s
+so they run on both the Android emulator and the iOS simulator. The one
+exception is the bottom-tab bar, whose labels aren't text-matchable on iOS —
+tab taps go through `_lib/tap-tab.yaml`, which falls back to a point tap there
+(see Gotchas).
 
 ## Prerequisites
 

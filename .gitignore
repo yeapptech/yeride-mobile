@@ -82,3 +82,6 @@ coverage/
 .env.development
 .env.stage
 .env.production
+
+# Maestro screenshot artifacts (takeScreenshot writes to the cwd)
+e2e/**/*.png
