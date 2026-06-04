@@ -124,10 +124,14 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
 
-  // Auto-redirect to RideMonitor if there's an in-progress ride. We use
-  // `useFocusEffect` so the redirect fires every time RiderHome gains
-  // focus — including after the user backs out of RideMonitor without
-  // completing the ride.
+  // Auto-redirect to RideMonitor if there's an in-progress ride. The
+  // `useFocusEffect` callback runs on every focus gain, but
+  // `routedRideIdRef` gates the actual `navigation.reset` so it fires
+  // AT MOST ONCE per distinct ride id. This is what allows the rider to
+  // back out of RideMonitor and roam other tabs freely — the ref records
+  // that we already routed for this ride, so re-gaining focus doesn't
+  // bounce them back. A genuinely new ride (different id) clears the
+  // guard and routes again.
   //
   // CRITICAL: this hook runs from inside `RiderTabs` (a tab screen), so
   // calling `navigation.replace('RideMonitor', ...)` bubbles up to the
@@ -139,20 +143,20 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   // "POP_TO_TOP not handled by any navigator". Use `reset` so the back
   // stack is `[RiderTabs, RideMonitor]` — that gives RideReceipt
   // somewhere to pop to.
+  const routedRideIdRef = useRef<string | null>(null);
   useFocusEffect(
     useCallback(() => {
-      if (inProgressRide) {
-        navigation.reset({
-          index: 1,
-          routes: [
-            { name: 'RiderTabs' },
-            {
-              name: 'RideMonitor',
-              params: { rideId: String(inProgressRide.id) },
-            },
-          ],
-        });
-      }
+      if (!inProgressRide) return;
+      const rideId = String(inProgressRide.id);
+      if (routedRideIdRef.current === rideId) return;
+      routedRideIdRef.current = rideId;
+      navigation.reset({
+        index: 1,
+        routes: [
+          { name: 'RiderTabs' },
+          { name: 'RideMonitor', params: { rideId } },
+        ],
+      });
     }, [inProgressRide, navigation]),
   );
 

@@ -3,8 +3,15 @@ import type { ReactNode } from 'react';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
+import { Endpoint } from '@domain/entities/Endpoint';
+import { Money } from '@domain/entities/Money';
+import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { Ride } from '@domain/entities/Ride';
+import { RideId } from '@domain/entities/RideId';
+import { RideServiceId } from '@domain/entities/RideServiceId';
+import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { ServiceArea } from '@domain/entities/ServiceArea';
 import { ServiceAreaId } from '@domain/entities/ServiceAreaId';
 import { makeRider } from '@domain/entities/User';
@@ -13,6 +20,7 @@ import { useServiceAreaStore } from '@presentation/stores/useServiceAreaStore';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import {
   InMemoryAuthRepository,
+  InMemoryRideRepository,
   InMemoryServiceAreaRepository,
   InMemoryUserRepository,
   TestContainerProvider,
@@ -82,6 +90,61 @@ function makeArea(): ServiceArea {
   );
 }
 
+const usd = (major: number) => unwrap(Money.fromMajor(major, 'USD'));
+
+function makeAwaitingRiderRide(uid: UserId, id: string): Ride {
+  const passenger = unwrap(
+    PassengerSnapshot.create({
+      id: uid,
+      name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+      email: unwrap(Email.create('rider2@yeapp.tech')),
+      phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
+      pushToken: null,
+      avatarUrl: null,
+      stripeCustomerId: null,
+      defaultPaymentMethod: null,
+    }),
+  );
+  const service = unwrap(
+    RideServiceSnapshot.create({
+      id: unwrap(RideServiceId.create('economy')),
+      name: 'Economy',
+      baseFare: usd(2.5),
+      minimumFare: usd(5),
+      cancelationFee: usd(2),
+      costPerKm: usd(1.25),
+      costPerMinute: usd(0.2),
+      seatCapacity: 4,
+    }),
+  );
+  const miami = unwrap(Coordinates.create(25.7617, -80.1918));
+  const lauderdale = unwrap(Coordinates.create(26.1224, -80.1373));
+  return unwrap(
+    Ride.create({
+      id: unwrap(RideId.create(id)),
+      passenger,
+      rideService: service,
+      pickup: unwrap(
+        Endpoint.create({
+          location: miami,
+          address: 'pickup',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      dropoff: unwrap(
+        Endpoint.create({
+          location: lauderdale,
+          address: 'dropoff',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      createdAt: new Date(),
+    }),
+  );
+}
+
 async function setupSeededState(): Promise<{
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
@@ -135,12 +198,14 @@ function withTestContainer(opts: {
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
   serviceAreasRepo: InMemoryServiceAreaRepository;
+  ridesRepo?: InMemoryRideRepository;
 }) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       auth={opts.authRepo}
       users={opts.usersRepo}
       serviceAreas={opts.serviceAreasRepo}
+      {...(opts.ridesRepo !== undefined ? { rides: opts.ridesRepo } : {})}
     >
       {children}
     </TestContainerProvider>
@@ -209,5 +274,31 @@ describe('useRiderHomeViewModel', () => {
     expect(mockNavigate).toHaveBeenCalledWith('RideMonitor', {
       rideId: 'rideAbc1234567890ab',
     });
+  });
+
+  it('auto-routes to RideMonitor once per ride, not on every focus', async () => {
+    const setup = await setupSeededState();
+    const ridesRepo = new InMemoryRideRepository();
+    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'rideOnce0000000001ab'));
+
+    renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
+    });
+
+    await waitFor(() => {
+      expect(mockReset).toHaveBeenCalledWith({
+        index: 1,
+        routes: [
+          { name: 'RiderTabs' },
+          { name: 'RideMonitor', params: { rideId: 'rideOnce0000000001ab' } },
+        ],
+      });
+    });
+    expect(mockReset).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      focusCallbacks[focusCallbacks.length - 1]?.();
+    });
+    expect(mockReset).toHaveBeenCalledTimes(1);
   });
 });
