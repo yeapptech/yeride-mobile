@@ -18,6 +18,13 @@ export interface ActiveRideBannerProps {
   readonly topInset: number;
 }
 
+/**
+ * The view-model output that feeds `ActiveRideBanner` — the banner's
+ * props minus `topInset`, which the mounting navigator supplies.
+ * Shared by the rider and driver banner view-models.
+ */
+export type ActiveRideBannerViewModel = Omit<ActiveRideBannerProps, 'topInset'>;
+
 export function ActiveRideBanner({
   visible,
   statusLabel,

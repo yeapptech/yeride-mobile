@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useCallback } from 'react';
 
 import type { RideStatus } from '@domain/entities/RideStatus';
-import type { UseActiveRideBannerViewModel } from '@presentation/features/rider/view-models/useRiderActiveRideBannerViewModel';
+import type { ActiveRideBannerViewModel } from '@presentation/components/trip/ActiveRideBanner';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
 import { useInProgressDriverRideQuery } from '@presentation/queries';
 import { useCurrentUserId } from '@presentation/stores';
@@ -25,7 +25,7 @@ export function driverBannerLabel(status: RideStatus): string {
   }
 }
 
-export function useDriverActiveRideBannerViewModel(): UseActiveRideBannerViewModel {
+export function useDriverActiveRideBannerViewModel(): ActiveRideBannerViewModel {
   const navigation = useNavigation<DriverStackNavigation>();
   const driverId = useCurrentUserId();
   const { data: ride } = useInProgressDriverRideQuery(driverId);

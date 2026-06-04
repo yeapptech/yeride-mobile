@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useCallback } from 'react';
 
 import type { RideStatus } from '@domain/entities/RideStatus';
-import type { ActiveRideBannerProps } from '@presentation/components/trip/ActiveRideBanner';
+import type { ActiveRideBannerViewModel } from '@presentation/components/trip/ActiveRideBanner';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useInProgressRideQuery } from '@presentation/queries';
 import { useCurrentUserId } from '@presentation/stores';
@@ -27,13 +27,7 @@ export function riderBannerLabel(status: RideStatus): string {
   }
 }
 
-/** Output is the banner's props minus `topInset` (supplied by the navigator). */
-export type UseActiveRideBannerViewModel = Omit<
-  ActiveRideBannerProps,
-  'topInset'
->;
-
-export function useRiderActiveRideBannerViewModel(): UseActiveRideBannerViewModel {
+export function useRiderActiveRideBannerViewModel(): ActiveRideBannerViewModel {
   const navigation = useNavigation<RiderStackNavigation>();
   const userId = useCurrentUserId();
   const { data: ride } = useInProgressRideQuery(userId);
