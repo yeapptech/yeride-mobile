@@ -206,17 +206,21 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
 
-  // Auto-redirect to the active ride. The status-router inside
-  // DriverMonitor handles every active state (en-route, at-pickup,
-  // started, payment_requested, payment_failed), so DriverHome doesn't
-  // need to branch on status.
+  // Auto-redirect to the active ride, but only ONCE per ride id.
+  // Without the ref guard every focus event (e.g. returning from the
+  // Profile tab) would call navigate again, bouncing the driver straight
+  // back to DriverMonitor and making tabs unreachable.
+  // The status-router inside DriverMonitor handles every active state
+  // (en-route, at-pickup, started, payment_requested, payment_failed),
+  // so the redirect target is unconditional on status.
+  const routedRideIdRef = useRef<string | null>(null);
   useFocusEffect(
     useCallback(() => {
-      if (inProgressRide) {
-        navigation.navigate('DriverMonitor', {
-          rideId: String(inProgressRide.id),
-        });
-      }
+      if (!inProgressRide) return;
+      const rideId = String(inProgressRide.id);
+      if (routedRideIdRef.current === rideId) return;
+      routedRideIdRef.current = rideId;
+      navigation.navigate('DriverMonitor', { rideId });
     }, [inProgressRide, navigation]),
   );
 

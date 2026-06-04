@@ -509,6 +509,75 @@ describe('useDriverHomeViewModel', () => {
     });
   });
 
+  it('routes to DriverMonitor once per ride, not on every focus', async () => {
+    const setup = await setupSeededState();
+    const driverSnap = unwrap(
+      DriverSnapshot.create({
+        id: setup.uid,
+        name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+        email: unwrap(Email.create('driver@yeapp.tech')),
+        phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+        stripeAccountId: 'acct_test',
+        pushToken: null,
+        avatarUrl: null,
+        vehicle: unwrap(
+          VehicleSnapshot.create({
+            make: 'Toyota',
+            model: 'Camry',
+            year: 2024,
+            color: 'White',
+            licensePlate: 'ABC1234',
+            stockPhoto: null,
+            photos: [],
+          }),
+        ),
+      }),
+    );
+    const route = unwrap(
+      Route.create({
+        distanceMeters: 5_000,
+        durationSeconds: 600,
+        distanceText: '3.1 mi',
+        durationText: '10 mins',
+        encodedPolyline: '_p~iF',
+        startLocation: MIAMI,
+        endLocation: FORT_LAUDERDALE,
+        routeLabels: [],
+        tollPrice: null,
+        routeToken: 'tk',
+        description: '',
+      }),
+    );
+    const dispatched = unwrap(
+      makeAwaitingRide({ id: 'rideOnceDrv12345678ab' }).dispatch({
+        driver: driverSnap,
+        pickupDirections: route,
+        at: new Date(),
+      }),
+    );
+    setup.ridesRepo.seed(dispatched);
+
+    renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
+        rideId: 'rideOnceDrv12345678ab',
+      });
+    });
+    expect(
+      mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor'),
+    ).toHaveLength(1);
+
+    act(() => {
+      focusCallbacks[focusCallbacks.length - 1]?.();
+    });
+    expect(
+      mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor'),
+    ).toHaveLength(1);
+  });
+
   describe('bgPermissionDenied gating (Phase 9 turn 10)', () => {
     it('false by default (store starts at undetermined)', async () => {
       const setup = await setupSeededState();
