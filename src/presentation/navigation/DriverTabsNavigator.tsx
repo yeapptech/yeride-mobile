@@ -1,9 +1,16 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View } from 'react-native';
+import {
+  SafeAreaInsetsContext,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
+import { ActiveRideBanner } from '@presentation/components/trip/ActiveRideBanner';
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
 import DriverActivityScreen from '@presentation/features/driver/screens/DriverActivityScreen';
 import DriverEarningsScreen from '@presentation/features/driver/screens/DriverEarningsScreen';
 import DriverHomeScreen from '@presentation/features/driver/screens/DriverHomeScreen';
+import { useDriverActiveRideBannerViewModel } from '@presentation/features/driver/view-models/useDriverActiveRideBannerViewModel';
 
 import type { DriverTabsParamList } from './types';
 
@@ -26,34 +33,44 @@ import type { DriverTabsParamList } from './types';
 const Tabs = createBottomTabNavigator<DriverTabsParamList>();
 
 export function DriverTabsNavigator() {
+  const insets = useSafeAreaInsets();
+  const banner = useDriverActiveRideBannerViewModel();
+
   return (
-    <Tabs.Navigator
-      initialRouteName="DriverHome"
-      screenOptions={{
-        headerShown: false,
-        tabBarLabelStyle: { fontSize: 12 },
-      }}
-    >
-      <Tabs.Screen
-        name="DriverHome"
-        component={DriverHomeScreen}
-        options={{ tabBarLabel: 'Home' }}
-      />
-      <Tabs.Screen
-        name="Activity"
-        component={DriverActivityScreen}
-        options={{ tabBarLabel: 'Activity' }}
-      />
-      <Tabs.Screen
-        name="Earnings"
-        component={DriverEarningsScreen}
-        options={{ tabBarLabel: 'Earnings' }}
-      />
-      <Tabs.Screen
-        name="Profile"
-        component={UserProfileScreen}
-        options={{ tabBarLabel: 'Profile' }}
-      />
-    </Tabs.Navigator>
+    <View className="flex-1">
+      <ActiveRideBanner {...banner} topInset={insets.top} />
+      <SafeAreaInsetsContext.Provider
+        value={{ ...insets, top: banner.visible ? 0 : insets.top }}
+      >
+        <Tabs.Navigator
+          initialRouteName="DriverHome"
+          screenOptions={{
+            headerShown: false,
+            tabBarLabelStyle: { fontSize: 12 },
+          }}
+        >
+          <Tabs.Screen
+            name="DriverHome"
+            component={DriverHomeScreen}
+            options={{ tabBarLabel: 'Home' }}
+          />
+          <Tabs.Screen
+            name="Activity"
+            component={DriverActivityScreen}
+            options={{ tabBarLabel: 'Activity' }}
+          />
+          <Tabs.Screen
+            name="Earnings"
+            component={DriverEarningsScreen}
+            options={{ tabBarLabel: 'Earnings' }}
+          />
+          <Tabs.Screen
+            name="Profile"
+            component={UserProfileScreen}
+            options={{ tabBarLabel: 'Profile' }}
+          />
+        </Tabs.Navigator>
+      </SafeAreaInsetsContext.Provider>
+    </View>
   );
 }

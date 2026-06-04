@@ -1,9 +1,16 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View } from 'react-native';
+import {
+  SafeAreaInsetsContext,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
+import { ActiveRideBanner } from '@presentation/components/trip/ActiveRideBanner';
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
 import ActivityScreen from '@presentation/features/rider/screens/ActivityScreen';
 import RiderHomeScreen from '@presentation/features/rider/screens/RiderHomeScreen';
 import WalletScreen from '@presentation/features/rider/screens/WalletScreen';
+import { useRiderActiveRideBannerViewModel } from '@presentation/features/rider/view-models/useRiderActiveRideBannerViewModel';
 
 import type { RiderTabsParamList } from './types';
 
@@ -20,35 +27,45 @@ import type { RiderTabsParamList } from './types';
 const Tabs = createBottomTabNavigator<RiderTabsParamList>();
 
 export function RiderTabsNavigator() {
+  const insets = useSafeAreaInsets();
+  const banner = useRiderActiveRideBannerViewModel();
+
   return (
-    <Tabs.Navigator
-      initialRouteName="RiderHome"
-      screenOptions={{
-        headerShown: false,
-        // Native-stack-style icons + labels stylized in a follow-up turn.
-        tabBarLabelStyle: { fontSize: 12 },
-      }}
-    >
-      <Tabs.Screen
-        name="RiderHome"
-        component={RiderHomeScreen}
-        options={{ tabBarLabel: 'Home' }}
-      />
-      <Tabs.Screen
-        name="Activity"
-        component={ActivityScreen}
-        options={{ tabBarLabel: 'Activity' }}
-      />
-      <Tabs.Screen
-        name="Wallet"
-        component={WalletScreen}
-        options={{ tabBarLabel: 'Wallet' }}
-      />
-      <Tabs.Screen
-        name="Profile"
-        component={UserProfileScreen}
-        options={{ tabBarLabel: 'Profile' }}
-      />
-    </Tabs.Navigator>
+    <View className="flex-1">
+      <ActiveRideBanner {...banner} topInset={insets.top} />
+      <SafeAreaInsetsContext.Provider
+        value={{ ...insets, top: banner.visible ? 0 : insets.top }}
+      >
+        <Tabs.Navigator
+          initialRouteName="RiderHome"
+          screenOptions={{
+            headerShown: false,
+            // Native-stack-style icons + labels stylized in a follow-up turn.
+            tabBarLabelStyle: { fontSize: 12 },
+          }}
+        >
+          <Tabs.Screen
+            name="RiderHome"
+            component={RiderHomeScreen}
+            options={{ tabBarLabel: 'Home' }}
+          />
+          <Tabs.Screen
+            name="Activity"
+            component={ActivityScreen}
+            options={{ tabBarLabel: 'Activity' }}
+          />
+          <Tabs.Screen
+            name="Wallet"
+            component={WalletScreen}
+            options={{ tabBarLabel: 'Wallet' }}
+          />
+          <Tabs.Screen
+            name="Profile"
+            component={UserProfileScreen}
+            options={{ tabBarLabel: 'Profile' }}
+          />
+        </Tabs.Navigator>
+      </SafeAreaInsetsContext.Provider>
+    </View>
   );
 }
