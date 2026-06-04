@@ -1,6 +1,8 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import {
   DriverSnapshot,
@@ -576,6 +578,133 @@ describe('useDriverHomeViewModel', () => {
     expect(
       mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor'),
     ).toHaveLength(1);
+  });
+
+  it('re-routes when a new ride id becomes active', async () => {
+    const setup = await setupSeededState();
+
+    // Build a reusable DriverSnapshot / Route (same shape as the existing tests).
+    const driverSnap = unwrap(
+      DriverSnapshot.create({
+        id: setup.uid,
+        name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+        email: unwrap(Email.create('driver@yeapp.tech')),
+        phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+        stripeAccountId: 'acct_test',
+        pushToken: null,
+        avatarUrl: null,
+        vehicle: unwrap(
+          VehicleSnapshot.create({
+            make: 'Toyota',
+            model: 'Camry',
+            year: 2024,
+            color: 'White',
+            licensePlate: 'ABC1234',
+            stockPhoto: null,
+            photos: [],
+          }),
+        ),
+      }),
+    );
+    const route = unwrap(
+      Route.create({
+        distanceMeters: 5_000,
+        durationSeconds: 600,
+        distanceText: '3.1 mi',
+        durationText: '10 mins',
+        encodedPolyline: '_p~iF',
+        startLocation: MIAMI,
+        endLocation: FORT_LAUDERDALE,
+        routeLabels: [],
+        tollPrice: null,
+        routeToken: 'tk',
+        description: '',
+      }),
+    );
+
+    // The driver query excludes 'awaiting_driver' — ride must be dispatched.
+    const rideAWaiting = makeAwaitingRide({ id: 'rideDrvNewIdA00001ab' });
+    const rideA = unwrap(
+      rideAWaiting.dispatch({
+        driver: driverSnap,
+        pickupDirections: route,
+        at: new Date(),
+      }),
+    );
+    setup.ridesRepo.seed(rideA);
+
+    // Nest our own QueryClient so we control refetches.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <TestContainerProvider
+        auth={setup.authRepo}
+        users={setup.usersRepo}
+        serviceAreas={setup.serviceAreasRepo}
+        rides={setup.ridesRepo}
+        vehicles={setup.vehiclesRepo}
+      >
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      </TestContainerProvider>
+    );
+
+    renderHook(() => useDriverHomeViewModel(), { wrapper });
+
+    // Step 1 — ride A triggers the first DriverMonitor navigate.
+    await waitFor(() => {
+      expect(
+        mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor'),
+      ).toHaveLength(1);
+    });
+    expect(
+      mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor')[0]?.[1],
+    ).toEqual({
+      rideId: 'rideDrvNewIdA00001ab',
+    });
+
+    // Step 2 — deactivate ride A (cancel → terminal, excluded from DRIVER_ACTIVE_STATUSES).
+    // Seed ride B as the new dispatched ride for this driver.
+    const cancelledA = unwrap(
+      rideA.cancel({
+        reason: unwrap(
+          CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+        ),
+        by: 'driver',
+        at: new Date(),
+        odometerMeters: null,
+      }),
+    );
+    setup.ridesRepo.seed(cancelledA);
+
+    const rideBWaiting = makeAwaitingRide({ id: 'rideDrvNewIdB00002ab' });
+    const rideB = unwrap(
+      rideBWaiting.dispatch({
+        driver: driverSnap,
+        pickupDirections: route,
+        at: new Date(),
+      }),
+    );
+    setup.ridesRepo.seed(rideB);
+
+    // Force refetch — the focus mock re-runs with ride B, clearing the guard.
+    await act(async () => {
+      await queryClient.invalidateQueries();
+    });
+
+    // Step 3 — ride B must trigger a second DriverMonitor navigate.
+    await waitFor(() => {
+      expect(
+        mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor'),
+      ).toHaveLength(2);
+    });
+    expect(
+      mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor')[1]?.[1],
+    ).toEqual({
+      rideId: 'rideDrvNewIdB00002ab',
+    });
   });
 
   describe('bgPermissionDenied gating (Phase 9 turn 10)', () => {

@@ -1,6 +1,8 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
@@ -300,5 +302,80 @@ describe('useRiderHomeViewModel', () => {
       focusCallbacks[focusCallbacks.length - 1]?.();
     });
     expect(mockReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-routes when a new ride id becomes active', async () => {
+    const setup = await setupSeededState();
+    const ridesRepo = new InMemoryRideRepository();
+    const rideA = makeAwaitingRiderRide(setup.uid, 'rideNewIdA000000001ab');
+    ridesRepo.seed(rideA);
+
+    // Nest our own QueryClient inside TestContainerProvider so we control
+    // when refetches happen. The hook resolves the nearest QueryClient (ours)
+    // while still pulling the DI container from the outer provider.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <TestContainerProvider
+        auth={setup.authRepo}
+        users={setup.usersRepo}
+        serviceAreas={setup.serviceAreasRepo}
+        rides={ridesRepo}
+      >
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      </TestContainerProvider>
+    );
+
+    renderHook(() => useRiderHomeViewModel(), { wrapper });
+
+    // Step 1 — ride A triggers the first route.
+    await waitFor(() => {
+      expect(mockReset).toHaveBeenCalledWith({
+        index: 1,
+        routes: [
+          { name: 'RiderTabs' },
+          { name: 'RideMonitor', params: { rideId: 'rideNewIdA000000001ab' } },
+        ],
+      });
+    });
+    expect(mockReset).toHaveBeenCalledTimes(1);
+
+    // Step 2 — deactivate ride A by cancelling it (terminal status is excluded
+    // from ACTIVE_STATUSES, so the query deterministically returns only ride B).
+    // Then seed ride B as the new active ride.
+    const cancelledA = unwrap(
+      rideA.cancel({
+        reason: unwrap(
+          CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+        ),
+        by: 'rider',
+        at: new Date(),
+        odometerMeters: null,
+      }),
+    );
+    ridesRepo.seed(cancelledA);
+    const rideB = makeAwaitingRiderRide(setup.uid, 'rideNewIdB000000002ab');
+    ridesRepo.seed(rideB);
+
+    // Force a refetch — the focus mock re-runs the latest callback, which now
+    // closes over ride B, clearing the guard and triggering the second route.
+    await act(async () => {
+      await queryClient.invalidateQueries();
+    });
+
+    // Step 3 — ride B must trigger a second route call.
+    await waitFor(() => {
+      expect(mockReset).toHaveBeenCalledWith({
+        index: 1,
+        routes: [
+          { name: 'RiderTabs' },
+          { name: 'RideMonitor', params: { rideId: 'rideNewIdB000000002ab' } },
+        ],
+      });
+    });
+    expect(mockReset).toHaveBeenCalledTimes(2);
   });
 });
