@@ -28,7 +28,10 @@ import {
   TestContainerProvider,
 } from '@shared/testing';
 
-import { useRiderHomeViewModel } from '../useRiderHomeViewModel';
+import {
+  resetRiderAutoRouteGuard,
+  useRiderHomeViewModel,
+} from '../useRiderHomeViewModel';
 
 // Navigation mock — we assert `replace`, `navigate`, and `reset` shape
 // only. The auto-resume path now uses `reset` (not `replace`) to keep
@@ -220,6 +223,7 @@ describe('useRiderHomeViewModel', () => {
     mockReplace.mockClear();
     mockReset.mockClear();
     focusCallbacks.length = 0;
+    resetRiderAutoRouteGuard();
     useServiceAreaStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
@@ -301,6 +305,41 @@ describe('useRiderHomeViewModel', () => {
     act(() => {
       focusCallbacks[focusCallbacks.length - 1]?.();
     });
+    expect(mockReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-route after the reset remounts RiderHome (no trap)', async () => {
+    // Reproduces the on-device trap: `navigation.reset([RiderTabs,
+    // RideMonitor])` remounts RiderTabs with a fresh route key, so the
+    // view-model is a BRAND-NEW instance when the rider backs out to the
+    // Home tab. A per-component `useRef` guard would be null on that fresh
+    // mount and re-route → bounce → trapped. The module-level guard must
+    // survive the remount so the second mount stays put.
+    const setup = await setupSeededState();
+    const ridesRepo = new InMemoryRideRepository();
+    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'rideRemount00000001ab'));
+
+    const first = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
+    });
+    await waitFor(() => {
+      expect(mockReset).toHaveBeenCalledTimes(1);
+    });
+
+    // Simulate the reset remounting RiderTabs: tear down this instance and
+    // mount a fresh one against the SAME active ride.
+    first.unmount();
+    renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
+    });
+    await waitFor(() => {
+      expect(focusCallbacks.length).toBeGreaterThan(0);
+    });
+    act(() => {
+      focusCallbacks[focusCallbacks.length - 1]?.();
+    });
+
+    // The fresh mount must NOT route again — same ride, already routed.
     expect(mockReset).toHaveBeenCalledTimes(1);
   });
 

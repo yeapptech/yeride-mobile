@@ -23,6 +23,24 @@ import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RiderHomeVM');
 
+// Tracks the ride id we've already auto-routed into RideMonitor for.
+//
+// This MUST live at module scope, not in a component `useRef`: the
+// auto-route below calls `navigation.reset([RiderTabs, RideMonitor])`,
+// which remounts `RiderTabs` with a fresh route key — so a per-component
+// ref would reset to `null` on every remount, and the rider would be
+// re-routed (and trapped) on RideMonitor every time they backed out to a
+// tab. A module-level guard survives the remount, so the auto-route fires
+// AT MOST ONCE per distinct ride id for the life of the JS context.
+// Resets naturally on JS reload / app restart; `resetRiderAutoRouteGuard`
+// exists so tests (and a future sign-out) can clear it explicitly.
+let autoRoutedRideId: string | null = null;
+
+/** Test/sign-out hook: re-arm the once-per-ride auto-route guard. */
+export function resetRiderAutoRouteGuard(): void {
+  autoRoutedRideId = null;
+}
+
 /**
  * View-model for `RiderHomeScreen`.
  *
@@ -125,13 +143,15 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   }, [user, currentLocation.coordinates, updateLocationMutation]);
 
   // Auto-redirect to RideMonitor if there's an in-progress ride. The
-  // `useFocusEffect` callback runs on every focus gain, but
-  // `routedRideIdRef` gates the actual `navigation.reset` so it fires
-  // AT MOST ONCE per distinct ride id. This is what allows the rider to
-  // back out of RideMonitor and roam other tabs freely — the ref records
-  // that we already routed for this ride, so re-gaining focus doesn't
-  // bounce them back. A genuinely new ride (different id) clears the
-  // guard and routes again.
+  // `useFocusEffect` callback runs on every focus gain, but the
+  // module-level `autoRoutedRideId` guard gates the actual
+  // `navigation.reset` so it fires AT MOST ONCE per distinct ride id.
+  // This is what allows the rider to back out of RideMonitor and roam
+  // other tabs freely — once we've routed for a ride, re-gaining focus
+  // doesn't bounce them back. A genuinely new ride (different id) routes
+  // again. The guard lives at module scope (not a `useRef`) because the
+  // `reset` below remounts `RiderTabs`, which would wipe a per-component
+  // ref every time — see the `autoRoutedRideId` declaration above.
   //
   // CRITICAL: this hook runs from inside `RiderTabs` (a tab screen), so
   // calling `navigation.replace('RideMonitor', ...)` bubbles up to the
@@ -143,13 +163,12 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   // "POP_TO_TOP not handled by any navigator". Use `reset` so the back
   // stack is `[RiderTabs, RideMonitor]` — that gives RideReceipt
   // somewhere to pop to.
-  const routedRideIdRef = useRef<string | null>(null);
   useFocusEffect(
     useCallback(() => {
       if (!inProgressRide) return;
       const rideId = String(inProgressRide.id);
-      if (routedRideIdRef.current === rideId) return;
-      routedRideIdRef.current = rideId;
+      if (autoRoutedRideId === rideId) return;
+      autoRoutedRideId = rideId;
       navigation.reset({
         index: 1,
         routes: [

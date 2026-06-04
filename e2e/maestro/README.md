@@ -71,9 +71,21 @@ simulator is the **rider**.
 
 ## Gotchas discovered
 
-- A rider with an **active ride is auto-routed to the ride monitor** (no tab
-  bar) — you cannot reach Profile/Sign-out until the ride is cancelled or
-  completed.
+- A rider with an active ride lands on the ride monitor **once** (when the
+  ride first becomes active / on cold-start resume), but is no longer trapped
+  there: backing out returns to the tabs, a persistent **active-ride banner**
+  ("Finding your driver" / etc.) sits above every tab, and Profile/Sign-out
+  stay reachable. Tap the banner to return to the monitor. (The old "trapped
+  on the monitor" behaviour was fixed on the `feat/active-ride-banner` branch.)
+- The rider home **needs a resolved location to show ride services** — on the
+  iOS simulator a cold start can default to a far-away region, leaving
+  RouteSelect on "No services in this area". Set a location first, e.g.
+  `xcrun simctl location <udid> set 26.1276,-80.2331` (Plantation, FL), then
+  relaunch so the service-area query resolves before `book-ride`.
+- On **iOS** the system **"Save Password"** prompt and the Expo **dev-menu gear**
+  (top-right) can intercept taps during `sign-in`. Disable Settings → General →
+  AutoFill & Passwords → AutoFill Passwords once, and avoid point-taps near the
+  top-right gear.
 - On the **RouteSelect** screen the ride-option list is below the fold on
   smaller screens; expand the bottom sheet (swipe up) before selecting.
 - On the **rider Receipt**, the tip presets + submit button render **behind the
