@@ -1,0 +1,37 @@
+appId: app.yeride.dev
+# Rider static-surface sweep: every tab. Assumes already signed in as a rider with
+# NO active ride. Read-only (no Save / Delete / card removal).
+# Tab taps go through ../_lib/tap-tab.yaml so this runs on Android AND iOS.
+---
+- runFlow: ../auth/dismiss-soft-asks.yaml
+- assertVisible:
+    id: 'rider-home-where-to'
+- takeScreenshot: rider-home
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Activity'
+      TAB_POINT: '37%,96%'
+- takeScreenshot: rider-activity
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Wallet'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: 'wallet-loading-spinner'
+    timeout: 10000
+    optional: true
+- takeScreenshot: rider-wallet
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Profile'
+      TAB_POINT: '87%,96%'
+- takeScreenshot: rider-profile
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Home'
+      TAB_POINT: '12%,96%'

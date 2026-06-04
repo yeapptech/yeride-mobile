@@ -1,0 +1,17 @@
+appId: app.yeride.dev
+# Signs in from the "Welcome back" screen. Pass creds via env:
+#   maestro -e EMAIL=... -e PASSWORD=... test e2e/maestro/auth/sign-in.yaml
+---
+- assertVisible: 'Welcome back'
+- tapOn:
+    text: 'you@example.com'
+- inputText: ${EMAIL}
+- tapOn:
+    text: 'At least 6 characters'
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn: 'Sign in'
+- extendedWaitUntil:
+    notVisible: 'Welcome back'
+    timeout: 15000
+- waitForAnimationToEnd

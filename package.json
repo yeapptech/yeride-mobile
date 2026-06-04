@@ -16,7 +16,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "verify": "npm run typecheck && npm run lint && npm run format:check && npm test",
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test:coverage",
     "prepare": "husky"
   },
   "dependencies": {

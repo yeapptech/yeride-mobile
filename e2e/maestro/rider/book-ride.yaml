@@ -1,0 +1,42 @@
+appId: app.yeride.dev
+# Rider books an Economy ride from the default Plantation->Sunrise route and lands on
+# the "awaiting driver" monitor. Creates a REAL ride on stage Firebase.
+# Override addresses via env PICKUP / DROPOFF (must match a Places autocomplete result).
+---
+- runFlow: ../auth/dismiss-soft-asks.yaml
+- tapOn:
+    id: 'rider-home-where-to'
+- tapOn:
+    text: 'Pickup location'
+- inputText: ${PICKUP}
+- waitForAnimationToEnd
+- tapOn: ${PICKUP_RESULT}
+- waitForAnimationToEnd
+- tapOn:
+    text: 'Dropoff location'
+- inputText: ${DROPOFF}
+- waitForAnimationToEnd
+- tapOn: ${DROPOFF_RESULT}
+- waitForAnimationToEnd
+- tapOn:
+    id: 'route-search-continue'
+- extendedWaitUntil:
+    visible:
+      id: 'route-select-confirm'
+    timeout: 20000
+# On smaller screens (notably iOS) the ride-option list sits below the fold —
+# expand the sheet before selecting.
+- swipe:
+    start: 50%, 75%
+    end: 50%, 25%
+- tapOn:
+    id: 'ride-service-economy'
+- waitForAnimationToEnd
+- tapOn:
+    id: 'route-select-confirm'
+- extendedWaitUntil:
+    notVisible:
+      id: 'route-select-confirm'
+    timeout: 20000
+- assertVisible: 'Looking for a driver'
+- takeScreenshot: rider-awaiting

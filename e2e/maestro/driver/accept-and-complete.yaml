@@ -1,0 +1,39 @@
+appId: app.yeride.dev
+# Drives a dispatched ride through the full lifecycle to payment + completion.
+# Preconditions: signed in as driver, ONLINE, and a rider has an awaiting ride that
+# shows on the driver home as an incoming-ride card. Pass the ride id via env RIDE_ID.
+# This CHARGES the rider's Stripe test card at "request payment".
+---
+- tapOn:
+    id: 'driver-ride-card-${RIDE_ID}'
+- assertVisible:
+    id: 'driver-dispatch-accept'
+- takeScreenshot: driver-incoming-ride
+- tapOn:
+    id: 'driver-dispatch-accept'
+- extendedWaitUntil:
+    visible:
+      id: 'en-route-arrived'
+    timeout: 20000
+- takeScreenshot: driver-en-route
+- tapOn:
+    id: 'en-route-arrived'
+- assertVisible:
+    id: 'at-pickup-start'
+- takeScreenshot: driver-at-pickup
+- tapOn:
+    id: 'at-pickup-start'
+- extendedWaitUntil:
+    visible:
+      id: 'started-request-payment'
+    timeout: 15000
+- takeScreenshot: driver-started
+- tapOn:
+    id: 'started-request-payment'
+- tapOn:
+    text: 'REQUEST PAYMENT'
+- extendedWaitUntil:
+    notVisible: 'REQUEST PAYMENT'
+    timeout: 25000
+- waitForAnimationToEnd
+- takeScreenshot: driver-completed

@@ -1,0 +1,19 @@
+appId: app.yeride.dev
+# Cross-platform bottom-tab tap.
+# Android exposes the React-Navigation tab labels as text; iOS does not, so we
+# fall back to a point tap. Tabs are evenly spaced at y≈96%:
+#   Home 12%, Activity 37%, Wallet/Earnings 62%, Profile 87%.
+# Params: TAB_TEXT (Android label), TAB_POINT (iOS "x%,y%").
+---
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn: ${TAB_TEXT}
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          point: ${TAB_POINT}
+- waitForAnimationToEnd
