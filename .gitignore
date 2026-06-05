@@ -55,6 +55,7 @@ ios/
 .env
 .env.local
 .env.*.local
+.env.e2e
 
 # Firebase config files (each developer + EAS Secrets supplies their own)
 firebase/config/**/GoogleService-Info.plist
