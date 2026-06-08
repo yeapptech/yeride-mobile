@@ -34,6 +34,10 @@ export {
   type UploadVehiclePhotosInput,
 } from './vehicle.queries';
 export {
+  useInProgressRidesSubscription,
+  useScheduledRidesSubscription,
+} from './ride.subscriptions';
+export {
   useBalanceTransactionsQuery,
   useCreateAccountLoginLinkMutation,
   useCreateConnectOnboardingLinkMutation,

@@ -3,13 +3,14 @@ import {
   useQueryClient,
   type InfiniteData,
 } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import type { Ride } from '@domain/entities/Ride';
 import type { RideListCursor, RidePage } from '@domain/entities/RideListCursor';
 import type { UserId } from '@domain/entities/UserId';
 import type { NetworkError } from '@domain/errors';
 import { useUseCases } from '@presentation/di';
+import { useScheduledRidesSubscription } from '@presentation/queries';
 import { queryKeys } from '@presentation/queries/keys';
 
 /**
@@ -157,33 +158,7 @@ export function useActivityViewModel(args: {
     [navigator],
   );
 
-  // Phase 10 turn 7 — live scheduled-rides subscription. Subscription-
-  // shaped (returns synchronous unsubscribe) per the repository
-  // contract; the effect cleanup runs the unsubscribe on unmount or
-  // when the passenger id changes. Result lands in a `useState` so
-  // re-emits trigger re-renders.
-  const [scheduledRides, setScheduledRides] = useState<readonly Ride[]>([]);
-  useEffect(() => {
-    if (!passengerId) {
-      setScheduledRides([]);
-      return;
-    }
-    const unsubscribe = useCases.observeScheduledRides.execute({
-      passengerId,
-      callback: (rs) => {
-        // Sort client-side: next-soonest first. Rides with no
-        // schedulePickupAt (defensive — shouldn't happen) sink to the
-        // bottom.
-        const sorted = [...rs].sort((a, b) => {
-          const aT = a.schedulePickupAt?.getTime() ?? Number.POSITIVE_INFINITY;
-          const bT = b.schedulePickupAt?.getTime() ?? Number.POSITIVE_INFINITY;
-          return aT - bT;
-        });
-        setScheduledRides(sorted);
-      },
-    });
-    return () => unsubscribe();
-  }, [passengerId, useCases.observeScheduledRides]);
+  const scheduledRides = useScheduledRidesSubscription(passengerId);
 
   return {
     status,
