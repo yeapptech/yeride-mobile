@@ -449,6 +449,77 @@ export class FirestoreRideRepository implements RideRepository {
     );
   }
 
+  observeInProgressRidesByPassenger(args: {
+    passengerId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const q = query(
+      collection(this.firestore, TRIPS),
+      where('passenger.id', '==', String(args.passengerId)),
+      where('status', 'in', [
+        'awaiting_driver',
+        'dispatched',
+        'started',
+        'payment_requested',
+        'payment_failed',
+      ]),
+    );
+    return onSnapshot(
+      q,
+      (snap) => {
+        const out: Ride[] = [];
+        snap.forEach((d) => {
+          const r = this.toDomainOrCorrupt(d.id, d.data());
+          if (!r.ok) return;
+          out.push(r.value);
+        });
+        args.callback(out);
+      },
+      (e) => {
+        logger.warn('observeInProgressRidesByPassenger error', {
+          passengerId: String(args.passengerId),
+          code: errCode(e),
+        });
+        args.callback([]);
+      },
+    );
+  }
+
+  observeInProgressRidesByDriver(args: {
+    driverId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const q = query(
+      collection(this.firestore, TRIPS),
+      where('driver.id', '==', String(args.driverId)),
+      where('status', 'in', [
+        'dispatched',
+        'started',
+        'payment_requested',
+        'payment_failed',
+      ]),
+    );
+    return onSnapshot(
+      q,
+      (snap) => {
+        const out: Ride[] = [];
+        snap.forEach((d) => {
+          const r = this.toDomainOrCorrupt(d.id, d.data());
+          if (!r.ok) return;
+          out.push(r.value);
+        });
+        args.callback(out);
+      },
+      (e) => {
+        logger.warn('observeInProgressRidesByDriver error', {
+          driverId: String(args.driverId),
+          code: errCode(e),
+        });
+        args.callback([]);
+      },
+    );
+  }
+
   subscribeEvents(args: {
     rideId: RideId;
     callback: (events: readonly TripEvent[]) => void;
