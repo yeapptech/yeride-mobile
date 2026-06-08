@@ -1,7 +1,16 @@
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import type { Ride } from '@domain/entities/Ride';
 import { Map, type MapMarkerProps } from '@presentation/components/map';
+import { HomeRideSections } from '@presentation/components/trip/HomeRideSections';
 
 import { useRiderHomeViewModel } from '../view-models/useRiderHomeViewModel';
 
@@ -25,6 +34,7 @@ import { useRiderHomeViewModel } from '../view-models/useRiderHomeViewModel';
  */
 export default function RiderHomeScreen() {
   const vm = useRiderHomeViewModel();
+  const { height: windowHeight } = useWindowDimensions();
 
   const initialRegion = vm.currentLocation.coordinates
     ? {
@@ -110,32 +120,44 @@ export default function RiderHomeScreen() {
         edges={['bottom']}
         className="absolute left-0 right-0 bottom-0"
       >
-        <View className="mx-4 mb-4 rounded-2xl bg-card p-4 shadow-lg">
-          {vm.user && (
-            <Text className="mb-3 text-base text-foreground">
-              Hi, {vm.user.name.first} 👋
-            </Text>
-          )}
-          <Pressable
-            onPress={vm.goToRouteSearch}
-            disabled={vm.status !== 'ready'}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: vm.status !== 'ready' }}
-            className={`items-center rounded-xl px-4 py-4 ${
-              vm.status === 'ready' ? 'bg-primary' : 'bg-muted'
-            }`}
-            testID="rider-home-where-to"
+        <View className="mx-4 mb-4 rounded-2xl bg-card shadow-lg">
+          <ScrollView
+            style={{ maxHeight: windowHeight * 0.6 }}
+            contentContainerStyle={{ padding: 16 }}
+            showsVerticalScrollIndicator={false}
           >
-            <Text
-              className={`text-base font-semibold ${
-                vm.status === 'ready'
-                  ? 'text-primary-foreground'
-                  : 'text-muted-foreground'
+            {vm.user && (
+              <Text className="mb-3 text-base text-foreground">
+                Hi, {vm.user.name.first} 👋
+              </Text>
+            )}
+            <Pressable
+              onPress={vm.goToRouteSearch}
+              disabled={vm.status !== 'ready'}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: vm.status !== 'ready' }}
+              className={`items-center rounded-xl px-4 py-4 ${
+                vm.status === 'ready' ? 'bg-primary' : 'bg-muted'
               }`}
+              testID="rider-home-where-to"
             >
-              Where to?
-            </Text>
-          </Pressable>
+              <Text
+                className={`text-base font-semibold ${
+                  vm.status === 'ready'
+                    ? 'text-primary-foreground'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                Where to?
+              </Text>
+            </Pressable>
+            <HomeRideSections
+              inProgressRides={vm.inProgressRides}
+              scheduledRides={vm.scheduledRides}
+              viewerRole="rider"
+              onSelectRide={(ride: Ride) => vm.resumeRide(String(ride.id))}
+            />
+          </ScrollView>
         </View>
       </SafeAreaView>
     </View>
