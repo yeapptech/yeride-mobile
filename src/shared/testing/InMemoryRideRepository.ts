@@ -50,6 +50,14 @@ export class InMemoryRideRepository implements RideRepository {
     passengerId: string;
     callback: (rides: readonly Ride[]) => void;
   }>();
+  private inProgressPassengerObservers = new Set<{
+    passengerId: string;
+    callback: (rides: readonly Ride[]) => void;
+  }>();
+  private inProgressDriverObservers = new Set<{
+    driverId: string;
+    callback: (rides: readonly Ride[]) => void;
+  }>();
   private eventObservers = new Map<
     string,
     Set<(events: readonly TripEvent[]) => void>
@@ -116,6 +124,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.notifyRide(ride);
     this.notifyAvailable();
     this.notifyScheduled();
+    this.notifyInProgress();
     return Result.ok(ride);
   }
 
@@ -156,6 +165,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.notifyRide(ride);
     this.notifyAvailable();
     this.notifyScheduled();
+    this.notifyInProgress();
     return Result.ok(ride);
   }
 
@@ -235,6 +245,40 @@ export class InMemoryRideRepository implements RideRepository {
     };
   }
 
+  observeInProgressRidesByPassenger(args: {
+    passengerId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const entry = {
+      passengerId: String(args.passengerId),
+      callback: args.callback,
+    };
+    this.inProgressPassengerObservers.add(entry);
+    // Emit current state synchronously so subscribers reflect initial
+    // contents the same way the Firestore `onSnapshot` does on attach.
+    args.callback(this.computeInProgressByPassenger(entry.passengerId));
+    return () => {
+      this.inProgressPassengerObservers.delete(entry);
+    };
+  }
+
+  observeInProgressRidesByDriver(args: {
+    driverId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const entry = {
+      driverId: String(args.driverId),
+      callback: args.callback,
+    };
+    this.inProgressDriverObservers.add(entry);
+    // Emit current state synchronously so subscribers reflect initial
+    // contents the same way the Firestore `onSnapshot` does on attach.
+    args.callback(this.computeInProgressByDriver(entry.driverId));
+    return () => {
+      this.inProgressDriverObservers.delete(entry);
+    };
+  }
+
   subscribeEvents(args: {
     rideId: RideId;
     callback: (events: readonly TripEvent[]) => void;
@@ -294,6 +338,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.rides.set(String(args.rideId), next.value);
     this.notifyRide(next.value);
     this.notifyScheduled();
+    this.notifyInProgress();
     return Result.ok(next.value);
   }
 
@@ -334,6 +379,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.notifyRide(next.value);
     this.notifyAvailable();
     this.notifyScheduled();
+    this.notifyInProgress();
     return Result.ok(next.value);
   }
 
@@ -373,6 +419,8 @@ export class InMemoryRideRepository implements RideRepository {
     this.rideObservers.clear();
     this.availableObservers.clear();
     this.scheduledObservers.clear();
+    this.inProgressPassengerObservers.clear();
+    this.inProgressDriverObservers.clear();
     this.eventObservers.clear();
     this.paymentObservers.clear();
     this.nextCancelResult = null;
@@ -429,6 +477,35 @@ export class InMemoryRideRepository implements RideRepository {
     return matching;
   }
 
+  private notifyInProgress(): void {
+    for (const obs of this.inProgressPassengerObservers) {
+      obs.callback(this.computeInProgressByPassenger(obs.passengerId));
+    }
+    for (const obs of this.inProgressDriverObservers) {
+      obs.callback(this.computeInProgressByDriver(obs.driverId));
+    }
+  }
+
+  private computeInProgressByPassenger(passengerId: string): readonly Ride[] {
+    const matching: Ride[] = [];
+    for (const r of this.rides.values()) {
+      if (String(r.passenger.id) !== passengerId) continue;
+      if (!RIDER_LIVE_STATUSES.has(r.status)) continue;
+      matching.push(r);
+    }
+    return matching;
+  }
+
+  private computeInProgressByDriver(driverId: string): readonly Ride[] {
+    const matching: Ride[] = [];
+    for (const r of this.rides.values()) {
+      if (!r.driver || String(r.driver.id) !== driverId) continue;
+      if (!DRIVER_LIVE_STATUSES.has(r.status)) continue;
+      matching.push(r);
+    }
+    return matching;
+  }
+
   private computeAvailable(obs: {
     services: readonly RideServiceId[];
     location: Coordinates;
@@ -454,6 +531,21 @@ export class InMemoryRideRepository implements RideRepository {
 }
 
 const DEFAULT_AVAILABLE_RADIUS_METERS = 80_467; // 50 mi (matches legacy)
+
+const RIDER_LIVE_STATUSES: ReadonlySet<RideStatus> = new Set([
+  'awaiting_driver',
+  'dispatched',
+  'started',
+  'payment_requested',
+  'payment_failed',
+]);
+
+const DRIVER_LIVE_STATUSES: ReadonlySet<RideStatus> = new Set([
+  'dispatched',
+  'started',
+  'payment_requested',
+  'payment_failed',
+]);
 
 /**
  * Reproduce the Firestore pagination shape (`{ rides, nextCursor }`)

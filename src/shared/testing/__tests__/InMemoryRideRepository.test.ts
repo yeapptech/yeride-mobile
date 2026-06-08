@@ -780,3 +780,138 @@ describe('InMemoryRideRepository — observeScheduledRidesByPassenger', () => {
     unsub();
   });
 });
+
+describe('InMemoryRideRepository — observeInProgressRidesByPassenger', () => {
+  it('delivers LIVE passenger rides and excludes scheduled/terminal', async () => {
+    const repo = new InMemoryRideRepository();
+    await repo.create(makeRide({ id: 'liveAwaiting12345678', pickup: MIAMI }));
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeInProgressRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toHaveLength(1);
+    expect(seen[0]?.[0]?.status).toBe('awaiting_driver');
+    unsub();
+  });
+
+  it('re-emits when a ride is created, and drops it on terminal', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeInProgressRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[0]).toEqual([]);
+
+    const ride = makeRide({ id: 'liveCreate1234567890', pickup: MIAMI });
+    await repo.create(ride);
+    expect(seen[seen.length - 1]).toHaveLength(1);
+
+    const cancelled = await repo.cancel({
+      rideId: ride.id,
+      by: 'rider',
+      reason: unwrap(
+        CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+      ),
+    });
+    expect(cancelled.ok).toBe(true);
+    expect(seen[seen.length - 1]).toEqual([]);
+    unsub();
+  });
+
+  it('stops emitting after unsubscribe', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeInProgressRidesByPassenger({
+      passengerId: PASSENGER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    unsub();
+    await repo.create(makeRide({ id: 'liveAfterUnsub123456', pickup: MIAMI }));
+    expect(seen).toHaveLength(1);
+  });
+});
+
+describe('InMemoryRideRepository — observeInProgressRidesByDriver', () => {
+  it('delivers dispatched rides for the driver, excludes awaiting/other driver', async () => {
+    const repo = new InMemoryRideRepository();
+    // awaiting (no driver) — must NOT appear
+    await repo.create(makeRide({ id: 'drvAwaiting123456789', pickup: MIAMI }));
+    // dispatched to DRIVER — must appear
+    const toDispatch = makeRide({ id: 'drvDispatched12345ab', pickup: MIAMI });
+    await repo.create(toDispatch);
+    await repo.update(
+      unwrap(
+        toDispatch.dispatch({
+          driver: DRIVER,
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeInProgressRidesByDriver({
+      driverId: DRIVER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    const latest = seen[seen.length - 1] ?? [];
+    expect(latest).toHaveLength(1);
+    expect(String(latest[0]?.id)).toBe('drvDispatched12345ab');
+    expect(latest[0]?.status).toBe('dispatched');
+    unsub();
+  });
+
+  it('stops emitting after unsubscribe', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeInProgressRidesByDriver({
+      driverId: DRIVER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    unsub();
+    const ride = makeRide({ id: 'drvAfterUnsub1234567', pickup: MIAMI });
+    await repo.create(ride);
+    await repo.update(
+      unwrap(
+        ride.dispatch({
+          driver: DRIVER,
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+    expect(seen).toHaveLength(1);
+  });
+
+  it('re-emits when a ride becomes dispatched to this driver', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeInProgressRidesByDriver({
+      driverId: DRIVER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[0]).toEqual([]);
+
+    const ride = makeRide({ id: 'drvReemit12345678901', pickup: MIAMI });
+    await repo.create(ride); // awaiting_driver — not a driver-LIVE status yet
+    expect(seen[seen.length - 1]).toEqual([]);
+
+    await repo.update(
+      unwrap(
+        ride.dispatch({
+          driver: DRIVER,
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+    const latest = seen[seen.length - 1] ?? [];
+    expect(latest).toHaveLength(1);
+    expect(latest[0]?.status).toBe('dispatched');
+    unsub();
+  });
+});
