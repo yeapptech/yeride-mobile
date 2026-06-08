@@ -1,8 +1,10 @@
 import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import type { Ride } from '@domain/entities/Ride';
 import { Map, type MapMarkerProps } from '@presentation/components/map';
 import { PermissionDeniedBanner } from '@presentation/components/permission';
+import { HomeRideSections } from '@presentation/components/trip/HomeRideSections';
 
 import { DriverRideCardStack } from '../components/DriverRideCardStack';
 import { useDriverHomeViewModel } from '../view-models/useDriverHomeViewModel';
@@ -124,6 +126,14 @@ export default function DriverHomeScreen() {
         className="absolute left-0 right-0 bottom-0"
       >
         <View className="mx-4 mb-4 rounded-2xl bg-card p-4 shadow-lg">
+          <HomeRideSections
+            inProgressRides={vm.inProgressRides}
+            scheduledRides={[]}
+            viewerRole="driver"
+            onSelectRide={(ride: Ride) =>
+              vm.onResumeInProgress(String(ride.id))
+            }
+          />
           {vm.user && !isOnline && (
             <Text className="mb-3 text-base text-foreground">
               Hi, {vm.user.name.first} 👋
