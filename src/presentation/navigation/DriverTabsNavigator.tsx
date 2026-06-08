@@ -1,76 +1,51 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View } from 'react-native';
-import {
-  SafeAreaInsetsContext,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
 
-import { ActiveRideBanner } from '@presentation/components/trip/ActiveRideBanner';
 import { UserProfileScreen } from '@presentation/features/auth/screens/UserProfileScreen';
 import DriverActivityScreen from '@presentation/features/driver/screens/DriverActivityScreen';
 import DriverEarningsScreen from '@presentation/features/driver/screens/DriverEarningsScreen';
 import DriverHomeScreen from '@presentation/features/driver/screens/DriverHomeScreen';
-import { useDriverActiveRideBannerViewModel } from '@presentation/features/driver/view-models/useDriverActiveRideBannerViewModel';
 
 import type { DriverTabsParamList } from './types';
 
 /**
- * Bottom tabs for the authenticated driver experience. Phase 4 turn 1
- * mounts placeholder screens for Home / Activity / Earnings while reusing
- * the shared `UserProfileScreen` for the Profile tab — same pattern as
- * `RiderTabsNavigator`.
+ * Bottom tabs for the authenticated driver experience. Active rides surface
+ * as a list on DriverHome (see `HomeRideSections`), so there is no
+ * persistent banner above the tabs.
  *
- * Turn 2 replaces `DriverHomePlaceholderScreen` with the real DriverHome
- * (map + ListAvailableRides). Phase 6 turn 4 swaps in the real
- * `DriverEarningsScreen` (Stripe Connect onboarding + balance + payouts).
- * Phase 10 Turn 6 promotes `Activity` to the real driver-side
- * `DriverActivityScreen` — recent-rides list mirroring the rider tab.
- *
- * Tab bar styling intentionally minimal here — visual design is a
- * follow-up turn once the legacy app's tab labels and icon set port
- * cleanly. The focus right now is "the harness works".
+ * Tab bar styling intentionally minimal — visual design iterates in a
+ * later turn.
  */
 const Tabs = createBottomTabNavigator<DriverTabsParamList>();
 
 export function DriverTabsNavigator() {
-  const insets = useSafeAreaInsets();
-  const banner = useDriverActiveRideBannerViewModel();
-
   return (
-    <View className="flex-1">
-      <ActiveRideBanner {...banner} topInset={insets.top} />
-      <SafeAreaInsetsContext.Provider
-        value={{ ...insets, top: banner.visible ? 0 : insets.top }}
-      >
-        <Tabs.Navigator
-          initialRouteName="DriverHome"
-          screenOptions={{
-            headerShown: false,
-            tabBarLabelStyle: { fontSize: 12 },
-          }}
-        >
-          <Tabs.Screen
-            name="DriverHome"
-            component={DriverHomeScreen}
-            options={{ tabBarLabel: 'Home' }}
-          />
-          <Tabs.Screen
-            name="Activity"
-            component={DriverActivityScreen}
-            options={{ tabBarLabel: 'Activity' }}
-          />
-          <Tabs.Screen
-            name="Earnings"
-            component={DriverEarningsScreen}
-            options={{ tabBarLabel: 'Earnings' }}
-          />
-          <Tabs.Screen
-            name="Profile"
-            component={UserProfileScreen}
-            options={{ tabBarLabel: 'Profile' }}
-          />
-        </Tabs.Navigator>
-      </SafeAreaInsetsContext.Provider>
-    </View>
+    <Tabs.Navigator
+      initialRouteName="DriverHome"
+      screenOptions={{
+        headerShown: false,
+        tabBarLabelStyle: { fontSize: 12 },
+      }}
+    >
+      <Tabs.Screen
+        name="DriverHome"
+        component={DriverHomeScreen}
+        options={{ tabBarLabel: 'Home' }}
+      />
+      <Tabs.Screen
+        name="Activity"
+        component={DriverActivityScreen}
+        options={{ tabBarLabel: 'Activity' }}
+      />
+      <Tabs.Screen
+        name="Earnings"
+        component={DriverEarningsScreen}
+        options={{ tabBarLabel: 'Earnings' }}
+      />
+      <Tabs.Screen
+        name="Profile"
+        component={UserProfileScreen}
+        options={{ tabBarLabel: 'Profile' }}
+      />
+    </Tabs.Navigator>
   );
 }
