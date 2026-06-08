@@ -1,8 +1,6 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
-import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
@@ -28,31 +26,18 @@ import {
   TestContainerProvider,
 } from '@shared/testing';
 
-import {
-  resetRiderAutoRouteGuard,
-  useRiderHomeViewModel,
-} from '../useRiderHomeViewModel';
+import { useRiderHomeViewModel } from '../useRiderHomeViewModel';
 
-// Navigation mock — we assert `replace`, `navigate`, and `reset` shape
-// only. The auto-resume path now uses `reset` (not `replace`) to keep
-// `RiderTabs` at the base of the stack so RideReceipt's `Done`
-// (popToTop) has somewhere to pop to.
+// Navigation mock — `navigate` is used by the VM for goToRouteSearch and
+// resumeRide; `reset` is mocked only so the no-auto-route test can assert
+// it was never called.
 const mockNavigate = jest.fn();
-const mockReplace = jest.fn();
 const mockReset = jest.fn();
-const focusCallbacks: (() => void)[] = [];
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     navigate: mockNavigate,
-    replace: mockReplace,
     reset: mockReset,
   }),
-  // useFocusEffect runs the callback immediately (and once) so the
-  // auto-redirect behaviour fires deterministically.
-  useFocusEffect: (cb: () => void) => {
-    focusCallbacks.push(cb);
-    cb();
-  },
 }));
 
 // expo-location mock — return a deterministic location.
@@ -150,6 +135,21 @@ function makeAwaitingRiderRide(uid: UserId, id: string): Ride {
   );
 }
 
+function makeScheduledRiderRide(uid: UserId, id: string): Ride {
+  const base = makeAwaitingRiderRide(uid, id);
+  return unwrap(
+    Ride.createScheduled({
+      id: base.id,
+      passenger: base.passenger,
+      rideService: base.rideService,
+      pickup: base.pickup,
+      dropoff: base.dropoff,
+      createdAt: base.createdAt,
+      schedulePickupAt: new Date(base.createdAt.getTime() + 60 * 60_000),
+    }),
+  );
+}
+
 async function setupSeededState(): Promise<{
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
@@ -220,10 +220,7 @@ function withTestContainer(opts: {
 describe('useRiderHomeViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
-    mockReplace.mockClear();
     mockReset.mockClear();
-    focusCallbacks.length = 0;
-    resetRiderAutoRouteGuard();
     useServiceAreaStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
@@ -282,139 +279,53 @@ describe('useRiderHomeViewModel', () => {
     });
   });
 
-  it('auto-routes to RideMonitor once per ride, not on every focus', async () => {
+  it('exposes in-progress rides from the live subscription', async () => {
     const setup = await setupSeededState();
     const ridesRepo = new InMemoryRideRepository();
-    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'rideOnce0000000001ab'));
+    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'riderLive000000001ab'));
 
-    renderHook(() => useRiderHomeViewModel(), {
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
       wrapper: withTestContainer({ ...setup, ridesRepo }),
     });
 
     await waitFor(() => {
-      expect(mockReset).toHaveBeenCalledWith({
-        index: 1,
-        routes: [
-          { name: 'RiderTabs' },
-          { name: 'RideMonitor', params: { rideId: 'rideOnce0000000001ab' } },
-        ],
-      });
+      expect(result.current.inProgressRides).toHaveLength(1);
     });
-    expect(mockReset).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      focusCallbacks[focusCallbacks.length - 1]?.();
-    });
-    expect(mockReset).toHaveBeenCalledTimes(1);
+    expect(String(result.current.inProgressRides[0]?.id)).toBe(
+      'riderLive000000001ab',
+    );
   });
 
-  it('does not re-route after the reset remounts RiderHome (no trap)', async () => {
-    // Reproduces the on-device trap: `navigation.reset([RiderTabs,
-    // RideMonitor])` remounts RiderTabs with a fresh route key, so the
-    // view-model is a BRAND-NEW instance when the rider backs out to the
-    // Home tab. A per-component `useRef` guard would be null on that fresh
-    // mount and re-route → bounce → trapped. The module-level guard must
-    // survive the remount so the second mount stays put.
+  it('exposes scheduled rides from the live subscription', async () => {
     const setup = await setupSeededState();
     const ridesRepo = new InMemoryRideRepository();
-    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'rideRemount00000001ab'));
+    ridesRepo.seed(makeScheduledRiderRide(setup.uid, 'riderSched00000001ab'));
 
-    const first = renderHook(() => useRiderHomeViewModel(), {
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
       wrapper: withTestContainer({ ...setup, ridesRepo }),
     });
-    await waitFor(() => {
-      expect(mockReset).toHaveBeenCalledTimes(1);
-    });
 
-    // Simulate the reset remounting RiderTabs: tear down this instance and
-    // mount a fresh one against the SAME active ride.
-    first.unmount();
-    renderHook(() => useRiderHomeViewModel(), {
-      wrapper: withTestContainer({ ...setup, ridesRepo }),
-    });
     await waitFor(() => {
-      expect(focusCallbacks.length).toBeGreaterThan(0);
+      expect(result.current.scheduledRides).toHaveLength(1);
     });
-    act(() => {
-      focusCallbacks[focusCallbacks.length - 1]?.();
-    });
-
-    // The fresh mount must NOT route again — same ride, already routed.
-    expect(mockReset).toHaveBeenCalledTimes(1);
   });
 
-  it('re-routes when a new ride id becomes active', async () => {
+  it('does NOT auto-route to RideMonitor when an in-progress ride exists', async () => {
     const setup = await setupSeededState();
     const ridesRepo = new InMemoryRideRepository();
-    const rideA = makeAwaitingRiderRide(setup.uid, 'rideNewIdA000000001ab');
-    ridesRepo.seed(rideA);
+    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'riderNoRoute0001ab12'));
 
-    // Nest our own QueryClient inside TestContainerProvider so we control
-    // when refetches happen. The hook resolves the nearest QueryClient (ours)
-    // while still pulling the DI container from the outer provider.
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
     });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <TestContainerProvider
-        auth={setup.authRepo}
-        users={setup.usersRepo}
-        serviceAreas={setup.serviceAreasRepo}
-        rides={ridesRepo}
-      >
-        <QueryClientProvider client={queryClient}>
-          {children}
-        </QueryClientProvider>
-      </TestContainerProvider>
-    );
 
-    renderHook(() => useRiderHomeViewModel(), { wrapper });
-
-    // Step 1 — ride A triggers the first route.
     await waitFor(() => {
-      expect(mockReset).toHaveBeenCalledWith({
-        index: 1,
-        routes: [
-          { name: 'RiderTabs' },
-          { name: 'RideMonitor', params: { rideId: 'rideNewIdA000000001ab' } },
-        ],
-      });
+      expect(result.current.inProgressRides).toHaveLength(1);
     });
-    expect(mockReset).toHaveBeenCalledTimes(1);
-
-    // Step 2 — deactivate ride A by cancelling it (terminal status is excluded
-    // from ACTIVE_STATUSES, so the query deterministically returns only ride B).
-    // Then seed ride B as the new active ride.
-    const cancelledA = unwrap(
-      rideA.cancel({
-        reason: unwrap(
-          CancellationReason.create({ code: 'changed_mind', reasonText: null }),
-        ),
-        by: 'rider',
-        at: new Date(),
-        odometerMeters: null,
-      }),
+    expect(mockReset).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      'RideMonitor',
+      expect.anything(),
     );
-    ridesRepo.seed(cancelledA);
-    const rideB = makeAwaitingRiderRide(setup.uid, 'rideNewIdB000000002ab');
-    ridesRepo.seed(rideB);
-
-    // Force a refetch — the focus mock re-runs the latest callback, which now
-    // closes over ride B, clearing the guard and triggering the second route.
-    await act(async () => {
-      await queryClient.invalidateQueries();
-    });
-
-    // Step 3 — ride B must trigger a second route call.
-    await waitFor(() => {
-      expect(mockReset).toHaveBeenCalledWith({
-        index: 1,
-        routes: [
-          { name: 'RiderTabs' },
-          { name: 'RideMonitor', params: { rideId: 'rideNewIdB000000002ab' } },
-        ],
-      });
-    });
-    expect(mockReset).toHaveBeenCalledTimes(2);
   });
 });
