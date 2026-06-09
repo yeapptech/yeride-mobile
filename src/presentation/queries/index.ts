@@ -1,6 +1,8 @@
 export { queryKeys } from './keys';
 export {
+  useAcceptScheduledRideMutation,
   useAvailableRidesQuery,
+  useBeginScheduledRideMutation,
   useCancelRideAsDriverMutation,
   useCancelRideAsRiderMutation,
   useCreateRideMutation,
@@ -11,6 +13,8 @@ export {
   useRideQuery,
   useRidesByPassengerQuery,
   useStartRideMutation,
+  type AcceptScheduledRideInput,
+  type BeginScheduledRideInput,
   type CancelRideInput,
   type DispatchRideInput,
   type RequestPaymentInput,
