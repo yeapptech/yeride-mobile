@@ -443,6 +443,57 @@ describe('useDriverHomeViewModel', () => {
     });
   });
 
+  function makeAcceptedScheduledToDriver(driverId: UserId, id: string): Ride {
+    const driverSnap = unwrap(
+      DriverSnapshot.create({
+        id: driverId,
+        name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+        email: unwrap(Email.create('driver@yeapp.tech')),
+        phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+        stripeAccountId: 'acct_test',
+        pushToken: null,
+        avatarUrl: null,
+        vehicle: unwrap(
+          VehicleSnapshot.create({
+            make: 'Toyota',
+            model: 'Camry',
+            year: 2024,
+            color: 'White',
+            licensePlate: 'ABC1234',
+            stockPhoto: null,
+            photos: [],
+          }),
+        ),
+      }),
+    );
+    const scheduled = unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create(id)),
+        passenger: PASSENGER,
+        rideService: ECONOMY_SNAPSHOT,
+        pickup: unwrap(
+          Endpoint.create({
+            location: MIAMI,
+            address: 'pickup',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        dropoff: unwrap(
+          Endpoint.create({
+            location: FORT_LAUDERDALE,
+            address: 'dropoff',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        createdAt: new Date(),
+        schedulePickupAt: new Date(Date.now() + 60 * 60_000),
+      }),
+    );
+    return unwrap(scheduled.acceptSchedule({ driver: driverSnap }));
+  }
+
   function makeDispatchedToDriver(driverId: UserId, id: string): Ride {
     const driverSnap = unwrap(
       DriverSnapshot.create({
@@ -539,6 +590,65 @@ describe('useDriverHomeViewModel', () => {
     });
     expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
       rideId: 'drvResume123456789ab',
+    });
+  });
+
+  it('exposes the driver accepted scheduled rides in scheduledRides', async () => {
+    const setup = await setupSeededState();
+    setup.ridesRepo.seed(
+      makeAcceptedScheduledToDriver(setup.uid, 'drvHomeSched12345678'),
+    );
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    await waitFor(() => {
+      expect(result.current.scheduledRides).toHaveLength(1);
+    });
+    expect(result.current.scheduledRides[0]?.status).toBe(
+      'scheduled_driver_accepted',
+    );
+  });
+
+  it('onSelectHomeRide routes an accepted scheduled ride to DriverDispatch', async () => {
+    const setup = await setupSeededState();
+    const accepted = makeAcceptedScheduledToDriver(
+      setup.uid,
+      'drvHomeSchedSel12345',
+    );
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.onSelectHomeRide(accepted);
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('DriverDispatch', {
+      rideId: 'drvHomeSchedSel12345',
+    });
+  });
+
+  it('onSelectHomeRide routes an in-progress ride to DriverMonitor', async () => {
+    const setup = await setupSeededState();
+    const dispatched = makeDispatchedToDriver(
+      setup.uid,
+      'drvHomeInProg1234567',
+    );
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.onSelectHomeRide(dispatched);
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
+      rideId: 'drvHomeInProg1234567',
     });
   });
 
