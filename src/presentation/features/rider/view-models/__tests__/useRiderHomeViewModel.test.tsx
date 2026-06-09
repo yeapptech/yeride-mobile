@@ -3,8 +3,15 @@ import type { ReactNode } from 'react';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
+import { Endpoint } from '@domain/entities/Endpoint';
+import { Money } from '@domain/entities/Money';
+import { PassengerSnapshot } from '@domain/entities/PassengerSnapshot';
 import { PersonName } from '@domain/entities/PersonName';
 import { PhoneNumber } from '@domain/entities/PhoneNumber';
+import { Ride } from '@domain/entities/Ride';
+import { RideId } from '@domain/entities/RideId';
+import { RideServiceId } from '@domain/entities/RideServiceId';
+import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { ServiceArea } from '@domain/entities/ServiceArea';
 import { ServiceAreaId } from '@domain/entities/ServiceAreaId';
 import { makeRider } from '@domain/entities/User';
@@ -13,6 +20,7 @@ import { useServiceAreaStore } from '@presentation/stores/useServiceAreaStore';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import {
   InMemoryAuthRepository,
+  InMemoryRideRepository,
   InMemoryServiceAreaRepository,
   InMemoryUserRepository,
   TestContainerProvider,
@@ -20,26 +28,16 @@ import {
 
 import { useRiderHomeViewModel } from '../useRiderHomeViewModel';
 
-// Navigation mock — we assert `replace`, `navigate`, and `reset` shape
-// only. The auto-resume path now uses `reset` (not `replace`) to keep
-// `RiderTabs` at the base of the stack so RideReceipt's `Done`
-// (popToTop) has somewhere to pop to.
+// Navigation mock — `navigate` is used by the VM for goToRouteSearch and
+// resumeRide; `reset` is mocked only so the no-auto-route test can assert
+// it was never called.
 const mockNavigate = jest.fn();
-const mockReplace = jest.fn();
 const mockReset = jest.fn();
-const focusCallbacks: (() => void)[] = [];
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
     navigate: mockNavigate,
-    replace: mockReplace,
     reset: mockReset,
   }),
-  // useFocusEffect runs the callback immediately (and once) so the
-  // auto-redirect behaviour fires deterministically.
-  useFocusEffect: (cb: () => void) => {
-    focusCallbacks.push(cb);
-    cb();
-  },
 }));
 
 // expo-location mock — return a deterministic location.
@@ -78,6 +76,76 @@ function makeArea(): ServiceArea {
       notifyOnEntry: true,
       notifyOnDwell: false,
       notifyOnExit: true,
+    }),
+  );
+}
+
+const usd = (major: number) => unwrap(Money.fromMajor(major, 'USD'));
+
+function makeAwaitingRiderRide(uid: UserId, id: string): Ride {
+  const passenger = unwrap(
+    PassengerSnapshot.create({
+      id: uid,
+      name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+      email: unwrap(Email.create('rider2@yeapp.tech')),
+      phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
+      pushToken: null,
+      avatarUrl: null,
+      stripeCustomerId: null,
+      defaultPaymentMethod: null,
+    }),
+  );
+  const service = unwrap(
+    RideServiceSnapshot.create({
+      id: unwrap(RideServiceId.create('economy')),
+      name: 'Economy',
+      baseFare: usd(2.5),
+      minimumFare: usd(5),
+      cancelationFee: usd(2),
+      costPerKm: usd(1.25),
+      costPerMinute: usd(0.2),
+      seatCapacity: 4,
+    }),
+  );
+  const miami = unwrap(Coordinates.create(25.7617, -80.1918));
+  const lauderdale = unwrap(Coordinates.create(26.1224, -80.1373));
+  return unwrap(
+    Ride.create({
+      id: unwrap(RideId.create(id)),
+      passenger,
+      rideService: service,
+      pickup: unwrap(
+        Endpoint.create({
+          location: miami,
+          address: 'pickup',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      dropoff: unwrap(
+        Endpoint.create({
+          location: lauderdale,
+          address: 'dropoff',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      createdAt: new Date(),
+    }),
+  );
+}
+
+function makeScheduledRiderRide(uid: UserId, id: string): Ride {
+  const base = makeAwaitingRiderRide(uid, id);
+  return unwrap(
+    Ride.createScheduled({
+      id: base.id,
+      passenger: base.passenger,
+      rideService: base.rideService,
+      pickup: base.pickup,
+      dropoff: base.dropoff,
+      createdAt: base.createdAt,
+      schedulePickupAt: new Date(base.createdAt.getTime() + 60 * 60_000),
     }),
   );
 }
@@ -135,12 +203,14 @@ function withTestContainer(opts: {
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
   serviceAreasRepo: InMemoryServiceAreaRepository;
+  ridesRepo?: InMemoryRideRepository;
 }) {
   return ({ children }: { children: ReactNode }) => (
     <TestContainerProvider
       auth={opts.authRepo}
       users={opts.usersRepo}
       serviceAreas={opts.serviceAreasRepo}
+      {...(opts.ridesRepo !== undefined ? { rides: opts.ridesRepo } : {})}
     >
       {children}
     </TestContainerProvider>
@@ -150,9 +220,7 @@ function withTestContainer(opts: {
 describe('useRiderHomeViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
-    mockReplace.mockClear();
     mockReset.mockClear();
-    focusCallbacks.length = 0;
     useServiceAreaStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
@@ -209,5 +277,55 @@ describe('useRiderHomeViewModel', () => {
     expect(mockNavigate).toHaveBeenCalledWith('RideMonitor', {
       rideId: 'rideAbc1234567890ab',
     });
+  });
+
+  it('exposes in-progress rides from the live subscription', async () => {
+    const setup = await setupSeededState();
+    const ridesRepo = new InMemoryRideRepository();
+    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'riderLive000000001ab'));
+
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.inProgressRides).toHaveLength(1);
+    });
+    expect(String(result.current.inProgressRides[0]?.id)).toBe(
+      'riderLive000000001ab',
+    );
+  });
+
+  it('exposes scheduled rides from the live subscription', async () => {
+    const setup = await setupSeededState();
+    const ridesRepo = new InMemoryRideRepository();
+    ridesRepo.seed(makeScheduledRiderRide(setup.uid, 'riderSched00000001ab'));
+
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.scheduledRides).toHaveLength(1);
+    });
+  });
+
+  it('does NOT auto-route to RideMonitor when an in-progress ride exists', async () => {
+    const setup = await setupSeededState();
+    const ridesRepo = new InMemoryRideRepository();
+    ridesRepo.seed(makeAwaitingRiderRide(setup.uid, 'riderNoRoute0001ab12'));
+
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer({ ...setup, ridesRepo }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.inProgressRides).toHaveLength(1);
+    });
+    expect(mockReset).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      'RideMonitor',
+      expect.anything(),
+    );
   });
 });

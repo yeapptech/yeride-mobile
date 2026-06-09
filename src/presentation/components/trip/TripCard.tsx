@@ -134,6 +134,9 @@ export const TripCard = memo(function TripCard({
     ride.status === 'cancelled'
       ? null
       : `Est. ${ride.rideService.baseFare.format()}`;
+  const timeText: string = ride.schedulePickupAt
+    ? `Scheduled for ${formatTimestamp(ride.schedulePickupAt)}`
+    : formatTimestamp(ride.createdAt);
   return (
     <Pressable
       testID={`trip-card-${String(ride.id)}`}
@@ -154,7 +157,7 @@ export const TripCard = memo(function TripCard({
             {otherPartyLabel(ride, viewerRole)}
           </Text>
           <Text className="mt-0.5 text-xs text-muted-foreground">
-            {formatTimestamp(ride.createdAt)}
+            {timeText}
           </Text>
         </View>
         <View

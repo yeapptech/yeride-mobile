@@ -548,6 +548,11 @@ npm run verify         # all four in sequence
 
 All four must be green before commit. CI runs the same.
 
+End-to-end UI flows live in `e2e/maestro/{auth,rider,driver}` (Maestro;
+driver=Android / rider=iOS, stage test accounts). They are not part of
+`npm run verify` — run them against a booted simulator/emulator + dev
+client. See `e2e/README.md`.
+
 ### Env vars
 
 Live in `.env.development` / `.env.stage` / `.env.production`:
@@ -678,4 +683,4 @@ Critical files table above.
 ---
 
 **End of CLAUDE.md.** When in doubt, read the most recent
-`docs/PHASE_*.md` (latest: `PHASE_9_TURN_18.md`), then ask.
+`docs/PHASE_*.md` (latest: `PHASE_10_TURN_10.md`), then ask.

@@ -162,6 +162,29 @@ export interface RideRepository {
     callback: (rides: readonly Ride[]) => void;
   }): () => void;
 
+  /**
+   * Live "user's in-progress rides" subscription for the Home In-progress
+   * section. Passenger LIVE statuses: awaiting_driver, dispatched, started,
+   * payment_requested, payment_failed (scheduled* belong to
+   * observeScheduledRidesByPassenger; terminals are excluded). Synchronous
+   * unsubscribe. Ordering NOT specified server-side; callers sort by
+   * createdAt desc.
+   */
+  observeInProgressRidesByPassenger(args: {
+    passengerId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void;
+
+  /**
+   * Driver-side equivalent. Driver LIVE statuses: dispatched, started,
+   * payment_requested, payment_failed (no awaiting_driver — no driver yet;
+   * no scheduled_driver_accepted — that's the Scheduled section).
+   */
+  observeInProgressRidesByDriver(args: {
+    driverId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void;
+
   /** Audit-log subcollection. Read-only; emits sorted by createdAt asc. */
   subscribeEvents(args: {
     rideId: RideId;

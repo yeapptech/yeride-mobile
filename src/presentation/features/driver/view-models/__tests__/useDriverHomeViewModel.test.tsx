@@ -43,13 +43,8 @@ import { useDriverHomeViewModel } from '../useDriverHomeViewModel';
 
 // Navigation mock — we assert `navigate` calls only.
 const mockNavigate = jest.fn();
-const focusCallbacks: (() => void)[] = [];
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate }),
-  useFocusEffect: (cb: () => void) => {
-    focusCallbacks.push(cb);
-    cb();
-  },
 }));
 
 // expo-location mock — return a deterministic location.
@@ -287,7 +282,6 @@ function withTestContainer(opts: {
 describe('useDriverHomeViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
-    focusCallbacks.length = 0;
     useServiceAreaStore.getState().reset();
     useDriverStatusStore.getState().reset();
     useGpsStore.getState().reset();
@@ -449,12 +443,10 @@ describe('useDriverHomeViewModel', () => {
     });
   });
 
-  it('redirects to DriverMonitor when the driver has an in-progress ride', async () => {
-    const setup = await setupSeededState();
-    // Build an awaiting ride, dispatch it to this driver, and seed it.
+  function makeDispatchedToDriver(driverId: UserId, id: string): Ride {
     const driverSnap = unwrap(
       DriverSnapshot.create({
-        id: setup.uid,
+        id: driverId,
         name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
         email: unwrap(Email.create('driver@yeapp.tech')),
         phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
@@ -489,23 +481,64 @@ describe('useDriverHomeViewModel', () => {
         description: '',
       }),
     );
-    const dispatched = unwrap(
-      makeAwaitingRide({ id: 'rideInProgress12345ab' }).dispatch({
+    return unwrap(
+      makeAwaitingRide({ id }).dispatch({
         driver: driverSnap,
         pickupDirections: route,
         at: new Date(),
       }),
     );
-    setup.ridesRepo.seed(dispatched);
+  }
 
-    renderHook(() => useDriverHomeViewModel(), {
+  it('exposes in-progress rides from the live subscription', async () => {
+    const setup = await setupSeededState();
+    setup.ridesRepo.seed(
+      makeDispatchedToDriver(setup.uid, 'drvHomeLive00001ab12'),
+    );
+
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
       wrapper: withTestContainer(setup),
     });
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
-        rideId: 'rideInProgress12345ab',
-      });
+      expect(result.current.inProgressRides).toHaveLength(1);
+    });
+    expect(String(result.current.inProgressRides[0]?.id)).toBe(
+      'drvHomeLive00001ab12',
+    );
+  });
+
+  it('does NOT auto-route to DriverMonitor when an in-progress ride exists', async () => {
+    const setup = await setupSeededState();
+    setup.ridesRepo.seed(
+      makeDispatchedToDriver(setup.uid, 'drvHomeNoRoute001ab1'),
+    );
+
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+
+    await waitFor(() => {
+      expect(result.current.inProgressRides).toHaveLength(1);
+    });
+    expect(
+      mockNavigate.mock.calls.filter((c) => c[0] === 'DriverMonitor'),
+    ).toHaveLength(0);
+  });
+
+  it('onResumeInProgress navigates to DriverMonitor', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    act(() => {
+      result.current.onResumeInProgress('drvResume123456789ab');
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('DriverMonitor', {
+      rideId: 'drvResume123456789ab',
     });
   });
 

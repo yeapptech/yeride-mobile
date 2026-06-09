@@ -39,6 +39,7 @@ import { ListRidesByDriver } from '@app/usecases/ride/ListRidesByDriver';
 import { ListRidesByPassenger } from '@app/usecases/ride/ListRidesByPassenger';
 import { MarkMessagesRead } from '@app/usecases/ride/MarkMessagesRead';
 import { ObserveChatMessages } from '@app/usecases/ride/ObserveChatMessages';
+import { ObserveInProgressRides } from '@app/usecases/ride/ObserveInProgressRides';
 import { ObserveLatestMessage } from '@app/usecases/ride/ObserveLatestMessage';
 import { ObserveRide } from '@app/usecases/ride/ObserveRide';
 import { ObserveScheduledRides } from '@app/usecases/ride/ObserveScheduledRides';
@@ -197,6 +198,7 @@ export interface UseCases {
 
   // Scheduled rides (Phase 10 turn 7)
   observeScheduledRides: ObserveScheduledRides;
+  observeInProgressRides: ObserveInProgressRides;
 
   // Trip-tracking domain logic (Phase 3 turn 1; full GPS lifecycle Phase 4)
   evaluateExitWarning: EvaluateExitWarning;
@@ -358,6 +360,7 @@ export function makeUseCases(args: {
     markMessagesRead: new MarkMessagesRead(args.chats),
     observeTripPayments: new ObserveTripPayments(args.rides),
     observeScheduledRides: new ObserveScheduledRides(args.rides),
+    observeInProgressRides: new ObserveInProgressRides(args.rides),
     evaluateExitWarning: new EvaluateExitWarning(),
     updateUserLocation: new UpdateUserLocation(args.locations),
     subscribeToUserLocation: new SubscribeToUserLocation(args.locations),

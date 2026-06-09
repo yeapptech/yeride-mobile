@@ -8,20 +8,12 @@ import DriverHomeScreen from '@presentation/features/driver/screens/DriverHomeSc
 import type { DriverTabsParamList } from './types';
 
 /**
- * Bottom tabs for the authenticated driver experience. Phase 4 turn 1
- * mounts placeholder screens for Home / Activity / Earnings while reusing
- * the shared `UserProfileScreen` for the Profile tab — same pattern as
- * `RiderTabsNavigator`.
+ * Bottom tabs for the authenticated driver experience. Active rides surface
+ * as a list on DriverHome (see `HomeRideSections`), so there is no
+ * persistent banner above the tabs.
  *
- * Turn 2 replaces `DriverHomePlaceholderScreen` with the real DriverHome
- * (map + ListAvailableRides). Phase 6 turn 4 swaps in the real
- * `DriverEarningsScreen` (Stripe Connect onboarding + balance + payouts).
- * Phase 10 Turn 6 promotes `Activity` to the real driver-side
- * `DriverActivityScreen` — recent-rides list mirroring the rider tab.
- *
- * Tab bar styling intentionally minimal here — visual design is a
- * follow-up turn once the legacy app's tab labels and icon set port
- * cleanly. The focus right now is "the harness works".
+ * Tab bar styling intentionally minimal — visual design iterates in a
+ * later turn.
  */
 const Tabs = createBottomTabNavigator<DriverTabsParamList>();
 

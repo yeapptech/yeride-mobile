@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
@@ -19,7 +19,7 @@ import {
   useAvailableRidesQuery,
   useCurrentUserQuery,
   useDriverActiveVehicleQuery,
-  useInProgressDriverRideQuery,
+  useInProgressRidesSubscription,
   useRideServicesQuery,
   useUpdateLocationMutation,
 } from '@presentation/queries';
@@ -50,10 +50,10 @@ const logger = LOG.extend('DriverHomeVM');
  *   - `useAvailableRidesQuery(...)` — live subscription gated on
  *     `mode === 'online_idle'`. Returns the queue of rides waiting for a
  *     driver near `coords`.
- *   - `useInProgressDriverRideQuery(driverId)` — auto-redirects to
- *     DriverMonitor when the driver has a ride mid-flight (cold-launch
- *     resumption / accidental back-out). The DriverMonitor status-router
- *     covers every active state, so the redirect target is unconditional.
+ *   - `useInProgressRidesSubscription(driverId, 'driver')` — live list of
+ *     the driver's currently-happening rides for the Home In-progress
+ *     section. No auto-redirect: the driver taps a row to open
+ *     DriverMonitor (`onResumeInProgress`).
  *   - `useUpdateLocationMutation` — writes the driver's foreground
  *     location to Firestore so riders' UIs can render driver-side ETA.
  *     Mirrors the rider-home pattern.
@@ -86,7 +86,7 @@ export interface UseDriverHomeViewModel {
    */
   readonly noActiveVehicle: boolean;
   readonly availableRides: readonly Ride[];
-  readonly inProgressRide: Ride | null;
+  readonly inProgressRides: readonly Ride[];
   readonly permissionStatus: LocationPermission;
   /**
    * Phase 9 turn 10. True when the BACKGROUND-geolocation SDK
@@ -132,9 +132,6 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
   const rideServicesQuery = useRideServicesQuery(
     activeAreaQuery.data?.id ?? null,
   );
-  const inProgressRideQuery = useInProgressDriverRideQuery(
-    userQuery.data?.id ?? null,
-  );
   const activeVehicleQuery = useDriverActiveVehicleQuery();
   const updateLocationMutation = useUpdateLocationMutation();
   const setReady = useServiceAreaStore((s) => s.setReady);
@@ -149,7 +146,10 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
 
   const user = userQuery.data ?? null;
   const activeServiceArea = activeAreaQuery.data ?? null;
-  const inProgressRide = inProgressRideQuery.data ?? null;
+  const inProgressRides = useInProgressRidesSubscription(
+    user?.id ?? null,
+    'driver',
+  );
 
   // The catalog of RideServiceIds the driver advertises for. Legacy
   // advertises against all services in the active area; we mirror that.
@@ -205,20 +205,6 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
       },
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
-
-  // Auto-redirect to the active ride. The status-router inside
-  // DriverMonitor handles every active state (en-route, at-pickup,
-  // started, payment_requested, payment_failed), so DriverHome doesn't
-  // need to branch on status.
-  useFocusEffect(
-    useCallback(() => {
-      if (inProgressRide) {
-        navigation.navigate('DriverMonitor', {
-          rideId: String(inProgressRide.id),
-        });
-      }
-    }, [inProgressRide, navigation]),
-  );
 
   // Phase 5 turn 4: the `activeVehicleId` is now real — drivers must
   // register a vehicle before going online. The legacy `'vehicle-stub'`
@@ -305,7 +291,7 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     activeVehicle: activeVehicleQuery.data ?? null,
     noActiveVehicle,
     availableRides,
-    inProgressRide,
+    inProgressRides,
     permissionStatus: currentLocation.permissionStatus,
     bgPermissionDenied,
     onToggleOnline,

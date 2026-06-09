@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
@@ -15,7 +15,8 @@ import type { RiderStackNavigation } from '@presentation/navigation/types';
 import {
   useActiveServiceAreaQuery,
   useCurrentUserQuery,
-  useInProgressRideQuery,
+  useInProgressRidesSubscription,
+  useScheduledRidesSubscription,
   useUpdateLocationMutation,
 } from '@presentation/queries';
 import { useServiceAreaStore } from '@presentation/stores';
@@ -27,21 +28,21 @@ const logger = LOG.extend('RiderHomeVM');
  * View-model for `RiderHomeScreen`.
  *
  * Composes:
- *   - `useCurrentUserQuery` — the rider's profile, used as the source of
- *     truth for `userId`. The session store has the id too, but the
- *     query is the single read path.
- *   - `useCurrentLocation` — foreground GPS read. Phase 4 will swap this
- *     for `useGpsLifecycle` once `BackgroundGeolocationClient` lands.
- *   - `useActiveServiceAreaQuery(coords)` — resolves which service area
- *     contains the rider. Pushes the result into `useServiceAreaStore`
- *     so RouteSearch's autocomplete sees the same active area.
- *   - `useInProgressRideQuery(userId)` — auto-redirects to RideMonitor
- *     when the rider has an active ride (resumes after app cold-launch
- *     or accidental back-out).
- *   - `useUpdateLocationMutation` — writes the rider's location to
- *     Firestore so the driver's UI can render rider-side ETA. Throttled
- *     by the adapter's 3-retry backoff; this view-model fires it once
- *     per coordinate read (no polling — that's Phase 4 GPS).
+ *   - `useCurrentUserQuery` — the rider's profile / `userId`.
+ *   - `useCurrentLocation` — foreground GPS read for the map camera.
+ *   - `useActiveServiceAreaQuery(coords)` — resolves the rider's area;
+ *     mirrored into `useServiceAreaStore`.
+ *   - `useInProgressRidesSubscription(userId, 'rider')` — live list for the
+ *     Home In-progress section.
+ *   - `useScheduledRidesSubscription(userId)` — live list for the Home
+ *     Scheduled section.
+ *   - `useUpdateLocationMutation` — writes the rider's location to Firestore.
+ *
+ * There is intentionally NO auto-route to RideMonitor: the rider lands on
+ * Home, sees their active / scheduled rides in the list, and taps a row to
+ * open the monitor (`resumeRide`). Removing the old focus-fired redirect is
+ * what frees every tab during an active ride (replaces the active-ride
+ * banner experiment).
  */
 
 export type RiderHomeStatus =
@@ -55,11 +56,14 @@ export interface UseRiderHomeViewModel {
   readonly user: User | null;
   readonly currentLocation: UseCurrentLocation;
   readonly activeServiceArea: ServiceArea | null;
-  readonly inProgressRide: Ride | null;
+  /** Live list of the rider's in-progress rides (newest-first). */
+  readonly inProgressRides: readonly Ride[];
+  /** Live list of the rider's scheduled rides (next-soonest-first). */
+  readonly scheduledRides: readonly Ride[];
   readonly permissionStatus: LocationPermission;
   /** Tap handler: push to RouteSearch. */
   goToRouteSearch: () => void;
-  /** Tap handler: jump back into the active ride. */
+  /** Tap handler: open a ride's live monitor. */
   resumeRide: (rideId: string) => void;
   /** Re-request location permission and re-read. */
   refreshLocation: () => Promise<void>;
@@ -72,20 +76,20 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   const activeAreaQuery = useActiveServiceAreaQuery(
     currentLocation.coordinates,
   );
-  const inProgressRideQuery = useInProgressRideQuery(
-    userQuery.data?.id ?? null,
-  );
   const updateLocationMutation = useUpdateLocationMutation();
   const setReady = useServiceAreaStore((s) => s.setReady);
   const setActiveArea = useServiceAreaStore((s) => s.setActiveArea);
 
   const user = userQuery.data ?? null;
   const activeServiceArea = activeAreaQuery.data ?? null;
-  const inProgressRide = inProgressRideQuery.data ?? null;
+  const inProgressRides = useInProgressRidesSubscription(
+    user?.id ?? null,
+    'rider',
+  );
+  const scheduledRides = useScheduledRidesSubscription(user?.id ?? null);
 
   // Mirror the resolved active area into the global store so RouteSearch
-  // and RouteSelect can read it without re-querying. Defensive: if there
-  // are no other areas seeded, still write the singleton.
+  // and RouteSelect can read it without re-querying.
   useEffect(() => {
     if (!activeServiceArea) return;
     setReady([activeServiceArea]);
@@ -93,12 +97,9 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   }, [activeServiceArea, setReady, setActiveArea]);
 
   // Push the rider's location to Firestore on every fresh coordinate read.
-  // No polling — Phase 4 takes over with the GPS lifecycle.
   const lastWrittenCoordsRef = useRef<Coordinates | null>(null);
   useEffect(() => {
     if (!user || !currentLocation.coordinates) return;
-    // Skip identical reads (the hook can re-emit the same coords on
-    // re-mount). Real dedup against jitter waits for Phase 4.
     if (
       lastWrittenCoordsRef.current &&
       lastWrittenCoordsRef.current.equals(currentLocation.coordinates)
@@ -123,38 +124,6 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
       },
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
-
-  // Auto-redirect to RideMonitor if there's an in-progress ride. We use
-  // `useFocusEffect` so the redirect fires every time RiderHome gains
-  // focus — including after the user backs out of RideMonitor without
-  // completing the ride.
-  //
-  // CRITICAL: this hook runs from inside `RiderTabs` (a tab screen), so
-  // calling `navigation.replace('RideMonitor', ...)` bubbles up to the
-  // parent native-stack and REPLACES the `RiderTabs` entry itself —
-  // leaving the rider stack as `[RideMonitor]` with nothing underneath.
-  // Once the ride completes and `RideMonitor` calls
-  // `replace('RideReceipt', ...)`, the stack becomes `[RideReceipt]`,
-  // and the Done button's `popToTop()` fails with
-  // "POP_TO_TOP not handled by any navigator". Use `reset` so the back
-  // stack is `[RiderTabs, RideMonitor]` — that gives RideReceipt
-  // somewhere to pop to.
-  useFocusEffect(
-    useCallback(() => {
-      if (inProgressRide) {
-        navigation.reset({
-          index: 1,
-          routes: [
-            { name: 'RiderTabs' },
-            {
-              name: 'RideMonitor',
-              params: { rideId: String(inProgressRide.id) },
-            },
-          ],
-        });
-      }
-    }, [inProgressRide, navigation]),
-  );
 
   const goToRouteSearch = useCallback(() => {
     navigation.navigate('RouteSearch');
@@ -199,7 +168,8 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
     user,
     currentLocation,
     activeServiceArea,
-    inProgressRide,
+    inProgressRides,
+    scheduledRides,
     permissionStatus: currentLocation.permissionStatus,
     goToRouteSearch,
     resumeRide,
