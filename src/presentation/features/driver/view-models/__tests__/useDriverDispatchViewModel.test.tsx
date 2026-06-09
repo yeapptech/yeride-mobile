@@ -160,6 +160,62 @@ function makeDispatchedRide(): Ride {
   );
 }
 
+function makeScheduledRide(): Ride {
+  return unwrap(
+    Ride.createScheduled({
+      id: RIDE_ID,
+      passenger: PASSENGER,
+      rideService: ECONOMY_SNAPSHOT,
+      pickup: unwrap(
+        Endpoint.create({
+          location: MIAMI,
+          address: 'pickup',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      dropoff: unwrap(
+        Endpoint.create({
+          location: FORT_LAUDERDALE,
+          address: 'dropoff',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      createdAt: new Date(),
+      schedulePickupAt: new Date(Date.now() + 60 * 60_000),
+    }),
+  );
+}
+
+function makeAcceptedScheduledRide(): Ride {
+  // status scheduled_driver_accepted (owned by some driver — the begin
+  // path doesn't check ownership; the entity only checks status).
+  const driver = unwrap(
+    DriverSnapshot.create({
+      id: unwrap(UserId.create('someDriverxxxxxxxxxxxxxxxxxx')),
+      name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+      email: unwrap(Email.create('grace@yeapp.tech')),
+      phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+      stripeAccountId: 'acct_abc',
+      pushToken: null,
+      avatarUrl: null,
+      vehicle: unwrap(
+        VehicleSnapshot.create({
+          make: 'Toyota',
+          model: 'Camry',
+          year: 2024,
+          color: 'White',
+          licensePlate: 'ABC1234',
+          stockPhoto: null,
+          photos: [],
+        }),
+      ),
+    }),
+  );
+  return unwrap(makeScheduledRide().acceptSchedule({ driver }));
+}
+
 interface SeededState {
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
@@ -435,5 +491,107 @@ describe('useDriverDispatchViewModel', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.status).toBe('loading');
     expect(result.current.pickupRoute).toBeNull();
+  });
+
+  it("action is 'accept_schedule' for a scheduled ride; onAccept accepts and goes back (no monitor)", async () => {
+    const setup = await setupSeededState({ seedRide: makeScheduledRide() });
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    expect(result.current.action).toBe('accept_schedule');
+
+    act(() => {
+      result.current.onAccept();
+    });
+
+    await waitFor(() => {
+      expect(mockGoBack).toHaveBeenCalled();
+    });
+    expect(mockReplace).not.toHaveBeenCalled();
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.status).toBe('scheduled_driver_accepted');
+      expect(persisted.value.driver?.id).toBe(setup.uid);
+    }
+  });
+
+  it("action is 'begin' for an accepted scheduled ride; onAccept begins and replaces with DriverMonitor", async () => {
+    const setup = await setupSeededState({
+      seedRide: makeAcceptedScheduledRide(),
+    });
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    expect(result.current.action).toBe('begin');
+
+    act(() => {
+      result.current.onAccept();
+    });
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('DriverMonitor', {
+        rideId: String(RIDE_ID),
+      });
+    });
+    expect(useDriverStatusStore.getState().mode).toBe('dispatched');
+    const persisted = await setup.ridesRepo.getById(RIDE_ID);
+    if (persisted.ok) expect(persisted.value.status).toBe('dispatched');
+  });
+
+  it("flips to 'gone' when a scheduled ride is taken by another driver mid-decision", async () => {
+    const setup = await setupSeededState({ seedRide: makeScheduledRide() });
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+
+    // Another driver accepts: scheduled → scheduled_driver_accepted.
+    const taken = unwrap(
+      makeScheduledRide().acceptSchedule({
+        driver: unwrap(
+          DriverSnapshot.create({
+            id: unwrap(UserId.create('rivalDriverxxxxxxxxxxxxxxxxx')),
+            name: unwrap(PersonName.create({ first: 'Rival', last: 'D' })),
+            email: unwrap(Email.create('rival@yeapp.tech')),
+            phoneNumber: unwrap(PhoneNumber.create('+14155558888')),
+            stripeAccountId: 'acct_rival',
+            pushToken: null,
+            avatarUrl: null,
+            vehicle: null,
+          }),
+        ),
+      }),
+    );
+    await act(async () => {
+      await setup.ridesRepo.update(taken);
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('gone');
+    });
   });
 });

@@ -1,17 +1,20 @@
 import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
 import { DriverSnapshot } from '@domain/entities/DriverSnapshot';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
+import type { RideStatus } from '@domain/entities/RideStatus';
 import type { Route } from '@domain/entities/Route';
 import type { User } from '@domain/entities/User';
 import { useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
 import {
+  useAcceptScheduledRideMutation,
+  useBeginScheduledRideMutation,
   useCurrentUserQuery,
   useDispatchRideMutation,
 } from '@presentation/queries';
@@ -63,6 +66,25 @@ export type CannotAcceptReason =
   | 'no_active_vehicle'
   | 'wrong_status';
 
+/**
+ * Which driver action this dispatch-screen visit performs, derived from the
+ * ride's status when the screen first painted (pinned — see the VM body).
+ */
+export type DispatchAction = 'accept' | 'accept_schedule' | 'begin';
+
+function actionForStatus(status: RideStatus): DispatchAction | null {
+  switch (status) {
+    case 'awaiting_driver':
+      return 'accept';
+    case 'scheduled':
+      return 'accept_schedule';
+    case 'scheduled_driver_accepted':
+      return 'begin';
+    default:
+      return null;
+  }
+}
+
 export interface UseDriverDispatchViewModel {
   readonly status: DriverDispatchStatus;
   readonly ride: Ride | null;
@@ -70,6 +92,8 @@ export interface UseDriverDispatchViewModel {
   readonly user: User | null;
   readonly driverLocation: Coordinates | null;
   readonly cannotAcceptReason: CannotAcceptReason | null;
+  /** Which action the Accept button performs (null until the ride loads). */
+  readonly action: DispatchAction | null;
   /** Accept the offer. Builds a DriverSnapshot, calls DispatchRide. */
   onAccept: () => void;
   /** Decline → pop back to DriverHome. No server-side trace in Turn 3. */
@@ -90,6 +114,8 @@ export function useDriverDispatchViewModel(
   const userQuery = useCurrentUserQuery();
   const setMode = useDriverStatusStore((s) => s.setMode);
   const dispatchMutation = useDispatchRideMutation();
+  const acceptScheduleMutation = useAcceptScheduledRideMutation();
+  const beginMutation = useBeginScheduledRideMutation();
 
   // Live ride subscription — initial paint + race-condition detection.
   const subscribedRide = useFirestoreSubscription<Ride | null>(
@@ -101,6 +127,28 @@ export function useDriverDispatchViewModel(
   );
 
   const user = userQuery.data ?? null;
+
+  // Pin the action to the FIRST status the subscription emits. Anchoring to
+  // the initial status (rather than the live one) is what makes 'gone'
+  // correct: if a 'scheduled' ride we're looking at flips to
+  // 'scheduled_driver_accepted' because another driver accepted it, the
+  // live status no longer matches our pinned intent → 'gone' (we must NOT
+  // re-derive the action to 'begin' and let this driver hijack it).
+  const intentStatusRef = useRef<RideStatus | null>(null);
+  if (intentStatusRef.current === null && subscribedRide !== null) {
+    intentStatusRef.current = subscribedRide.status;
+  }
+  const intentStatus = intentStatusRef.current;
+  const action = intentStatus !== null ? actionForStatus(intentStatus) : null;
+
+  const anyPending =
+    dispatchMutation.isPending ||
+    acceptScheduleMutation.isPending ||
+    beginMutation.isPending;
+  const anySuccess =
+    dispatchMutation.isSuccess ||
+    acceptScheduleMutation.isSuccess ||
+    beginMutation.isSuccess;
 
   // Pickup-route preview: driver's current location → ride's pickup. Skipped
   // when we don't yet have both; the screen falls back to the `'loading'`
@@ -146,18 +194,21 @@ export function useDriverDispatchViewModel(
   }, [user]);
 
   const status = useMemo<DriverDispatchStatus>(() => {
-    // The race-condition state takes priority, but only after we've heard
-    // from the subscription at least once (otherwise the `null` initial
-    // value would falsely report `'gone'`).
+    // 'gone' takes priority once we've pinned an intent: either the ride
+    // started in a non-actionable status, or it drifted off the pinned
+    // status (taken by another driver / cancelled). Guarded by
+    // !anySuccess/!anyPending so our own successful transition (which
+    // changes the status) doesn't read as 'gone' before we navigate.
     if (
       subscribedRide !== null &&
-      subscribedRide.status !== 'awaiting_driver' &&
-      !dispatchMutation.isSuccess &&
-      !dispatchMutation.isPending
+      intentStatus !== null &&
+      !anySuccess &&
+      !anyPending &&
+      (action === null || subscribedRide.status !== intentStatus)
     ) {
       return 'gone';
     }
-    if (dispatchMutation.isPending) return 'accepting';
+    if (anyPending) return 'accepting';
     if (cannotAcceptReason !== null) return 'cannot_accept';
     if (
       userQuery.isLoading ||
@@ -171,8 +222,10 @@ export function useDriverDispatchViewModel(
     return 'ready';
   }, [
     subscribedRide,
-    dispatchMutation.isPending,
-    dispatchMutation.isSuccess,
+    intentStatus,
+    action,
+    anyPending,
+    anySuccess,
     cannotAcceptReason,
     userQuery.isLoading,
     driverLocation,
@@ -182,44 +235,74 @@ export function useDriverDispatchViewModel(
 
   const onAccept = useCallback(() => {
     if (!user || user.role !== 'driver') return;
-    if (!subscribedRide || !pickupRoute) return;
+    if (!subscribedRide) return;
     if (cannotAcceptReason !== null) return;
+    if (action === null) return;
+
+    // Begin: the ride is already this driver's (reached from their own
+    // Scheduled section). Attach the freshly-computed pickup route and
+    // flip to dispatched, then drop into the existing monitor flow.
+    if (action === 'begin') {
+      if (!pickupRoute) return;
+      beginMutation.mutate(
+        { rideId, pickupDirections: pickupRoute },
+        {
+          onSuccess: () => {
+            setMode('dispatched');
+            navigation.replace('DriverMonitor', { rideId: String(rideId) });
+          },
+          onError: (e: unknown) => {
+            logger.warn('beginScheduledRide failed', e);
+          },
+        },
+      );
+      return;
+    }
+
+    // accept / accept_schedule both need a DriverSnapshot.
     if (!user.phone) {
-      // Registration enforces a phone, but type-narrowing requires us to
-      // handle the null branch. Treat as unexpected state — log + bail.
       logger.warn('driver doc missing phone; cannot build DriverSnapshot');
       return;
     }
     if (!user.stripeAccountId) {
-      // Already covered by cannotAcceptReason guard above, but TS
-      // doesn't narrow through useMemo. Re-check for the snapshot factory.
+      // Covered by cannotAcceptReason above, but TS doesn't narrow through
+      // useMemo — re-check for the factory.
       return;
     }
-
     const snapshotR = DriverSnapshot.create({
       id: user.id,
       name: user.name,
       email: user.email,
       phoneNumber: user.phone,
-      // DriverSnapshot's `stripeAccountId` is a denormalized trip-doc
-      // payload (not the branded ID type). Stringify the brand here so
-      // the snapshot's wire shape stays unchanged from Phase 4.
       stripeAccountId: String(user.stripeAccountId),
-      // Phase 9 turn 2 sub-turn 2a: bake the driver's current push token
-      // into the dispatch snapshot so the deployed
-      // `yeride-functions/handlers/trip-event-created.js` can address
-      // tip notifications via `tripData.driver.pushToken` (the
-      // `tip_succeeded` arm reads this). `null` until
-      // `RegisterPushToken` (sub-turn 2b) writes it to the user doc.
       pushToken: user.pushToken !== null ? String(user.pushToken) : null,
       avatarUrl: user.avatarUrl,
-      vehicle: null, // VehicleSnapshot wiring lives in Phase 5
+      vehicle: null,
     });
     if (!snapshotR.ok) {
       logger.warn('DriverSnapshot.create rejected', snapshotR.error);
       return;
     }
 
+    if (action === 'accept_schedule') {
+      // No monitor — the accepted scheduled ride lands in the driver's
+      // Home Scheduled section. Pop back to Home.
+      acceptScheduleMutation.mutate(
+        { rideId, driver: snapshotR.value },
+        {
+          onSuccess: () => {
+            navigation.goBack();
+          },
+          onError: (e: unknown) => {
+            logger.warn('acceptScheduledRide failed', e);
+          },
+        },
+      );
+      return;
+    }
+
+    // action === 'accept' (awaiting_driver) — immediate dispatch.
+    if (!pickupRoute) return;
     dispatchMutation.mutate(
       {
         rideId,
@@ -243,10 +326,13 @@ export function useDriverDispatchViewModel(
   }, [
     user,
     subscribedRide,
+    action,
     pickupRoute,
     cannotAcceptReason,
     rideId,
     dispatchMutation,
+    acceptScheduleMutation,
+    beginMutation,
     setMode,
     navigation,
   ]);
@@ -262,6 +348,7 @@ export function useDriverDispatchViewModel(
     user,
     driverLocation,
     cannotAcceptReason,
+    action,
     onAccept,
     onDecline,
   };
