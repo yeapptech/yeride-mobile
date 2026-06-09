@@ -72,10 +72,12 @@ simulator is the **rider**.
 ## Gotchas discovered
 
 - A rider/driver with an active ride is **no longer auto-routed** to the
-  monitor and is never trapped: Home shows their in-progress (and, for
-  riders, scheduled) rides as a tappable list, and every tab
-  (Profile/Sign-out/etc.) stays reachable. Tap the in-progress row to open
-  the monitor. (Replaces the short-lived active-ride banner.)
+  monitor and is never trapped: Home shows their in-progress and scheduled
+  rides as a tappable list (riders see pending + driver-accepted scheduled
+  rides; drivers see the scheduled rides they've accepted), and every tab
+  (Profile/Sign-out/etc.) stays reachable. Tap an in-progress row to open
+  the monitor; tap an accepted scheduled row (driver) to begin it.
+  (Replaces the short-lived active-ride banner.)
 - The rider home **needs a resolved location to show ride services** — on the
   iOS simulator a cold start can default to a far-away region, leaving
   RouteSelect on "No services in this area". Set a location first, e.g.
