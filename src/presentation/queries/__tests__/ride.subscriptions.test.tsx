@@ -197,9 +197,12 @@ describe('useScheduledRidesSubscription', () => {
     await rides.create(makeScheduled('subSchedLater12345ab', 120));
     await rides.create(makeScheduled('subSchedSooner1234ab', 30));
 
-    const { result } = renderHook(() => useScheduledRidesSubscription(PID), {
-      wrapper: wrapper(rides),
-    });
+    const { result } = renderHook(
+      () => useScheduledRidesSubscription(PID, 'rider'),
+      {
+        wrapper: wrapper(rides),
+      },
+    );
     await waitFor(() => expect(result.current).toHaveLength(2));
     expect(String(result.current[0]?.id)).toBe('subSchedSooner1234ab');
   });

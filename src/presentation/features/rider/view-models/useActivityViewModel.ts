@@ -158,7 +158,7 @@ export function useActivityViewModel(args: {
     [navigator],
   );
 
-  const scheduledRides = useScheduledRidesSubscription(passengerId);
+  const scheduledRides = useScheduledRidesSubscription(passengerId, 'rider');
 
   return {
     status,
