@@ -29,6 +29,8 @@ import { ListPaymentMethods } from '@app/usecases/payment/ListPaymentMethods';
 import { ProcessTip } from '@app/usecases/payment/ProcessTip';
 import { RefreshConnectAccountStatus } from '@app/usecases/payment/RefreshConnectAccountStatus';
 import { SetDefaultPaymentMethod } from '@app/usecases/payment/SetDefaultPaymentMethod';
+import { AcceptScheduledRide } from '@app/usecases/ride/AcceptScheduledRide';
+import { BeginScheduledRide } from '@app/usecases/ride/BeginScheduledRide';
 import { CancelRideByDriver } from '@app/usecases/ride/CancelRideByDriver';
 import { CancelRideByRider } from '@app/usecases/ride/CancelRideByRider';
 import { CreateRide } from '@app/usecases/ride/CreateRide';
@@ -178,6 +180,8 @@ export interface UseCases {
   observeRide: ObserveRide;
   listAvailableRides: ListAvailableRides;
   dispatchRide: DispatchRide;
+  acceptScheduledRide: AcceptScheduledRide;
+  beginScheduledRide: BeginScheduledRide;
   startRide: StartRide;
   requestPayment: RequestPayment;
   cancelRideByRider: CancelRideByRider;
@@ -346,6 +350,8 @@ export function makeUseCases(args: {
     observeRide: new ObserveRide(args.rides),
     listAvailableRides: new ListAvailableRides(args.rides),
     dispatchRide: new DispatchRide(args.rides, clock),
+    acceptScheduledRide: new AcceptScheduledRide(args.rides),
+    beginScheduledRide: new BeginScheduledRide(args.rides, clock),
     startRide: new StartRide(args.rides, clock),
     requestPayment: new RequestPayment(args.rides),
     cancelRideByRider: new CancelRideByRider(args.rides),
