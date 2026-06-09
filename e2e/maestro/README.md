@@ -71,12 +71,11 @@ simulator is the **rider**.
 
 ## Gotchas discovered
 
-- A rider with an active ride lands on the ride monitor **once** (when the
-  ride first becomes active / on cold-start resume), but is no longer trapped
-  there: backing out returns to the tabs, a persistent **active-ride banner**
-  ("Finding your driver" / etc.) sits above every tab, and Profile/Sign-out
-  stay reachable. Tap the banner to return to the monitor. (The old "trapped
-  on the monitor" behaviour was fixed on the `feat/active-ride-banner` branch.)
+- A rider/driver with an active ride is **no longer auto-routed** to the
+  monitor and is never trapped: Home shows their in-progress (and, for
+  riders, scheduled) rides as a tappable list, and every tab
+  (Profile/Sign-out/etc.) stays reachable. Tap the in-progress row to open
+  the monitor. (Replaces the short-lived active-ride banner.)
 - The rider home **needs a resolved location to show ride services** — on the
   iOS simulator a cold start can default to a far-away region, leaving
   RouteSelect on "No services in this area". Set a location first, e.g.
