@@ -15,6 +15,7 @@ import type { DriverStackScreenProps } from '@presentation/navigation/types';
 import { useDriverDispatchViewModel } from '../view-models/useDriverDispatchViewModel';
 import type {
   CannotAcceptReason,
+  DispatchAction,
   DriverDispatchStatus,
 } from '../view-models/useDriverDispatchViewModel';
 
@@ -118,6 +119,7 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
         <View className="mx-4 mb-4 rounded-2xl bg-card p-4 shadow-lg">
           <DispatchPanel
             status={vm.status}
+            action={vm.action}
             ride={vm.ride}
             cannotAcceptReason={vm.cannotAcceptReason}
             driverLocation={currentLocation.coordinates}
@@ -133,6 +135,7 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
 
 interface DispatchPanelProps {
   readonly status: DriverDispatchStatus;
+  readonly action: DispatchAction | null;
   readonly ride: Ride | null;
   readonly cannotAcceptReason: CannotAcceptReason | null;
   readonly driverLocation: Coordinates | null;
@@ -143,6 +146,7 @@ interface DispatchPanelProps {
 
 function DispatchPanel({
   status,
+  action,
   ride,
   cannotAcceptReason,
   driverLocation,
@@ -260,7 +264,7 @@ function DispatchPanel({
           onPress={onAccept}
           disabled={accepting || driverLocation === null}
           accessibilityRole="button"
-          accessibilityLabel="Accept"
+          accessibilityLabel={acceptLabel(action)}
           accessibilityState={{ disabled: accepting }}
           className={`flex-1 items-center rounded-xl px-4 py-4 ${
             accepting ? 'bg-primary/60' : 'bg-primary'
@@ -271,13 +275,24 @@ function DispatchPanel({
             <ActivityIndicator size="small" color="white" />
           ) : (
             <Text className="text-base font-semibold text-primary-foreground">
-              Accept
+              {acceptLabel(action)}
             </Text>
           )}
         </Pressable>
       </View>
     </View>
   );
+}
+
+function acceptLabel(action: DispatchAction | null): string {
+  switch (action) {
+    case 'accept_schedule':
+      return 'Accept scheduled ride';
+    case 'begin':
+      return 'Begin trip';
+    default:
+      return 'Accept';
+  }
 }
 
 function messageForReason(reason: CannotAcceptReason | null): string {
