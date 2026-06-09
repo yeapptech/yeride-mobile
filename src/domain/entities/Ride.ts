@@ -378,6 +378,33 @@ export class Ride {
   }
 
   /**
+   * Driver accepts a SCHEDULED ride. Sets the driver snapshot and flips
+   * status `scheduled → scheduled_driver_accepted`. Mirrors legacy
+   * `scheduleDriver`: pickup directions + timing are deliberately NOT set
+   * here — those are attached later when the driver begins the ride
+   * (`beginScheduledRide`). No single-active pointer is set; a driver may
+   * hold several accepted scheduled rides (legacy parity).
+   */
+  acceptSchedule(args: {
+    driver: DriverSnapshot;
+  }): Result<Ride, ValidationError> {
+    if (this.props.status !== 'scheduled') {
+      return Result.err(
+        illegal(
+          this.props.status,
+          'acceptSchedule',
+          'scheduled → scheduled_driver_accepted',
+        ),
+      );
+    }
+    return Ride.fromProps({
+      ...this.props,
+      status: 'scheduled_driver_accepted',
+      driver: args.driver,
+    });
+  }
+
+  /**
    * Driver picks up the rider. Records `pickupTiming.completedAt` +
    * `odometer` + `elapsedSeconds`, marks `dropoffTiming.startedAt`, flips
    * status to `'started'`.
