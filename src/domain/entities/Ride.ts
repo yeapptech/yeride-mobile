@@ -405,6 +405,41 @@ export class Ride {
   }
 
   /**
+   * Driver begins an accepted scheduled ride when the pickup nears.
+   * Attaches the freshly-computed driver→pickup directions, records
+   * `pickupTiming.startedAt`, and flips status
+   * `scheduled_driver_accepted → dispatched` so the ride enters the normal
+   * live-trip flow (the driver snapshot is already set from
+   * `acceptSchedule`). Deliberate divergence from legacy, which drives a
+   * scheduled ride straight to `started`; the rewrite routes through
+   * `dispatched` because the monitor's en-route view and `start()` are
+   * keyed off it.
+   */
+  beginScheduledRide(args: {
+    pickupDirections: Route;
+    at: Date;
+  }): Result<Ride, ValidationError> {
+    if (this.props.status !== 'scheduled_driver_accepted') {
+      return Result.err(
+        illegal(
+          this.props.status,
+          'beginScheduledRide',
+          'scheduled_driver_accepted → dispatched',
+        ),
+      );
+    }
+    return Ride.fromProps({
+      ...this.props,
+      status: 'dispatched',
+      pickup: this.props.pickup.withDirections(args.pickupDirections),
+      pickupTiming: {
+        ...this.props.pickupTiming,
+        startedAt: args.at,
+      },
+    });
+  }
+
+  /**
    * Driver picks up the rider. Records `pickupTiming.completedAt` +
    * `odometer` + `elapsedSeconds`, marks `dropoffTiming.startedAt`, flips
    * status to `'started'`.
