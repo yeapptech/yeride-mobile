@@ -56,7 +56,12 @@ export default function DriverDispatchScreen({
     );
   }
 
-  return <DriverDispatchInner rideId={rideIdR.value} />;
+  // Key by rideId so a same-screen param change (e.g. a dispatch push while
+  // already on DriverDispatch) remounts the inner component, resetting the
+  // pinned-intent latch + location/route subscriptions to the new ride.
+  return (
+    <DriverDispatchInner key={String(rideIdR.value)} rideId={rideIdR.value} />
+  );
 }
 
 function DriverDispatchInner({ rideId }: { rideId: RideId }) {
@@ -164,14 +169,21 @@ function DispatchPanel({
   }
 
   if (status === 'gone') {
+    // For a begin intent (the driver's own accepted scheduled ride), 'gone'
+    // means it left scheduled_driver_accepted — almost always a rider
+    // cancellation, not another driver. Use accurate copy per action.
+    const goneTitle =
+      action === 'begin' ? 'No longer available' : 'Already taken';
+    const goneBody =
+      action === 'begin'
+        ? 'This scheduled ride is no longer available — it may have been cancelled.'
+        : "Another driver accepted this ride. You're back to the queue.";
     return (
       <View>
         <Text className="mb-2 text-base font-semibold text-foreground">
-          Already taken
+          {goneTitle}
         </Text>
-        <Text className="mb-4 text-sm text-muted-foreground">
-          Another driver accepted this ride. You're back to the queue.
-        </Text>
+        <Text className="mb-4 text-sm text-muted-foreground">{goneBody}</Text>
         <Pressable
           onPress={onDecline}
           accessibilityRole="button"
