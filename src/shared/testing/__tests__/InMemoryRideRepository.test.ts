@@ -915,3 +915,114 @@ describe('InMemoryRideRepository — observeInProgressRidesByDriver', () => {
     unsub();
   });
 });
+
+describe('InMemoryRideRepository — observeScheduledRidesByDriver', () => {
+  function makeAcceptedScheduled(id: string): Ride {
+    const scheduled = unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create(id)),
+        passenger: PASSENGER,
+        rideService: ECONOMY,
+        pickup: unwrap(
+          Endpoint.create({
+            location: MIAMI,
+            address: 'pickup',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        dropoff: unwrap(
+          Endpoint.create({
+            location: FORT_LAUDERDALE,
+            address: 'dropoff',
+            placeName: null,
+            directions: null,
+          }),
+        ),
+        createdAt: new Date('2026-04-27T12:00:00Z'),
+        schedulePickupAt: new Date('2026-04-27T13:00:00Z'),
+      }),
+    );
+    return unwrap(scheduled.acceptSchedule({ driver: DRIVER }));
+  }
+
+  it('delivers the driver-scoped scheduled_driver_accepted rides on subscribe', async () => {
+    const repo = new InMemoryRideRepository();
+    await repo.create(makeAcceptedScheduled('drvSched1234567890ab'));
+    // A pure scheduled ride (no driver) must NOT appear for the driver.
+    await repo.create(
+      unwrap(
+        Ride.createScheduled({
+          id: unwrap(RideId.create('drvSchedPlain12345ab')),
+          passenger: PASSENGER,
+          rideService: ECONOMY,
+          pickup: unwrap(
+            Endpoint.create({
+              location: MIAMI,
+              address: 'pickup',
+              placeName: null,
+              directions: null,
+            }),
+          ),
+          dropoff: unwrap(
+            Endpoint.create({
+              location: FORT_LAUDERDALE,
+              address: 'dropoff',
+              placeName: null,
+              directions: null,
+            }),
+          ),
+          createdAt: new Date('2026-04-27T12:00:00Z'),
+          schedulePickupAt: new Date('2026-04-27T13:00:00Z'),
+        }),
+      ),
+    );
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByDriver({
+      driverId: DRIVER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    const latest = seen[seen.length - 1] ?? [];
+    expect(latest).toHaveLength(1);
+    expect(String(latest[0]?.id)).toBe('drvSched1234567890ab');
+    expect(latest[0]?.status).toBe('scheduled_driver_accepted');
+    unsub();
+  });
+
+  it('re-emits when the driver begins a ride (drops out of the set)', async () => {
+    const repo = new InMemoryRideRepository();
+    const accepted = makeAcceptedScheduled('drvSchedBegin12345ab');
+    await repo.create(accepted);
+
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByDriver({
+      driverId: DRIVER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen[seen.length - 1]).toHaveLength(1);
+
+    await repo.update(
+      unwrap(
+        accepted.beginScheduledRide({
+          pickupDirections: makeRoute(),
+          at: new Date(),
+        }),
+      ),
+    );
+    expect(seen[seen.length - 1]).toEqual([]);
+    unsub();
+  });
+
+  it('stops emitting after unsubscribe', async () => {
+    const repo = new InMemoryRideRepository();
+    const seen: Ride[][] = [];
+    const unsub = repo.observeScheduledRidesByDriver({
+      driverId: DRIVER.id,
+      callback: (rs) => seen.push([...rs]),
+    });
+    unsub();
+    await repo.create(makeAcceptedScheduled('drvSchedAfterUnsub01'));
+    expect(seen).toHaveLength(1); // only the initial empty emit
+  });
+});

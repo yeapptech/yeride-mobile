@@ -449,6 +449,36 @@ export class FirestoreRideRepository implements RideRepository {
     );
   }
 
+  observeScheduledRidesByDriver(args: {
+    driverId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const q = query(
+      collection(this.firestore, TRIPS),
+      where('driver.id', '==', String(args.driverId)),
+      where('status', '==', 'scheduled_driver_accepted'),
+    );
+    return onSnapshot(
+      q,
+      (snap) => {
+        const out: Ride[] = [];
+        snap.forEach((d) => {
+          const r = this.toDomainOrCorrupt(d.id, d.data());
+          if (!r.ok) return;
+          out.push(r.value);
+        });
+        args.callback(out);
+      },
+      (e) => {
+        logger.warn('observeScheduledRidesByDriver error', {
+          driverId: String(args.driverId),
+          code: errCode(e),
+        });
+        args.callback([]);
+      },
+    );
+  }
+
   observeInProgressRidesByPassenger(args: {
     passengerId: UserId;
     callback: (rides: readonly Ride[]) => void;

@@ -163,6 +163,20 @@ export interface RideRepository {
   }): () => void;
 
   /**
+   * Live "driver's accepted scheduled rides" subscription for the driver
+   * Home Scheduled section. Emits the driver's trips in
+   * `'scheduled_driver_accepted'` (a driver never holds a bare
+   * `'scheduled'` ride — those are unaccepted/available). Mutates as the
+   * driver begins one (drops to `'dispatched'`) or the rider cancels.
+   * Synchronous unsubscribe. Ordering NOT specified server-side; callers
+   * sort by `schedulePickupAt asc`.
+   */
+  observeScheduledRidesByDriver(args: {
+    driverId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void;
+
+  /**
    * Live "user's in-progress rides" subscription for the Home In-progress
    * section. Passenger LIVE statuses: awaiting_driver, dispatched, started,
    * payment_requested, payment_failed (scheduled* belong to
