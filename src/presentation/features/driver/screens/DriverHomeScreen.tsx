@@ -21,13 +21,13 @@ import { useDriverHomeViewModel } from '../view-models/useDriverHomeViewModel';
  *                          there's nothing to advertise to.
  *   'ready'              — map renders, online-toggle enabled.
  *
- * The bottom panel renders three different shapes depending on mode:
+ * The bottom panel renders the driver's in-progress rides as a tappable
+ * list (`HomeRideSections`, tap → DriverMonitor) above the mode-dependent
+ * controls:
  *   - 'offline':        toggle button "Go online" + tagline.
  *   - 'online_idle':    toggle button "Go offline" + DriverRideCardStack.
- *   - 'dispatched' / 'on_trip': we never render this screen mid-trip —
- *                       the in-progress redirect in the view-model
- *                       pushes DriverDispatch (Turn 4 swaps to
- *                       DriverMonitor) before this screen renders.
+ * There is no auto-redirect mid-trip — the driver taps the in-progress
+ * row to return to DriverMonitor.
  */
 export default function DriverHomeScreen() {
   const vm = useDriverHomeViewModel();

@@ -15,8 +15,10 @@ import { HomeRideSections } from '@presentation/components/trip/HomeRideSections
 import { useRiderHomeViewModel } from '../view-models/useRiderHomeViewModel';
 
 /**
- * RiderHomeScreen — full-bleed map with a "Where to?" CTA and (when an
- * in-progress ride exists) an auto-resume redirect via the view-model.
+ * RiderHomeScreen — full-bleed map with a "Where to?" CTA and a bounded
+ * scrollable sheet listing the rider's in-progress + scheduled rides
+ * (`HomeRideSections`); tapping a row opens the live monitor. No
+ * auto-resume redirect — the rider chooses when to enter the monitor.
  *
  * Status states (driven by the view-model):
  *
