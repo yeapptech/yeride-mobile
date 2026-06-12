@@ -44,17 +44,19 @@ maestro -e PICKUP="9251 W Sunrise Blvd, Plantation" \
 
 ## Flows
 
-| Flow                              | What it does                                                                |
-| --------------------------------- | --------------------------------------------------------------------------- |
-| `auth/sign-in.yaml`               | Sign in from "Welcome back" (env `EMAIL`/`PASSWORD`).                       |
-| `auth/sign-out.yaml`              | Sign out from a tabbed surface.                                             |
-| `auth/dismiss-soft-asks.yaml`     | Dismiss dev-client launcher + push soft-ask.                                |
-| `_lib/tap-tab.yaml`               | Cross-platform bottom-tab tap (text on Android, point on iOS).              |
-| `driver/walkthrough.yaml`         | Driver tabs + trip detail + vehicles (read-only, screenshots).              |
-| `driver/accept-and-complete.yaml` | Dispatch → accept → arrive → start → **charge** → complete (env `RIDE_ID`). |
-| `rider/walkthrough.yaml`          | Rider tabs Home/Activity/Wallet/Profile (read-only).                        |
-| `rider/book-ride.yaml`            | Book an Economy ride → awaiting-driver (creates a **real** ride).           |
-| `rider/cancel-ride.yaml`          | Cancel the active ride (reason: changed mind).                              |
+| Flow                                | What it does                                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `auth/sign-in.yaml`                 | Sign in from "Welcome back" (env `EMAIL`/`PASSWORD`).                                                     |
+| `auth/sign-out.yaml`                | Sign out from a tabbed surface.                                                                           |
+| `auth/dismiss-soft-asks.yaml`       | Dismiss dev-client launcher + push soft-ask.                                                              |
+| `_lib/tap-tab.yaml`                 | Cross-platform bottom-tab tap (text on Android, point on iOS).                                            |
+| `driver/walkthrough.yaml`           | Driver tabs + trip detail + vehicles (read-only, screenshots).                                            |
+| `driver/accept-and-complete.yaml`   | Dispatch → accept → arrive → start → **charge** → complete (env `RIDE_ID`).                               |
+| `driver/accept-scheduled-ride.yaml` | Accept a scheduled ride → Home Scheduled → **Begin** → DriverMonitor (env `RIDE_ID`; no charge).          |
+| `rider/walkthrough.yaml`            | Rider tabs Home/Activity/Wallet/Profile (read-only).                                                      |
+| `rider/book-ride.yaml`              | Book an Economy ride → awaiting-driver (creates a **real** ride).                                         |
+| `rider/book-scheduled-ride.yaml`    | Book a **scheduled** Economy ride → "Ride Scheduled!" (creates a real `scheduled` ride; env `DAY_LABEL`). |
+| `rider/cancel-ride.yaml`            | Cancel the active ride (reason: changed mind).                                                            |
 
 ## Two-device paired E2E
 
@@ -99,3 +101,15 @@ simulator is the **rider**.
   (tabs are evenly spaced at y≈96% — Home 12%, Activity 37%, Wallet/Earnings
   62%, Profile 87%). So `*/walkthrough.yaml` now run on both platforms. If the
   tab count or order changes, update the point percentages in that helper.
+- The **schedule picker** (`book-scheduled-ride.yaml`) drives the Android
+  **native** date + time dialogs, which have no testIDs. The date dialog is a
+  Material calendar for the current month; each day cell exposes an
+  accessibility label like `"20 June 2026"`, so `tapOn` matches it — pass a
+  future, enabled day via env `DAY_LABEL`. The time dialog is just OK'd (any
+  time clears the 15-min floor once the date is in the future).
+- The driver **available-rides feed** only includes a ride once the driver's
+  offered-services query (active service area → services) has resolved. If a
+  freshly-created scheduled ride doesn't show as a `driver-ride-card-*` right
+  after signing in already-online, toggle **Go offline → Go online** once to
+  re-subscribe with the resolved services. Accepting it then moves it from the
+  available stack into the Home **Scheduled** section (`trip-card-*`).

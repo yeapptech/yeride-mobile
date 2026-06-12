@@ -1,0 +1,71 @@
+appId: app.yeride.dev
+# Rider books a SCHEDULED ride (Plantation -> Sunrise) and lands on the
+# "Ride Scheduled!" confirmation. Creates a REAL `scheduled` ride on stage —
+# capture its id from the Metro log line `RouteSelectVM confirm: ride created
+# {"isScheduled": true, "rideId": "..."}` and feed it to
+# driver/accept-scheduled-ride.yaml.
+#
+# Native picker caveat: the schedule step drives the Android *native* date +
+# time dialogs (Maestro can't address them by testID). The date dialog is a
+# Material calendar for the current month; each day cell exposes an
+# accessibility label like "20 June 2026". Override the future day to pick via
+# env DAY_LABEL (must be an ENABLED day >= 15 min from now). Any time is fine
+# once the date is in the future, so the time dialog is just OK'd.
+#   maestro test -e DAY_LABEL="20 June 2026" rider/book-scheduled-ride.yaml
+---
+- tapOn:
+    text: 'Not now'
+    optional: true
+- tapOn:
+    id: 'rider-home-where-to'
+- tapOn:
+    text: 'Pickup location'
+- inputText: '9251 W Sunrise Blvd, Plantation'
+- waitForAnimationToEnd
+- tapOn: '9251 W Sunrise Blvd, Plantation, FL, USA'
+- waitForAnimationToEnd
+- tapOn:
+    text: 'Dropoff location'
+- inputText: '13550 W Sunrise Blvd, Sunrise'
+- waitForAnimationToEnd
+- tapOn: '13550 W Sunrise Blvd, Sunrise, FL, USA'
+- waitForAnimationToEnd
+- tapOn:
+    id: 'route-search-continue'
+- extendedWaitUntil:
+    visible:
+      id: 'route-select-confirm'
+    timeout: 25000
+# Ride-option list sits below the fold — expand the sheet first.
+- swipe:
+    start: 50%, 75%
+    end: 50%, 25%
+- tapOn:
+    id: 'ride-service-economy'
+- waitForAnimationToEnd
+# Open the schedule picker, then the native date dialog.
+- tapOn:
+    id: 'route-select-schedule-row'
+- assertVisible:
+    id: 'schedule-datetime-picker'
+- tapOn:
+    id: 'schedule-datetime-picker-row'
+- waitForAnimationToEnd
+# Native date dialog: pick a future enabled day, then OK.
+- tapOn: ${DAY_LABEL}
+- tapOn: 'OK'
+- waitForAnimationToEnd
+# Native time dialog: any time is fine (future date clears the 15-min floor).
+- tapOn: 'OK'
+- waitForAnimationToEnd
+# Confirm the picker, then submit — CTA now reads "Schedule ride".
+- tapOn:
+    id: 'schedule-datetime-picker-confirm'
+- waitForAnimationToEnd
+- tapOn:
+    id: 'route-select-confirm'
+- extendedWaitUntil:
+    visible:
+      id: 'ride-scheduled-confirmation'
+    timeout: 25000
+- takeScreenshot: rider-scheduled-confirmation
