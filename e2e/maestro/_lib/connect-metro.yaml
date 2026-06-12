@@ -1,0 +1,13 @@
+appId: app.yeride.dev
+# Cold start helper: connect the Android dev client to Metro by tapping the
+# discovered dev-server entry, then wait for the JS bundle to load. Safe no-op
+# when the app is already past the launcher. Port-agnostic (matches any
+# 10.0.2.2:<port>, so it works whether Metro is on 8081 or a dodged port).
+---
+- tapOn:
+    text: 'http://10.0.2.2'
+    optional: true
+- extendedWaitUntil:
+    notVisible: 'DEVELOPMENT SERVERS'
+    timeout: 120000
+- waitForAnimationToEnd

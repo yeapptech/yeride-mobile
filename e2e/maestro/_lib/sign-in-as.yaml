@@ -1,0 +1,47 @@
+appId: app.yeride.dev
+# Ensure the app is signed in as a specific account, switching if needed:
+# dismiss any launcher/confirmation/soft-ask, sign out of an active session
+# (tab bar present), then sign in. env: EMAIL, PASSWORD
+#
+# The sign-in here is inlined (not auth/sign-in.yaml) on purpose: it hides the
+# keyboard between fields so the password field isn't obscured, and erases each
+# field first, so account-switching is reliable when run back-to-back. (The
+# shared auth/sign-in.yaml can leave the password concatenated into the email
+# field when the keyboard overlaps the password input.)
+---
+- tapOn:
+    text: 'Continue'
+    optional: true
+- tapOn:
+    text: 'Got it'
+    optional: true
+- tapOn:
+    text: 'Not now'
+    optional: true
+- waitForAnimationToEnd
+# If a session is active (a tab bar is showing), sign out first.
+- runFlow:
+    when:
+      visible: 'Profile'
+    commands:
+      - runFlow: ../auth/sign-out.yaml
+# Now on "Welcome back" — sign in with the requested creds.
+- assertVisible: 'Welcome back'
+- tapOn:
+    text: 'you@example.com'
+- eraseText
+- inputText: ${EMAIL}
+- hideKeyboard
+- tapOn:
+    text: 'At least 6 characters'
+- eraseText
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn: 'Sign in'
+- extendedWaitUntil:
+    notVisible: 'Welcome back'
+    timeout: 20000
+- tapOn:
+    text: 'Not now'
+    optional: true
+- waitForAnimationToEnd
