@@ -378,6 +378,68 @@ export class Ride {
   }
 
   /**
+   * Driver accepts a SCHEDULED ride. Sets the driver snapshot and flips
+   * status `scheduled → scheduled_driver_accepted`. Mirrors legacy
+   * `scheduleDriver`: pickup directions + timing are deliberately NOT set
+   * here — those are attached later when the driver begins the ride
+   * (`beginScheduledRide`). No single-active pointer is set; a driver may
+   * hold several accepted scheduled rides (legacy parity).
+   */
+  acceptSchedule(args: {
+    driver: DriverSnapshot;
+  }): Result<Ride, ValidationError> {
+    if (this.props.status !== 'scheduled') {
+      return Result.err(
+        illegal(
+          this.props.status,
+          'acceptSchedule',
+          'scheduled → scheduled_driver_accepted',
+        ),
+      );
+    }
+    return Ride.fromProps({
+      ...this.props,
+      status: 'scheduled_driver_accepted',
+      driver: args.driver,
+    });
+  }
+
+  /**
+   * Driver begins an accepted scheduled ride when the pickup nears.
+   * Attaches the freshly-computed driver→pickup directions, records
+   * `pickupTiming.startedAt`, and flips status
+   * `scheduled_driver_accepted → dispatched` so the ride enters the normal
+   * live-trip flow (the driver snapshot is already set from
+   * `acceptSchedule`). Deliberate divergence from legacy, which drives a
+   * scheduled ride straight to `started`; the rewrite routes through
+   * `dispatched` because the monitor's en-route view and `start()` are
+   * keyed off it.
+   */
+  beginScheduledRide(args: {
+    pickupDirections: Route;
+    at: Date;
+  }): Result<Ride, ValidationError> {
+    if (this.props.status !== 'scheduled_driver_accepted') {
+      return Result.err(
+        illegal(
+          this.props.status,
+          'beginScheduledRide',
+          'scheduled_driver_accepted → dispatched',
+        ),
+      );
+    }
+    return Ride.fromProps({
+      ...this.props,
+      status: 'dispatched',
+      pickup: this.props.pickup.withDirections(args.pickupDirections),
+      pickupTiming: {
+        ...this.props.pickupTiming,
+        startedAt: args.at,
+      },
+    });
+  }
+
+  /**
    * Driver picks up the rider. Records `pickupTiming.completedAt` +
    * `odometer` + `elapsedSeconds`, marks `dropoffTiming.startedAt`, flips
    * status to `'started'`.

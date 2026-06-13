@@ -1,4 +1,8 @@
 import { Coordinates } from '@domain/entities/Coordinates';
+import {
+  DriverSnapshot,
+  VehicleSnapshot,
+} from '@domain/entities/DriverSnapshot';
 import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
 import { Money } from '@domain/entities/Money';
@@ -50,6 +54,33 @@ const ECONOMY = unwrap(
     seatCapacity: 4,
   }),
 );
+
+const DRIVER = unwrap(
+  DriverSnapshot.create({
+    id: unwrap(UserId.create('bbbbbbbbbbbbbbbbbbbbbbbbbbbb')),
+    name: unwrap(PersonName.create({ first: 'Grace', last: 'Hopper' })),
+    email: unwrap(Email.create('grace@yeapp.tech')),
+    phoneNumber: unwrap(PhoneNumber.create('+14155552222')),
+    stripeAccountId: 'acct_abc',
+    pushToken: null,
+    avatarUrl: null,
+    vehicle: unwrap(
+      VehicleSnapshot.create({
+        make: 'Toyota',
+        model: 'Camry',
+        year: 2024,
+        color: 'White',
+        licensePlate: 'ABC1234',
+        stockPhoto: null,
+        photos: [],
+      }),
+    ),
+  }),
+);
+
+function makeAcceptedByDriver(id: string): Ride {
+  return unwrap(makeScheduled(id, 30).acceptSchedule({ driver: DRIVER }));
+}
 
 function makeScheduled(id: string, scheduledMinutesAhead: number): Ride {
   return unwrap(
@@ -118,7 +149,8 @@ describe('ObserveScheduledRides', () => {
     const sut = new ObserveScheduledRides(repo);
     const seen: Ride[][] = [];
     const unsub = sut.execute({
-      passengerId: PASSENGER.id,
+      userId: PASSENGER.id,
+      role: 'rider',
       callback: (rs) => seen.push([...rs]),
     });
     expect(seen).toHaveLength(1);
@@ -135,7 +167,8 @@ describe('ObserveScheduledRides', () => {
     const sut = new ObserveScheduledRides(repo);
     const seen: Ride[][] = [];
     const unsub = sut.execute({
-      passengerId: PASSENGER.id,
+      userId: PASSENGER.id,
+      role: 'rider',
       callback: (rs) => seen.push([...rs]),
     });
     expect(seen[0]).toEqual([]);
@@ -150,11 +183,30 @@ describe('ObserveScheduledRides', () => {
     const sut = new ObserveScheduledRides(repo);
     const seen: Ride[][] = [];
     const unsub = sut.execute({
-      passengerId: PASSENGER.id,
+      userId: PASSENGER.id,
+      role: 'rider',
       callback: (rs) => seen.push([...rs]),
     });
     unsub();
     await repo.create(makeScheduled('EEEEEEEEEEEEEEEEEEEE', 30));
     expect(seen).toHaveLength(1); // Only the initial empty emit.
+  });
+
+  it('delivers the driver-scoped accepted scheduled rides for role=driver', async () => {
+    const repo = new InMemoryRideRepository();
+    await repo.create(makeAcceptedByDriver('FFFFFFFFFFFFFFFFFFFF'));
+    await repo.create(makeScheduled('GGGGGGGGGGGGGGGGGGGG', 60)); // no driver
+
+    const sut = new ObserveScheduledRides(repo);
+    const seen: Ride[][] = [];
+    const unsub = sut.execute({
+      userId: DRIVER.id,
+      role: 'driver',
+      callback: (rs) => seen.push([...rs]),
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toHaveLength(1);
+    expect(seen[0]?.[0]?.status).toBe('scheduled_driver_accepted');
+    unsub();
   });
 });

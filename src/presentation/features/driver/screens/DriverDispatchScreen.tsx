@@ -15,6 +15,7 @@ import type { DriverStackScreenProps } from '@presentation/navigation/types';
 import { useDriverDispatchViewModel } from '../view-models/useDriverDispatchViewModel';
 import type {
   CannotAcceptReason,
+  DispatchAction,
   DriverDispatchStatus,
 } from '../view-models/useDriverDispatchViewModel';
 
@@ -55,7 +56,12 @@ export default function DriverDispatchScreen({
     );
   }
 
-  return <DriverDispatchInner rideId={rideIdR.value} />;
+  // Key by rideId so a same-screen param change (e.g. a dispatch push while
+  // already on DriverDispatch) remounts the inner component, resetting the
+  // pinned-intent latch + location/route subscriptions to the new ride.
+  return (
+    <DriverDispatchInner key={String(rideIdR.value)} rideId={rideIdR.value} />
+  );
 }
 
 function DriverDispatchInner({ rideId }: { rideId: RideId }) {
@@ -118,6 +124,7 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
         <View className="mx-4 mb-4 rounded-2xl bg-card p-4 shadow-lg">
           <DispatchPanel
             status={vm.status}
+            action={vm.action}
             ride={vm.ride}
             cannotAcceptReason={vm.cannotAcceptReason}
             driverLocation={currentLocation.coordinates}
@@ -133,6 +140,7 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
 
 interface DispatchPanelProps {
   readonly status: DriverDispatchStatus;
+  readonly action: DispatchAction | null;
   readonly ride: Ride | null;
   readonly cannotAcceptReason: CannotAcceptReason | null;
   readonly driverLocation: Coordinates | null;
@@ -143,6 +151,7 @@ interface DispatchPanelProps {
 
 function DispatchPanel({
   status,
+  action,
   ride,
   cannotAcceptReason,
   driverLocation,
@@ -160,14 +169,21 @@ function DispatchPanel({
   }
 
   if (status === 'gone') {
+    // For a begin intent (the driver's own accepted scheduled ride), 'gone'
+    // means it left scheduled_driver_accepted — almost always a rider
+    // cancellation, not another driver. Use accurate copy per action.
+    const goneTitle =
+      action === 'begin' ? 'No longer available' : 'Already taken';
+    const goneBody =
+      action === 'begin'
+        ? 'This scheduled ride is no longer available — it may have been cancelled.'
+        : "Another driver accepted this ride. You're back to the queue.";
     return (
       <View>
         <Text className="mb-2 text-base font-semibold text-foreground">
-          Already taken
+          {goneTitle}
         </Text>
-        <Text className="mb-4 text-sm text-muted-foreground">
-          Another driver accepted this ride. You're back to the queue.
-        </Text>
+        <Text className="mb-4 text-sm text-muted-foreground">{goneBody}</Text>
         <Pressable
           onPress={onDecline}
           accessibilityRole="button"
@@ -260,7 +276,7 @@ function DispatchPanel({
           onPress={onAccept}
           disabled={accepting || driverLocation === null}
           accessibilityRole="button"
-          accessibilityLabel="Accept"
+          accessibilityLabel={acceptLabel(action)}
           accessibilityState={{ disabled: accepting }}
           className={`flex-1 items-center rounded-xl px-4 py-4 ${
             accepting ? 'bg-primary/60' : 'bg-primary'
@@ -271,13 +287,24 @@ function DispatchPanel({
             <ActivityIndicator size="small" color="white" />
           ) : (
             <Text className="text-base font-semibold text-primary-foreground">
-              Accept
+              {acceptLabel(action)}
             </Text>
           )}
         </Pressable>
       </View>
     </View>
   );
+}
+
+function acceptLabel(action: DispatchAction | null): string {
+  switch (action) {
+    case 'accept_schedule':
+      return 'Accept scheduled ride';
+    case 'begin':
+      return 'Begin trip';
+    default:
+      return 'Accept';
+  }
 }
 
 function messageForReason(reason: CannotAcceptReason | null): string {

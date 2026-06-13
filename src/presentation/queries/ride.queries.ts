@@ -465,6 +465,91 @@ export function useDispatchRideMutation(): UseMutationResult<
 }
 
 /**
+ * Mutation: accept a scheduled ride as this driver. Wraps
+ * `AcceptScheduledRide` (flips `scheduled → scheduled_driver_accepted`,
+ * stores the driver snapshot). Cache: byId set + both parties' lists
+ * invalidated so the driver's Scheduled section and the rider's Scheduled
+ * card reflect the acceptance immediately.
+ */
+export interface AcceptScheduledRideInput {
+  readonly rideId: RideId;
+  readonly driver: DriverSnapshot;
+}
+
+export function useAcceptScheduledRideMutation(): UseMutationResult<
+  Ride,
+  NotFoundError | AuthorizationError | ValidationError,
+  AcceptScheduledRideInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Ride,
+    NotFoundError | AuthorizationError | ValidationError,
+    AcceptScheduledRideInput
+  >({
+    mutationFn: async (input: AcceptScheduledRideInput): Promise<Ride> => {
+      const r = await useCases.acceptScheduledRide.execute(input);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (ride: Ride) => {
+      queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      if (ride.driver) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.ride.listsForDriver(ride.driver.id),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
+      });
+    },
+  });
+}
+
+/**
+ * Mutation: begin an accepted scheduled ride. Wraps `BeginScheduledRide`
+ * (attaches pickup directions + flips `scheduled_driver_accepted →
+ * dispatched`). Cache: byId set + both parties' lists invalidated so the
+ * ride moves from Scheduled → In-progress on both sides.
+ */
+export interface BeginScheduledRideInput {
+  readonly rideId: RideId;
+  readonly pickupDirections: Route;
+}
+
+export function useBeginScheduledRideMutation(): UseMutationResult<
+  Ride,
+  NotFoundError | AuthorizationError | ValidationError,
+  BeginScheduledRideInput
+> {
+  const useCases = useUseCases();
+  const queryClient = useQueryClient();
+  return useMutation<
+    Ride,
+    NotFoundError | AuthorizationError | ValidationError,
+    BeginScheduledRideInput
+  >({
+    mutationFn: async (input: BeginScheduledRideInput): Promise<Ride> => {
+      const r = await useCases.beginScheduledRide.execute(input);
+      if (!r.ok) throw r.error;
+      return r.value;
+    },
+    onSuccess: (ride: Ride) => {
+      queryClient.setQueryData<Ride>(queryKeys.ride.byId(ride.id), ride);
+      if (ride.driver) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.ride.listsForDriver(ride.driver.id),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ride.listsForPassenger(ride.passenger.id),
+      });
+    },
+  });
+}
+
+/**
  * Mutation: driver picks up the rider. Records pickup-completion odometer
  * and flips server status `dispatched → started`. Direct Firestore write
  * (no Cloud Function — the entity transition is purely local).

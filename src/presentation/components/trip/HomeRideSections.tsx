@@ -11,8 +11,9 @@ import { TripCard } from './TripCard';
  * Home stays clean when there's nothing active (matches legacy
  * `InProgressTrips` / `ScheduledTrips` returning null on empty).
  *
- * The driver passes `scheduledRides={[]}` in Phase 1 (drivers can't accept
- * scheduled rides yet), so the Scheduled section never renders for drivers.
+ * Both roles supply real `scheduledRides`: riders see their pending +
+ * driver-accepted scheduled rides; drivers see scheduled rides they've
+ * accepted. The section renders only when the list is non-empty.
  */
 export interface HomeRideSectionsProps {
   readonly inProgressRides: readonly Ride[];

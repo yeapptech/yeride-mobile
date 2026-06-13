@@ -1,0 +1,52 @@
+appId: app.yeride.dev
+# Drives the driver-accept-scheduled feature (feat/driver-accept-scheduled):
+#   available scheduled ride card → DriverDispatch "Accept scheduled ride"
+#   → Home "Scheduled" section → "Begin trip" → DriverMonitor (en route).
+#
+# Preconditions:
+#   - Signed in as a driver with Stripe Connect + an active vehicle, ONLINE.
+#   - A `scheduled` ride exists in the driver's service area (seed it with
+#     rider/book-scheduled-ride.yaml). Pass its id via env RIDE_ID.
+#   - The available-rides feed only includes the scheduled ride once the
+#     driver's offered-services query has resolved; if the card is missing
+#     right after sign-in, toggle Go offline → Go online once to re-subscribe.
+# This does NOT charge anything (accept + begin only; no completeTrip).
+---
+# --- Accept the available scheduled ride ---
+- tapOn:
+    id: 'driver-ride-card-${RIDE_ID}'
+- extendedWaitUntil:
+    visible:
+      id: 'driver-dispatch-accept'
+    timeout: 20000
+# CTA is status-branched: a `scheduled` ride reads "Accept scheduled ride".
+- assertVisible: 'Accept scheduled ride'
+- takeScreenshot: driver-accept-scheduled-cta
+- tapOn:
+    id: 'driver-dispatch-accept'
+# Accepting pops back to Home; the ride now sits in the Scheduled section.
+- extendedWaitUntil:
+    visible:
+      id: 'trip-card-${RIDE_ID}'
+    timeout: 20000
+- assertVisible:
+    id: 'home-scheduled-section'
+- takeScreenshot: driver-home-scheduled-section
+# --- Begin the accepted scheduled ride ---
+- tapOn:
+    id: 'trip-card-${RIDE_ID}'
+- extendedWaitUntil:
+    visible:
+      id: 'driver-dispatch-accept'
+    timeout: 20000
+# Same screen, now branched to the begin action: CTA reads "Begin trip".
+- assertVisible: 'Begin trip'
+- takeScreenshot: driver-begin-trip-cta
+- tapOn:
+    id: 'driver-dispatch-accept'
+# Begin flips the ride to `dispatched` and replaces into DriverMonitor.
+- extendedWaitUntil:
+    visible:
+      id: 'en-route-arrived'
+    timeout: 25000
+- takeScreenshot: driver-monitor-en-route

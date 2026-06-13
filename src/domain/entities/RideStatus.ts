@@ -12,9 +12,9 @@ import { Result } from '../shared/Result';
  *   - 'scheduled'                 — rider pre-booked for a future time;
  *                                   queryable by drivers; promoted to
  *                                   'scheduled_driver_accepted' on accept.
- *   - 'scheduled_driver_accepted' — driver has committed to the scheduled
- *                                   slot; the trip will auto-promote to
- *                                   'dispatched' near the start time.
+ *   - 'scheduled_driver_accepted' — driver accepted the scheduled slot;
+ *                                   the driver manually begins it
+ *                                   (→ 'dispatched') when the pickup nears.
  *   - 'dispatched'                — driver en route to pickup. Live tracking
  *                                   is on. pickup.startedAt has been written.
  *   - 'started'                   — driver picked up the rider. dropoff.

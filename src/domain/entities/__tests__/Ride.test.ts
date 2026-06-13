@@ -456,3 +456,95 @@ describe('Ride.createScheduled', () => {
     if (!r.ok) expect(r.error.code).toBe('ride_invalid_schedule');
   });
 });
+
+describe('Ride.acceptSchedule', () => {
+  const SCHEDULED_AT = new Date(T0.getTime() + 30 * 60_000);
+
+  function freshScheduled() {
+    return unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create('aBcDeFgHiJkLmNoPqRsT')),
+        passenger: PASSENGER,
+        rideService: RIDE_SERVICE,
+        pickup: PICKUP,
+        dropoff: DROPOFF,
+        createdAt: T0,
+        schedulePickupAt: SCHEDULED_AT,
+      }),
+    );
+  }
+
+  it('flips scheduled → scheduled_driver_accepted and stores the driver', () => {
+    const r = freshScheduled().acceptSchedule({ driver: DRIVER });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.status).toBe('scheduled_driver_accepted');
+      expect(r.value.driver?.stripeAccountId).toBe('acct_abc');
+      // No pickup directions / timing yet — those land at begin time.
+      expect(r.value.pickup.directions).toBeNull();
+      expect(r.value.pickupTiming.startedAt).toBeNull();
+      // schedulePickupAt is preserved.
+      expect(r.value.schedulePickupAt).toEqual(SCHEDULED_AT);
+    }
+  });
+
+  it('rejects acceptSchedule from a non-scheduled status', () => {
+    const r = freshRide().acceptSchedule({ driver: DRIVER });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('ride_illegal_transition');
+  });
+});
+
+describe('Ride.beginScheduledRide', () => {
+  const SCHEDULED_AT = new Date(T0.getTime() + 30 * 60_000);
+
+  function acceptedScheduled() {
+    const scheduled = unwrap(
+      Ride.createScheduled({
+        id: unwrap(RideId.create('aBcDeFgHiJkLmNoPqRsT')),
+        passenger: PASSENGER,
+        rideService: RIDE_SERVICE,
+        pickup: PICKUP,
+        dropoff: DROPOFF,
+        createdAt: T0,
+        schedulePickupAt: SCHEDULED_AT,
+      }),
+    );
+    return unwrap(scheduled.acceptSchedule({ driver: DRIVER }));
+  }
+
+  it('flips scheduled_driver_accepted → dispatched with pickup directions + startedAt', () => {
+    const r = acceptedScheduled().beginScheduledRide({
+      pickupDirections: makeRoute(),
+      at: T_DISPATCH,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.status).toBe('dispatched');
+      expect(r.value.driver?.stripeAccountId).toBe('acct_abc');
+      expect(r.value.pickup.directions?.routeToken).toBe('tk');
+      expect(r.value.pickupTiming.startedAt).toEqual(T_DISPATCH);
+    }
+  });
+
+  it('lets start() run after begin (precondition is dispatched)', () => {
+    const dispatched = unwrap(
+      acceptedScheduled().beginScheduledRide({
+        pickupDirections: makeRoute(),
+        at: T_DISPATCH,
+      }),
+    );
+    const started = dispatched.start({ odometerMeters: 1000, at: T_PICKUP });
+    expect(started.ok).toBe(true);
+    if (started.ok) expect(started.value.status).toBe('started');
+  });
+
+  it('rejects beginScheduledRide from a non-accepted status', () => {
+    const r = freshRide().beginScheduledRide({
+      pickupDirections: makeRoute(),
+      at: T_DISPATCH,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('ride_illegal_transition');
+  });
+});

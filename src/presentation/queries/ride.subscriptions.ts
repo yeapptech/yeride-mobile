@@ -57,27 +57,28 @@ export function useInProgressRidesSubscription(
 }
 
 /**
- * Live list of the rider's scheduled rides, sorted next-soonest-first.
- * Factored out of the Activity VM so the rider Home + Activity tab share
- * one implementation. Wraps `useUseCaseSubscription` (same approach as
- * `useAvailableRidesQuery`).
+ * Live list of the user's scheduled rides (role-parameterized), sorted
+ * next-soonest-first. Factored out of the Activity VM so the rider Home +
+ * Activity tab share one implementation. Wraps `useUseCaseSubscription`
+ * (same approach as `useAvailableRidesQuery`).
  *
  * Rules of Hooks: the hook is always called unconditionally. A
  * `canSubscribe` flag gates the real subscription; when false the
  * inline execute wrapper emits `[]` once and returns a no-op unsubscribe.
  */
 export function useScheduledRidesSubscription(
-  passengerId: UserId | null,
+  userId: UserId | null,
+  role: 'rider' | 'driver',
 ): readonly Ride[] {
   const useCases = useUseCases();
-  const canSubscribe = passengerId !== null;
+  const canSubscribe = userId !== null;
   const rides = useUseCaseSubscription<
     readonly Ride[],
-    { passengerId: UserId }
+    { userId: UserId; role: 'rider' | 'driver' }
   >({
     useCase: {
       execute: (
-        execArgs: { passengerId: UserId } & {
+        execArgs: { userId: UserId; role: 'rider' | 'driver' } & {
           callback: (rides: readonly Ride[]) => void;
         },
       ) => {
@@ -88,11 +89,12 @@ export function useScheduledRidesSubscription(
         return useCases.observeScheduledRides.execute(execArgs);
       },
     },
-    args: { passengerId: passengerId as UserId },
+    args: { userId: userId as UserId, role },
     deps: [
       useCases,
       canSubscribe,
-      passengerId === null ? null : String(passengerId),
+      userId === null ? null : String(userId),
+      role,
     ],
     initialValue: [],
   });

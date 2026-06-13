@@ -86,7 +86,10 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
     user?.id ?? null,
     'rider',
   );
-  const scheduledRides = useScheduledRidesSubscription(user?.id ?? null);
+  const scheduledRides = useScheduledRidesSubscription(
+    user?.id ?? null,
+    'rider',
+  );
 
   // Mirror the resolved active area into the global store so RouteSearch
   // and RouteSelect can read it without re-querying.

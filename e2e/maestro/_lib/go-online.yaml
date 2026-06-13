@@ -1,0 +1,15 @@
+appId: app.yeride.dev
+# Ensure the driver is ONLINE (no-op if already online). Handles the
+# background-location permission dialog if it appears. Run after signing in as
+# a driver and dismissing soft-asks.
+---
+- tapOn:
+    text: 'Go online'
+    optional: true
+- tapOn:
+    text: 'While using the app'
+    optional: true
+- tapOn:
+    text: 'Allow'
+    optional: true
+- waitForAnimationToEnd

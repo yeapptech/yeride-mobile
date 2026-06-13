@@ -50,6 +50,10 @@ export class InMemoryRideRepository implements RideRepository {
     passengerId: string;
     callback: (rides: readonly Ride[]) => void;
   }>();
+  private scheduledDriverObservers = new Set<{
+    driverId: string;
+    callback: (rides: readonly Ride[]) => void;
+  }>();
   private inProgressPassengerObservers = new Set<{
     passengerId: string;
     callback: (rides: readonly Ride[]) => void;
@@ -242,6 +246,21 @@ export class InMemoryRideRepository implements RideRepository {
     args.callback(this.computeScheduled(entry.passengerId));
     return () => {
       this.scheduledObservers.delete(entry);
+    };
+  }
+
+  observeScheduledRidesByDriver(args: {
+    driverId: UserId;
+    callback: (rides: readonly Ride[]) => void;
+  }): () => void {
+    const entry = {
+      driverId: String(args.driverId),
+      callback: args.callback,
+    };
+    this.scheduledDriverObservers.add(entry);
+    args.callback(this.computeScheduledByDriver(entry.driverId));
+    return () => {
+      this.scheduledDriverObservers.delete(entry);
     };
   }
 
@@ -460,6 +479,9 @@ export class InMemoryRideRepository implements RideRepository {
     for (const obs of this.scheduledObservers) {
       obs.callback(this.computeScheduled(obs.passengerId));
     }
+    for (const obs of this.scheduledDriverObservers) {
+      obs.callback(this.computeScheduledByDriver(obs.driverId));
+    }
   }
 
   private computeScheduled(passengerId: string): readonly Ride[] {
@@ -472,6 +494,16 @@ export class InMemoryRideRepository implements RideRepository {
       ) {
         continue;
       }
+      matching.push(r);
+    }
+    return matching;
+  }
+
+  private computeScheduledByDriver(driverId: string): readonly Ride[] {
+    const matching: Ride[] = [];
+    for (const r of this.rides.values()) {
+      if (!r.driver || String(r.driver.id) !== driverId) continue;
+      if (r.status !== 'scheduled_driver_accepted') continue;
       matching.push(r);
     }
     return matching;

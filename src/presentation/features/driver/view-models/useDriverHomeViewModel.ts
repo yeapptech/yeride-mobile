@@ -21,6 +21,7 @@ import {
   useDriverActiveVehicleQuery,
   useInProgressRidesSubscription,
   useRideServicesQuery,
+  useScheduledRidesSubscription,
   useUpdateLocationMutation,
 } from '@presentation/queries';
 import {
@@ -87,6 +88,7 @@ export interface UseDriverHomeViewModel {
   readonly noActiveVehicle: boolean;
   readonly availableRides: readonly Ride[];
   readonly inProgressRides: readonly Ride[];
+  readonly scheduledRides: readonly Ride[];
   readonly permissionStatus: LocationPermission;
   /**
    * Phase 9 turn 10. True when the BACKGROUND-geolocation SDK
@@ -111,6 +113,12 @@ export interface UseDriverHomeViewModel {
   onSelectRide: (rideId: string) => void;
   /** Resume an in-progress ride — pushes DriverMonitor with the rideId. */
   onResumeInProgress: (rideId: string) => void;
+  /**
+   * Tap a Home ride row. Routes an accepted scheduled ride
+   * (`scheduled_driver_accepted`) to DriverDispatch to begin it; any
+   * in-progress ride to DriverMonitor.
+   */
+  onSelectHomeRide: (ride: Ride) => void;
   /** Push the Vehicles screen so the driver can register their first vehicle. */
   onRegisterVehicle: () => void;
   /** Re-request location permission and re-read. */
@@ -147,6 +155,10 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
   const user = userQuery.data ?? null;
   const activeServiceArea = activeAreaQuery.data ?? null;
   const inProgressRides = useInProgressRidesSubscription(
+    user?.id ?? null,
+    'driver',
+  );
+  const scheduledRides = useScheduledRidesSubscription(
     user?.id ?? null,
     'driver',
   );
@@ -251,6 +263,17 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     [navigation],
   );
 
+  const onSelectHomeRide = useCallback(
+    (ride: Ride) => {
+      if (ride.status === 'scheduled_driver_accepted') {
+        navigation.navigate('DriverDispatch', { rideId: String(ride.id) });
+      } else {
+        navigation.navigate('DriverMonitor', { rideId: String(ride.id) });
+      }
+    },
+    [navigation],
+  );
+
   const status = useMemo<DriverHomeStatus>(() => {
     if (currentLocation.permissionStatus === 'denied') {
       return 'permission_denied';
@@ -292,11 +315,13 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     noActiveVehicle,
     availableRides,
     inProgressRides,
+    scheduledRides,
     permissionStatus: currentLocation.permissionStatus,
     bgPermissionDenied,
     onToggleOnline,
     onSelectRide,
     onResumeInProgress,
+    onSelectHomeRide,
     onRegisterVehicle,
     refreshLocation: currentLocation.refresh,
     onOpenSettings,
