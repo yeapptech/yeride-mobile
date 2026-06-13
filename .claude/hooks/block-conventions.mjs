@@ -53,7 +53,11 @@ const isTest =
   fp.includes('jest.setup');
 
 // Rule 1 — console.* outside the logger (tests may spy on console, so exempt them).
-if (!isLogger && !isTest && /\bconsole\.(log|info|warn|error|debug|trace)\s*\(/.test(added)) {
+if (
+  !isLogger &&
+  !isTest &&
+  /\bconsole\.(log|info|warn|error|debug|trace)\s*\(/.test(added)
+) {
   deny(
     "YeRide-Next rule: never console.* outside @shared/logger. Use `LOG.extend('Module')` " +
       'and the right level (LOG.error fans out to Crashlytics; LOG.warn does not). See CLAUDE.md §Logging.',
