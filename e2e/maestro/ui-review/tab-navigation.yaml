@@ -1,0 +1,87 @@
+appId: app.yeride.dev
+# Walks every tab for rider and driver, asserts each screen renders without crashing.
+# Covers: RiderTabsNavigator (Home, Activity, Wallet, Profile) and
+#         DriverTabsNavigator (Home, Activity, Earnings, Profile).
+# Prerequisite: RIDER_EMAIL / RIDER_PASSWORD / DRIVER_EMAIL / DRIVER_PASSWORD env vars.
+---
+# ── Rider tabs ───────────────────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${RIDER_EMAIL}
+      PASSWORD: ${RIDER_PASSWORD}
+- runFlow: ../auth/dismiss-soft-asks.yaml
+- assertVisible:
+    id: rider-home-where-to
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Activity'
+      TAB_POINT: '37%,96%'
+- assertVisible:
+    id: activity-screen
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Wallet'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: wallet-loading-spinner
+    timeout: 10000
+    optional: true
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Profile'
+      TAB_POINT: '87%,96%'
+# Profile tab renders UserProfileScreen — assert vehicles link present
+- assertVisible:
+    id: profile-vehicles-link
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Home'
+      TAB_POINT: '12%,96%'
+- assertVisible:
+    id: rider-home-where-to
+# ── Driver tabs ──────────────────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${DRIVER_EMAIL}
+      PASSWORD: ${DRIVER_PASSWORD}
+- runFlow: ../auth/dismiss-soft-asks.yaml
+- assertVisible:
+    id: driver-home-online-toggle
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Activity'
+      TAB_POINT: '37%,96%'
+- assertVisible:
+    id: driver-activity-screen
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Earnings'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: earnings-loading-spinner
+    timeout: 10000
+    optional: true
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Profile'
+      TAB_POINT: '87%,96%'
+- assertVisible:
+    id: profile-vehicles-link
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Home'
+      TAB_POINT: '12%,96%'
+- assertVisible:
+    id: driver-home-online-toggle
