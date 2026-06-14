@@ -1,0 +1,29 @@
+appId: app.yeride.dev
+# Asserts sticky bottom buttons are visible and not obscured.
+# Covers: AddPaymentMethodScreen (add-pm-save button).
+# Prerequisite: RIDER_EMAIL / RIDER_PASSWORD env vars.
+---
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${RIDER_EMAIL}
+      PASSWORD: ${RIDER_PASSWORD}
+- runFlow: ../auth/dismiss-soft-asks.yaml
+# Navigate to Wallet tab
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Wallet'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: wallet-loading-spinner
+    timeout: 10000
+    optional: true
+# Tap "Add card" — text is present in both empty-state and ready-state
+- tapOn: 'Add card'
+- waitForAnimationToEnd
+# AddPaymentMethod: assert the Save button is visible (not off-screen or behind home indicator)
+- assertVisible:
+    id: add-pm-save
+- back
