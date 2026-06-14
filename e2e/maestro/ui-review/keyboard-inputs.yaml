@@ -1,0 +1,30 @@
+appId: app.yeride.dev
+# Verifies text inputs remain visible and tappable after the keyboard opens.
+# Covers: RouteSearchScreen (pickup-input, dropoff-input).
+# Prerequisite: RIDER_EMAIL / RIDER_PASSWORD env vars.
+---
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${RIDER_EMAIL}
+      PASSWORD: ${RIDER_PASSWORD}
+- runFlow: ../auth/dismiss-soft-asks.yaml
+# Navigate to RouteSearch
+- tapOn:
+    id: rider-home-where-to
+- waitForAnimationToEnd
+# Pickup input: tap → assert still visible (not behind keyboard) → dismiss
+- tapOn:
+    id: pickup-input
+- waitForAnimationToEnd
+- assertVisible:
+    id: pickup-input
+- hideKeyboard
+# Dropoff input: tap → assert still visible → dismiss
+- tapOn:
+    id: dropoff-input
+- waitForAnimationToEnd
+- assertVisible:
+    id: dropoff-input
+- hideKeyboard
+- back
