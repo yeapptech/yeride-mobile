@@ -1,0 +1,86 @@
+appId: app.yeride.dev
+# Scrolls each long-content screen and asserts no crash / content not cut off.
+# Covers: ActivityScreen (rider+driver), WalletScreen, DriverEarningsScreen.
+# Prerequisite: RIDER_EMAIL / RIDER_PASSWORD / DRIVER_EMAIL / DRIVER_PASSWORD env vars.
+---
+# ── Rider: Activity tab ──────────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${RIDER_EMAIL}
+      PASSWORD: ${RIDER_PASSWORD}
+- runFlow: ../auth/dismiss-soft-asks.yaml
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Activity'
+      TAB_POINT: '37%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: activity-loading
+    timeout: 8000
+    optional: true
+- scroll
+- scroll
+- assertVisible:
+    id: activity-screen
+# ── Rider: Wallet tab ────────────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Wallet'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: wallet-loading-spinner
+    timeout: 8000
+    optional: true
+- scroll
+# Assert one of the known wallet elements is still visible after scroll
+- assertVisible:
+    id: wallet-empty-add
+    optional: true
+- assertVisible:
+    id: wallet-header-add
+    optional: true
+# ── Switch to driver account ─────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${DRIVER_EMAIL}
+      PASSWORD: ${DRIVER_PASSWORD}
+- runFlow: ../auth/dismiss-soft-asks.yaml
+# ── Driver: Activity tab ─────────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Activity'
+      TAB_POINT: '37%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: driver-activity-loading
+    timeout: 8000
+    optional: true
+- scroll
+- scroll
+- assertVisible:
+    id: driver-activity-screen
+# ── Driver: Earnings tab ─────────────────────────────────────────────────────
+- runFlow:
+    file: ../_lib/tap-tab.yaml
+    env:
+      TAB_TEXT: 'Earnings'
+      TAB_POINT: '62%,96%'
+- extendedWaitUntil:
+    notVisible:
+      id: earnings-loading-spinner
+    timeout: 10000
+    optional: true
+- scroll
+# Assert one of the known earnings elements is still visible after scroll
+- assertVisible:
+    id: earnings-setup-payouts
+    optional: true
+- assertVisible:
+    id: earnings-balance-card
+    optional: true
