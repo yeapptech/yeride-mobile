@@ -36,13 +36,15 @@ appId: app.yeride.dev
     timeout: 8000
     optional: true
 - scroll
-# Assert one of the known wallet elements is still visible after scroll
-- assertVisible:
-    id: wallet-empty-add
-    optional: true
-- assertVisible:
-    id: wallet-header-add
-    optional: true
+# Verify wallet rendered successfully: header-add (ready) or empty-add (no cards).
+# runFlow-when acts as OR: if header-add absent, assert empty-add (which must be there).
+- runFlow:
+    when:
+      notVisible:
+        id: wallet-header-add
+    commands:
+      - assertVisible:
+          id: wallet-empty-add
 # ── Switch to driver account ─────────────────────────────────────────────────
 - runFlow:
     file: ../_lib/sign-in-as.yaml
@@ -77,10 +79,16 @@ appId: app.yeride.dev
     timeout: 10000
     optional: true
 - scroll
-# Assert one of the known earnings elements is still visible after scroll
-- assertVisible:
-    id: earnings-setup-payouts
-    optional: true
-- assertVisible:
-    id: earnings-balance-card
-    optional: true
+# Verify earnings rendered: balance-card (enabled), continue-setup (pending), or setup-payouts (no_account).
+- runFlow:
+    when:
+      notVisible:
+        id: earnings-balance-card
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: earnings-continue-setup
+          commands:
+            - assertVisible:
+                id: earnings-setup-payouts

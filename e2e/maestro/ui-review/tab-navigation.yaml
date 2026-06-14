@@ -31,6 +31,13 @@ appId: app.yeride.dev
     timeout: 10000
     optional: true
 - runFlow:
+    when:
+      notVisible:
+        id: wallet-header-add
+    commands:
+      - assertVisible:
+          id: wallet-empty-add
+- runFlow:
     file: ../_lib/tap-tab.yaml
     env:
       TAB_TEXT: 'Profile'
@@ -71,6 +78,18 @@ appId: app.yeride.dev
       id: earnings-loading-spinner
     timeout: 10000
     optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: earnings-balance-card
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: earnings-continue-setup
+          commands:
+            - assertVisible:
+                id: earnings-setup-payouts
 - runFlow:
     file: ../_lib/tap-tab.yaml
     env:

@@ -213,7 +213,7 @@ If output is "MISSING", return { skipped: true, flows: [], skipReason: "Maestro 
 STEP 3 — Run each flow in sequence:
 export PATH="$PATH:$HOME/.maestro/bin"
 
-${allFlows.map((f) => `maestro test ${f}`).join('\n')}
+${allFlows.map((f) => `maestro test --env RIDER_EMAIL=$RIDER_EMAIL --env RIDER_PASSWORD=$RIDER_PASSWORD --env DRIVER_EMAIL=$DRIVER_EMAIL --env DRIVER_PASSWORD=$DRIVER_PASSWORD ${f}`).join('\n')}
 
 Credentials (RIDER_EMAIL, RIDER_PASSWORD, DRIVER_EMAIL, DRIVER_PASSWORD) must already be set in the calling environment.
 
@@ -310,7 +310,7 @@ appId: app.yeride.dev
 # Fix: <fix>
 # TODO: add the specific tap/scroll/assert sequence to reproduce the issue
 ---
-- runFlow: ../../_lib/sign-in-as.yaml
+- runFlow: ../_lib/sign-in-as.yaml
   env:
     EMAIL: \${RIDER_EMAIL}
     PASSWORD: \${RIDER_PASSWORD}
