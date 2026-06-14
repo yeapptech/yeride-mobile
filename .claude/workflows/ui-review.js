@@ -116,6 +116,7 @@ const staticResults = await parallel(
       agent(
         `Audit these React Native screen files for UI issues on ${platform}.
 
+Group: ${g.group}
 Read each file:
 ${g.files.join('\n')}
 
@@ -240,6 +241,12 @@ const criticalReproducible = allFindings.filter(
   (f) => f.severity === 'critical' && f.reproducible,
 );
 
+const maestroSummary = !maestroResults
+  ? 'ERROR: Maestro agent returned no result'
+  : maestroResults.skipped
+    ? 'SKIPPED: ' + (maestroResults.skipReason ?? 'unknown reason')
+    : JSON.stringify(maestroResults.flows ?? [], null, 2);
+
 await agent(
   `Write a UI audit report and Maestro regression stubs.
 
@@ -248,11 +255,7 @@ Findings (${allFindings.length} total — ${criticalCount} critical, ${warningCo
 ${JSON.stringify(allFindings, null, 2)}
 
 Maestro results:
-${
-  maestroResults?.skipped
-    ? 'SKIPPED: ' + (maestroResults.skipReason ?? 'unknown reason')
-    : JSON.stringify(maestroResults?.flows ?? [], null, 2)
-}
+${maestroSummary}
 
 Critical + reproducible findings (need regression stubs — ${criticalReproducible.length} total):
 ${JSON.stringify(criticalReproducible, null, 2)}
