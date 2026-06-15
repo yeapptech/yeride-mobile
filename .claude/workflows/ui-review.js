@@ -215,16 +215,18 @@ STEP 2 — Check Maestro CLI:
 Run: ls ~/.maestro/bin/maestro 2>/dev/null || echo MISSING
 If output is "MISSING", return { skipped: true, flows: [], skipReason: "Maestro CLI not found at ~/.maestro/bin/maestro" }.
 
-STEP 3 — Get the device ID to target explicitly (prevents Maestro defaulting to a connected Android when iOS is requested):
-Run: ${deviceIdCmd}
-Save the output as DEVICE_ID. If empty, skip --device flag.
+STEP 3 — Load credentials from e2e/.env.e2e:
+Run: cat e2e/.env.e2e
+Parse the output and extract the literal values of RIDER_EMAIL, RIDER_PASSWORD, DRIVER_EMAIL, DRIVER_PASSWORD (trim leading/trailing whitespace from each value).
 
-STEP 4 — Run each flow in sequence:
+STEP 4 — Run all flows in a SINGLE bash command so the device ID and credentials stay in scope.
+Substitute the LITERAL credential values you read in STEP 3 directly into the command (do NOT use $RIDER_EMAIL shell variable references — the shell won't have them set):
+
 export PATH="$PATH:$HOME/.maestro/bin"
+DEVICE_ID=$(${deviceIdCmd}) && \\
+${allFlows.map((f) => `maestro --device "$DEVICE_ID" test --env RIDER_EMAIL="<rider-email>" --env RIDER_PASSWORD="<rider-password>" --env DRIVER_EMAIL="<driver-email>" --env DRIVER_PASSWORD="<driver-password>" ${f}`).join(' ; \\\n')}
 
-${allFlows.map((f) => `maestro --device $DEVICE_ID test --env RIDER_EMAIL=$RIDER_EMAIL --env RIDER_PASSWORD=$RIDER_PASSWORD --env DRIVER_EMAIL=$DRIVER_EMAIL --env DRIVER_PASSWORD=$DRIVER_PASSWORD ${f}`).join('\n')}
-
-Credentials (RIDER_EMAIL, RIDER_PASSWORD, DRIVER_EMAIL, DRIVER_PASSWORD) must already be set in the calling environment.
+Replace <rider-email>, <rider-password>, <driver-email>, <driver-password> with the actual values from e2e/.env.e2e before running. Run all flows in one shell invocation using the chain above (use ; not && between flows so a failing flow does not abort the remaining ones).
 
 STEP 5 — For each flow, record:
   name: basename of the flow path (e.g. "keyboard-inputs.yaml")
