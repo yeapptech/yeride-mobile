@@ -130,10 +130,11 @@ Regression stubs live one level below `e2e/maestro/`. The `_lib/` helper is at `
 
 ## Common Mistakes
 
-| Mistake                                                       | Symptom                                         | Fix                                                   |
-| ------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------- |
-| Missing `--env` flags on `maestro test`                       | Sign-in fails, `${RIDER_EMAIL}` literal in logs | Add all four `--env` flags to every invocation        |
-| Double `optional: true` content asserts                       | Flow always passes even after crashes           | Use `runFlow-when` OR pattern                         |
-| `optional: true` on content after `optional: true` on spinner | Content assertion skipped silently              | Only `optional: true` on the spinner wait             |
-| `../../_lib/` from regression stub                            | `runFlow` file not found error                  | Use `../_lib/`                                        |
-| `tapOn: text` for tab bar on iOS                              | Tap silently misses on iOS                      | Use `_lib/tap-tab.yaml` with `TAB_TEXT` + `TAB_POINT` |
+| Mistake                                                       | Symptom                                                         | Fix                                                                                            |
+| ------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Missing `--env` flags on `maestro test`                       | Sign-in fails, `${RIDER_EMAIL}` literal in logs                 | Add all four `--env` flags to every invocation                                                 |
+| Double `optional: true` content asserts                       | Flow always passes even after crashes                           | Use `runFlow-when` OR pattern                                                                  |
+| `optional: true` on content after `optional: true` on spinner | Content assertion skipped silently                              | Only `optional: true` on the spinner wait                                                      |
+| `../../_lib/` from regression stub                            | `runFlow` file not found error                                  | Use `../_lib/`                                                                                 |
+| `tapOn: text` for tab bar on iOS                              | Tap silently misses on iOS                                      | Use `_lib/tap-tab.yaml` with `TAB_TEXT` + `TAB_POINT`                                          |
+| `when: visible: 'Profile'` to detect signed-in session on iOS | Condition always false — iOS tab labels are not accessible text | Use `when: visible: id: rider-home-where-to` or `when: visible: id: driver-home-online-toggle` |

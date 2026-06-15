@@ -19,10 +19,19 @@ appId: app.yeride.dev
     text: 'Not now'
     optional: true
 - waitForAnimationToEnd
-# If a session is active (a tab bar is showing), sign out first.
+# If a rider session is active, sign out first.
+# NOTE: tab bar text labels are not accessible on iOS — use testIDs instead.
 - runFlow:
     when:
-      visible: 'Profile'
+      visible:
+        id: rider-home-where-to
+    commands:
+      - runFlow: ../auth/sign-out.yaml
+# If a driver session is active, sign out first.
+- runFlow:
+    when:
+      visible:
+        id: driver-home-online-toggle
     commands:
       - runFlow: ../auth/sign-out.yaml
 # Now on "Welcome back" — sign in with the requested creds.
