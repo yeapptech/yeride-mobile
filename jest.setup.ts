@@ -838,6 +838,15 @@ jest.mock('expo-file-system', () => {
   };
 });
 
+// react-native-safe-area-context: override useSafeAreaInsets so it returns
+// zero insets instead of throwing "No safe area value available" when tests
+// render a screen that calls useSafeAreaInsets() outside a SafeAreaProvider.
+// SafeAreaView and everything else come from the real module unchanged.
+jest.mock('react-native-safe-area-context', () => ({
+  ...jest.requireActual('react-native-safe-area-context'),
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+
 // react-native-gifted-chat (Phase 10 turn 8): manual mock lives at
 // `<rootDir>/__mocks__/react-native-gifted-chat.tsx`. Jest auto-resolves
 // it. Same babel / NativeWind hoisting reason as the react-native-maps

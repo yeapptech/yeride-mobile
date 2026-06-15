@@ -1,4 +1,10 @@
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  useColorScheme,
+} from 'react-native';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import type {
   GooglePlaceData,
@@ -32,6 +38,9 @@ import {
  */
 export default function RouteSearchScreen() {
   const vm = useRouteSearchViewModel();
+  const isDark = useColorScheme() === 'dark';
+  const { styles: acStyles, placeholderTextColor } =
+    buildAutocompleteStyles(isDark);
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={['top']}>
@@ -72,10 +81,10 @@ export default function RouteSearchScreen() {
             query={vm.autocompleteQuery}
             textInputProps={{
               testID: 'pickup-input',
-              placeholderTextColor: '#9ca3af',
+              placeholderTextColor,
               defaultValue: vm.pickup?.placeName ?? vm.pickup?.address ?? '',
             }}
-            styles={autocompleteStyles}
+            styles={acStyles}
             listEmptyComponent={renderEmptyAutocomplete}
           />
         </View>
@@ -95,37 +104,39 @@ export default function RouteSearchScreen() {
             query={vm.autocompleteQuery}
             textInputProps={{
               testID: 'dropoff-input',
-              placeholderTextColor: '#9ca3af',
+              placeholderTextColor,
               defaultValue: vm.dropoff?.placeName ?? vm.dropoff?.address ?? '',
             }}
-            styles={autocompleteStyles}
+            styles={acStyles}
             listEmptyComponent={renderEmptyAutocomplete}
           />
         </View>
       </ScrollView>
 
-      <View className="border-t border-border px-4 py-3">
-        <Pressable
-          onPress={vm.goToRouteSelect}
-          disabled={!vm.canContinue}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !vm.canContinue }}
-          className={`items-center rounded-xl px-4 py-3 ${
-            vm.canContinue ? 'bg-primary' : 'bg-muted'
-          }`}
-          testID="route-search-continue"
-        >
-          <Text
-            className={`text-base font-semibold ${
-              vm.canContinue
-                ? 'text-primary-foreground'
-                : 'text-muted-foreground'
+      <SafeAreaView edges={['bottom']}>
+        <View className="border-t border-border px-4 py-3">
+          <Pressable
+            onPress={vm.goToRouteSelect}
+            disabled={!vm.canContinue}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !vm.canContinue }}
+            className={`items-center rounded-xl px-4 py-3 ${
+              vm.canContinue ? 'bg-primary' : 'bg-muted'
             }`}
+            testID="route-search-continue"
           >
-            Continue
-          </Text>
-        </Pressable>
-      </View>
+            <Text
+              className={`text-base font-semibold ${
+                vm.canContinue
+                  ? 'text-primary-foreground'
+                  : 'text-muted-foreground'
+              }`}
+            >
+              Continue
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
     </SafeAreaView>
   );
 }
@@ -191,37 +202,55 @@ function renderEmptyAutocomplete() {
 }
 
 /**
- * Minimal style overrides for the autocomplete widget. The widget's
- * default styles use platform fonts and colours that clash with our
- * design tokens; we map the most visible fields. Tailwind classes don't
- * reach into the widget, so this is plain RN style.
+ * Minimal style overrides for the autocomplete widget. Tailwind classes
+ * don't reach into the widget, so this is plain RN style. Computed at
+ * render time so values respond to the system color scheme.
+ *
+ * Token mapping (from tailwind.config.js):
+ *   border.DEFAULT / border.dark    → #e5e5e5 / #404040
+ *   card.DEFAULT   / card.dark      → #ffffff / #1f1f1f
+ *   muted.foreground / muted.dark-foreground → #737373 / #a3a3a3
  */
-const autocompleteStyles = {
-  textInputContainer: {
-    backgroundColor: 'transparent',
-  },
-  textInput: {
-    height: 44,
-    fontSize: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e5e5', // --border
-    paddingHorizontal: 12,
-    backgroundColor: 'white',
-  },
-  listView: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-    marginTop: 4,
-    maxHeight: 240,
-  },
-  row: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-  },
-  description: {
-    fontSize: 14,
-  },
-};
+function buildAutocompleteStyles(isDark: boolean): {
+  styles: object;
+  placeholderTextColor: string;
+} {
+  const border = isDark ? '#404040' : '#e5e5e5';
+  const card = isDark ? '#1f1f1f' : '#ffffff';
+  const fg = isDark ? '#ffffff' : '#000000';
+  const placeholderTextColor = isDark ? '#a3a3a3' : '#737373';
+  return {
+    placeholderTextColor,
+    styles: {
+      textInputContainer: {
+        backgroundColor: 'transparent',
+      },
+      textInput: {
+        height: 44,
+        fontSize: 16,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: border,
+        paddingHorizontal: 12,
+        backgroundColor: card,
+        color: fg,
+      },
+      listView: {
+        backgroundColor: card,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: border,
+        marginTop: 4,
+        maxHeight: 240,
+      },
+      row: {
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+      },
+      description: {
+        fontSize: 14,
+        color: fg,
+      },
+    },
+  };
+}

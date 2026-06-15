@@ -5,7 +5,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
 import type { DriverStackScreenProps } from '@presentation/navigation/types';
 
@@ -29,11 +32,12 @@ export default function VehiclePhotosScreen(
   props: DriverStackScreenProps<'VehiclePhotos'>,
 ) {
   const vm = useVehiclePhotosViewModel({ vin: props.route.params.vin });
+  const { bottom } = useSafeAreaInsets();
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={['top']}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingBottom: 24 + bottom }}
         keyboardShouldPersistTaps="handled"
       >
         <View className="px-4 pt-2 pb-3">

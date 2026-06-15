@@ -1,0 +1,11 @@
+appId: app.yeride.dev
+# Regression: Continue CTA covered by keyboard on small screens on RouteSearchScreen
+# Category: keyboard
+# Fix: Wrap the full screen content in a `KeyboardAvoidingView behavior="padding"` (correct for iOS). The bottom CTA View should be inside it so it shifts up with the keyboard.
+# TODO: add the specific tap/scroll/assert sequence to reproduce the issue
+---
+- runFlow: ../_lib/sign-in-as.yaml
+  env:
+    EMAIL: ${RIDER_EMAIL}
+    PASSWORD: ${RIDER_PASSWORD}
+# TODO: navigate to RouteSearchScreen and reproduce: The Continue button lives in a fixed plain <View className="border-t border-border px-4 py-3"> outside the ScrollView. There is no KeyboardAvoidingView. When either GooglePlacesAutocomplete input is focused and the software keyboard appears (~300 pt), the button is pushed behind the keyboard on iPhone SE (375x667 pt) and is untappable.

@@ -1,0 +1,11 @@
+appId: app.yeride.dev
+# Regression: Bottom 'Continue' button has no safe-area bottom inset on RouteSearchScreen
+# Category: safe-area
+# Fix: Change the outer SafeAreaView to edges={['top', 'bottom']} or wrap the bottom View in a SafeAreaView with edges={['bottom']}.
+# TODO: add the specific tap/scroll/assert sequence to reproduce the issue
+---
+- runFlow: ../_lib/sign-in-as.yaml
+  env:
+    EMAIL: ${RIDER_EMAIL}
+    PASSWORD: ${RIDER_PASSWORD}
+# TODO: navigate to RouteSearchScreen and reproduce: The outer SafeAreaView at line 37 uses edges={['top']} only. The 'Continue' Pressable sits in a plain View (line 107) at the bottom of the screen with no bottom inset, so it will be partially hidden behind the home indicator on iPhone X and later.

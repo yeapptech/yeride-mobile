@@ -1,14 +1,11 @@
 import { NavigationView } from '@googlemaps/react-native-navigation-sdk';
 import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  Text,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
 import { Coordinates } from '@domain/entities/Coordinates';
 import type {
@@ -96,6 +93,7 @@ function DriverNavigationContent({
 }: DriverNavigationContentProps) {
   const reactNavigation = useNavigation<DriverStackNavigation>();
   const [mapReady, setMapReady] = useState(false);
+  const { bottom: safeBottom } = useSafeAreaInsets();
 
   // Connector is mounted at the parent (DriverMonitor) level, not
   // here. See screen JSDoc for the rationale.
@@ -161,7 +159,7 @@ function DriverNavigationContent({
       {vm.state.kind !== 'arrived' && (
         <View
           className="absolute bottom-0 left-0 right-0 px-4"
-          style={{ paddingBottom: Platform.OS === 'ios' ? 28 : 16 }}
+          style={{ paddingBottom: safeBottom || 16 }}
           pointerEvents="box-none"
         >
           <Pressable

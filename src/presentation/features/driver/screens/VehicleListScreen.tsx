@@ -5,7 +5,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
 import type { Vehicle } from '@domain/entities/Vehicle';
 
@@ -25,6 +28,7 @@ import { useVehicleListViewModel } from '../view-models/useVehicleListViewModel'
  */
 export default function VehicleListScreen() {
   const vm = useVehicleListViewModel();
+  const { bottom } = useSafeAreaInsets();
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={['top']}>
@@ -76,7 +80,7 @@ export default function VehicleListScreen() {
           testID="vehicle-list"
           data={vm.state.vehicles}
           keyExtractor={(v: Vehicle) => String(v.vin)}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 16 + bottom }}
           renderItem={({ item }) => (
             <DriverVehicleCard
               vehicle={item}

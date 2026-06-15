@@ -6,7 +6,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
 import type { Vehicle } from '@domain/entities/Vehicle';
 import {
@@ -44,6 +47,7 @@ export default function VehicleDetailsScreen(
   props: DriverStackScreenProps<'VehicleDetails'>,
 ) {
   const vm = useVehicleDetailsViewModel({ vin: props.route.params.vin });
+  const { bottom } = useSafeAreaInsets();
 
   if (vm.state.kind === 'loading') {
     return (
@@ -72,7 +76,7 @@ export default function VehicleDetailsScreen(
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 + bottom }}>
         {/* Hero image + active badge */}
         <View className="h-48 bg-muted">
           {heroUri !== null && (

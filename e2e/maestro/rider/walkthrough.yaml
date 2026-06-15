@@ -1,9 +1,18 @@
 appId: app.yeride.dev
-# Rider static-surface sweep: every tab. Assumes already signed in as a rider with
-# NO active ride. Read-only (no Save / Delete / card removal).
+# Rider static-surface sweep: every tab. Signs in as RIDER_EMAIL / RIDER_PASSWORD.
+# No active ride. Read-only (no Save / Delete / card removal).
 # Tab taps go through ../_lib/tap-tab.yaml so this runs on Android AND iOS.
 ---
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${RIDER_EMAIL}
+      PASSWORD: ${RIDER_PASSWORD}
 - runFlow: ../auth/dismiss-soft-asks.yaml
+- extendedWaitUntil:
+    visible:
+      id: 'rider-home-where-to'
+    timeout: 15000
 - assertVisible:
     id: 'rider-home-where-to'
 - takeScreenshot: rider-home

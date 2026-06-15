@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
 import type { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
@@ -88,6 +91,7 @@ export default function TripDetailScreen({ route }: Props) {
 function TripDetailScreenBody({ rideId }: { rideId: RideId }) {
   const vm = useTripDetailViewModel({ rideId });
   const currentUserId = useCurrentUserId();
+  const { bottom } = useSafeAreaInsets();
 
   if (vm.status === 'loading') {
     return (
@@ -164,7 +168,9 @@ function TripDetailScreenBody({ rideId }: { rideId: RideId }) {
       className="flex-1 bg-background"
       testID="trip-detail-screen"
     >
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: 16 + bottom }}
+      >
         <Section title={partyHeader(ride, viewerRole)}>
           <DetailRow label="Status" value={statusLabel(ride.status)} />
           <DetailRow label="When" value={formatTimestamp(ride.createdAt)} />

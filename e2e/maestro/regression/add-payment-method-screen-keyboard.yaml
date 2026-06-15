@@ -1,0 +1,11 @@
+appId: app.yeride.dev
+# Regression: CardForm with no KeyboardAvoidingView — keyboard covers the Save button on small screens on AddPaymentMethodScreen
+# Category: keyboard
+# Fix: Wrap the root SafeAreaView content in a <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}> (iOS-correct behavior). Alternatively, place the CardForm and error banner inside a ScrollView with keyboardShouldPersistTaps="handled" so the rider can scroll to the Save button while the keyboard is up.
+# TODO: add the specific tap/scroll/assert sequence to reproduce the issue
+---
+- runFlow: ../_lib/sign-in-as.yaml
+  env:
+    EMAIL: ${RIDER_EMAIL}
+    PASSWORD: ${RIDER_PASSWORD}
+# TODO: navigate to AddPaymentMethodScreen and reproduce: AddPaymentMethodScreen renders Stripe's <CardForm> (height: 280) followed by an optional error banner, then a Save button pinned at the bottom via <View className="px-6 pb-4">. There is no KeyboardAvoidingView wrapping the layout. On iPhone SE (375x667pt) the numeric/card keyboard is approximately 260pt tall. The card form + subtitle text already consume ~330pt, leaving ~337pt below the notch. When the keyboard appears, the Save CTA and the error banner are pushed off-screen with no scrollable escape, making the button unreachable without dismissing the keyboard first.

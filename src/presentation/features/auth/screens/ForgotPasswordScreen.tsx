@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   View,
 } from 'react-native';
@@ -24,10 +25,13 @@ export function ForgotPasswordScreen(
   return (
     <SafeAreaView className="flex-1 bg-background">
       <KeyboardAvoidingView
-        className="flex-1 px-6"
+        className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View className="flex-1 justify-center">
+        <ScrollView
+          contentContainerClassName="flex-grow justify-center px-6"
+          keyboardShouldPersistTaps="handled"
+        >
           <Text className="text-3xl font-bold text-foreground mb-2">
             Reset password
           </Text>
@@ -92,7 +96,7 @@ export function ForgotPasswordScreen(
               </Pressable>
             </>
           )}
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

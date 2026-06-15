@@ -7,6 +7,8 @@ coverage/
 *.lock
 package-lock.json
 yarn.lock
+.claude/
+docs/ui-audit/
 
 # Phase kickoff prompts: ephemeral session-starting prompts. Don't
 # reformat them — the original prompt layout is part of the artifact.

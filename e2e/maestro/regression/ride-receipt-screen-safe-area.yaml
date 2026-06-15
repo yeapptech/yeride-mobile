@@ -1,0 +1,11 @@
+appId: app.yeride.dev
+# Regression: Bottom sticky panel (Done / Share receipt) has no safe-area bottom inset on RideReceiptScreen
+# Category: safe-area
+# Fix: Add 'bottom' to the SafeAreaView edges, or wrap the bottom panel View in a SafeAreaView with edges={['bottom']}.
+# TODO: add the specific tap/scroll/assert sequence to reproduce the issue
+---
+- runFlow: ../_lib/sign-in-as.yaml
+  env:
+    EMAIL: ${RIDER_EMAIL}
+    PASSWORD: ${RIDER_PASSWORD}
+# TODO: navigate to RideReceiptScreen and reproduce: LoadedReceipt's SafeAreaView at line 180 uses edges={['top']} only. The fixed bottom panel containing the Share receipt CTA and the Done Pressable (lines 267–291) has only py-3 padding — no inset for the home indicator. On iPhone X+ the buttons are clipped.

@@ -33,6 +33,7 @@ export default function RideScheduledConfirmationScreen({
 
   return (
     <SafeAreaView
+      edges={['top', 'bottom']}
       className="flex-1 bg-background"
       testID="ride-scheduled-confirmation"
     >

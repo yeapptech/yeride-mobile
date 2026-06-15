@@ -1,8 +1,13 @@
 appId: app.yeride.dev
 # Driver static-surface sweep: every tab + nested read-only screens, with screenshots.
-# Assumes already signed in as a driver. Does NOT mutate data (no Save / Delete / Submit).
+# Signs in as DRIVER_EMAIL / DRIVER_PASSWORD. Does NOT mutate data (no Save / Delete / Submit).
 # Tab taps go through ../_lib/tap-tab.yaml so this runs on Android AND iOS.
 ---
+- runFlow:
+    file: ../_lib/sign-in-as.yaml
+    env:
+      EMAIL: ${DRIVER_EMAIL}
+      PASSWORD: ${DRIVER_PASSWORD}
 - runFlow: ../auth/dismiss-soft-asks.yaml
 - assertVisible:
     id: 'driver-home-online-toggle'
@@ -40,7 +45,8 @@ appId: app.yeride.dev
       TAB_TEXT: 'Profile'
       TAB_POINT: '87%,96%'
 - takeScreenshot: driver-profile
-- tapOn: 'My vehicles'
+- tapOn:
+    id: 'profile-vehicles-link'
 - assertVisible:
     id: 'vehicle-list'
 - takeScreenshot: driver-vehicle-list
