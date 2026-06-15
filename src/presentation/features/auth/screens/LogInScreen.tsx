@@ -49,6 +49,7 @@ export function LogInScreen(_props: AuthStackScreenProps<'LogIn'>) {
             placeholder="you@example.com"
             keyboardType="email-address"
             textContentType="emailAddress"
+            testID="login-email-input"
           />
 
           <FormField
@@ -58,6 +59,7 @@ export function LogInScreen(_props: AuthStackScreenProps<'LogIn'>) {
             placeholder="At least 6 characters"
             secureTextEntry
             textContentType="password"
+            testID="login-password-input"
           />
 
           {error !== null && (

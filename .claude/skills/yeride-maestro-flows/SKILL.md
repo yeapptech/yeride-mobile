@@ -124,17 +124,18 @@ Regression stubs live one level below `e2e/maestro/`. The `_lib/` helper is at `
 | Wallet / Earnings | `62%,96%` |
 | Profile           | `87%,96%` |
 
-**Sign-in helper:** `e2e/maestro/_lib/sign-in-as.yaml` — takes `EMAIL` and `PASSWORD` env vars. Handles dismissing soft-asks, signing out existing session, erasing fields to avoid concatenation.
+**Sign-in helper:** `e2e/maestro/_lib/sign-in-as.yaml` — takes `EMAIL` and `PASSWORD` env vars. Uses `launchApp: clearKeychain: true` so the app always starts signed-out (no sign-out step needed) and the iOS autofill suggestion bar never appears (no saved credentials). Erases fields before typing to avoid concatenation on back-to-back runs.
 
 ---
 
 ## Common Mistakes
 
-| Mistake                                                       | Symptom                                                         | Fix                                                                                            |
-| ------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Missing `--env` flags on `maestro test`                       | Sign-in fails, `${RIDER_EMAIL}` literal in logs                 | Add all four `--env` flags to every invocation                                                 |
-| Double `optional: true` content asserts                       | Flow always passes even after crashes                           | Use `runFlow-when` OR pattern                                                                  |
-| `optional: true` on content after `optional: true` on spinner | Content assertion skipped silently                              | Only `optional: true` on the spinner wait                                                      |
-| `../../_lib/` from regression stub                            | `runFlow` file not found error                                  | Use `../_lib/`                                                                                 |
-| `tapOn: text` for tab bar on iOS                              | Tap silently misses on iOS                                      | Use `_lib/tap-tab.yaml` with `TAB_TEXT` + `TAB_POINT`                                          |
-| `when: visible: 'Profile'` to detect signed-in session on iOS | Condition always false — iOS tab labels are not accessible text | Use `when: visible: id: rider-home-where-to` or `when: visible: id: driver-home-online-toggle` |
+| Mistake                                                       | Symptom                                                                                                                                | Fix                                                                                                           |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Missing `--env` flags on `maestro test`                       | Sign-in fails, `${RIDER_EMAIL}` literal in logs                                                                                        | Add all four `--env` flags to every invocation                                                                |
+| Double `optional: true` content asserts                       | Flow always passes even after crashes                                                                                                  | Use `runFlow-when` OR pattern                                                                                 |
+| `optional: true` on content after `optional: true` on spinner | Content assertion skipped silently                                                                                                     | Only `optional: true` on the spinner wait                                                                     |
+| `../../_lib/` from regression stub                            | `runFlow` file not found error                                                                                                         | Use `../_lib/`                                                                                                |
+| `tapOn: text` for tab bar on iOS                              | Tap silently misses on iOS                                                                                                             | Use `_lib/tap-tab.yaml` with `TAB_TEXT` + `TAB_POINT`                                                         |
+| `when: visible: 'Profile'` to detect signed-in session on iOS | Condition always false — iOS tab labels are not accessible text                                                                        | Use `when: visible: id: rider-home-where-to` or `when: visible: id: driver-home-online-toggle`                |
+| `launchApp` (without `clearKeychain: true`) in sign-in flows  | iOS autofill suggestion bar appears after entering email, shifts layout so `tapOn:id:login-password-input` lands on "Forgot password?" | Use `launchApp: clearKeychain: true` — clears Firebase token + removes saved credentials that trigger the bar |

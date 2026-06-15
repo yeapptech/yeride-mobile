@@ -1,14 +1,15 @@
 appId: app.yeride.dev
-# Ensure the app is signed in as a specific account, switching if needed:
-# dismiss any launcher/confirmation/soft-ask, sign out of an active session
-# (tab bar present), then sign in. env: EMAIL, PASSWORD
+# Ensure the app is signed in as a specific account. env: EMAIL, PASSWORD
 #
-# The sign-in here is inlined (not auth/sign-in.yaml) on purpose: it hides the
-# keyboard between fields so the password field isn't obscured, and erases each
-# field first, so account-switching is reliable when run back-to-back. (The
-# shared auth/sign-in.yaml can leave the password concatenated into the email
-# field when the keyboard overlaps the password input.)
+# clearKeychain clears the Firebase auth token so the app always starts on
+# "Welcome back" — no stale session, no sign-out step needed.  It also
+# prevents iOS from showing the QuickType/autofill suggestion bar (no saved
+# credentials to suggest), which otherwise shifts the layout so a
+# tapOn:id:login-password-input lands on "Forgot password?" instead of the
+# field.
 ---
+- launchApp:
+    clearKeychain: true
 - tapOn:
     text: 'Continue'
     optional: true
@@ -19,30 +20,25 @@ appId: app.yeride.dev
     text: 'Not now'
     optional: true
 - waitForAnimationToEnd
-# If a rider session is active, sign out first.
-# NOTE: tab bar text labels are not accessible on iOS — use testIDs instead.
+# Dismiss the Expo developer menu if it appeared on startup (tap the app
+# backdrop above the menu sheet to close it).
 - runFlow:
     when:
-      visible:
-        id: rider-home-where-to
+      visible: 'Reload'
     commands:
-      - runFlow: ../auth/sign-out.yaml
-# If a driver session is active, sign out first.
-- runFlow:
-    when:
-      visible:
-        id: driver-home-online-toggle
-    commands:
-      - runFlow: ../auth/sign-out.yaml
+      - tapOn:
+          point: '50%,10%'
+      - waitForAnimationToEnd
 # Now on "Welcome back" — sign in with the requested creds.
+# Use testIDs (login-email-input / login-password-input) so the tap targets
+# are unambiguous regardless of keyboard / layout state.
 - assertVisible: 'Welcome back'
 - tapOn:
-    text: 'you@example.com'
+    id: login-email-input
 - eraseText
 - inputText: ${EMAIL}
-- hideKeyboard
 - tapOn:
-    text: 'At least 6 characters'
+    id: login-password-input
 - eraseText
 - inputText: ${PASSWORD}
 - hideKeyboard
