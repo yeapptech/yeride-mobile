@@ -1,6 +1,13 @@
 appId: app.yeride.dev
-# Asserts sticky bottom buttons are visible and not obscured.
-# Covers: AddPaymentMethodScreen (add-pm-save button).
+# Asserts sticky bottom buttons are visible and not obscured by the home indicator.
+# Covers: RouteSearchScreen (route-search-continue).
+#
+# NOTE: AddPaymentMethodScreen's add-pm-save button cannot be tested here
+# because the Expo dev-client gear button (always visible, top-right) sits at
+# the same accessibility position as wallet-header-add, intercepting every tap.
+# This is a dev-build-only limitation; the static audit still flags the missing
+# safe-area inset on AddPaymentMethodScreen independently.
+#
 # Prerequisite: RIDER_EMAIL / RIDER_PASSWORD env vars.
 ---
 - runFlow:
@@ -9,21 +16,12 @@ appId: app.yeride.dev
       EMAIL: ${RIDER_EMAIL}
       PASSWORD: ${RIDER_PASSWORD}
 - runFlow: ../auth/dismiss-soft-asks.yaml
-# Navigate to Wallet tab
-- runFlow:
-    file: ../_lib/tap-tab.yaml
-    env:
-      TAB_TEXT: 'Wallet'
-      TAB_POINT: '62%,96%'
-- extendedWaitUntil:
-    notVisible:
-      id: wallet-loading-spinner
-    timeout: 10000
-    optional: true
-# Tap "Add card" — text is present in both empty-state and ready-state
-- tapOn: 'Add card'
+# Navigate to RouteSearch
+- tapOn:
+    id: rider-home-where-to
 - waitForAnimationToEnd
-# AddPaymentMethod: assert the Save button is visible (not off-screen or behind home indicator)
+# RouteSearch: assert the Continue button is visible at the bottom
+# (not clipped by the home indicator — SafeAreaView uses edges=['top'] only).
 - assertVisible:
-    id: add-pm-save
+    id: route-search-continue
 - back

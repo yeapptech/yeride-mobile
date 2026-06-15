@@ -114,6 +114,7 @@ Regression stubs live one level below `e2e/maestro/`. The `_lib/` helper is at `
 | DriverActivityScreen | any                            | `driver-activity-screen` (root)                                                |
 | RiderHomeScreen      | any                            | `rider-home-where-to`                                                          |
 | DriverHomeScreen     | any                            | `driver-home-online-toggle`                                                    |
+| UserProfileScreen    | any (both roles)               | `profile-screen` (root); `profile-vehicles-link` driver-only                   |
 
 **Tab point coordinates** (y≈96% across both navigators):
 

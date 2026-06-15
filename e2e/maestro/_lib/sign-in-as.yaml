@@ -41,7 +41,6 @@ appId: app.yeride.dev
     id: login-password-input
 - eraseText
 - inputText: ${PASSWORD}
-- hideKeyboard
 - tapOn: 'Sign in'
 - extendedWaitUntil:
     notVisible: 'Welcome back'

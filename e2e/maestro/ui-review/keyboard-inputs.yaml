@@ -13,18 +13,22 @@ appId: app.yeride.dev
 - tapOn:
     id: rider-home-where-to
 - waitForAnimationToEnd
-# Pickup input: tap → assert still visible (not behind keyboard) → dismiss
+# Pickup input: tap → assert still visible (not behind keyboard) → dismiss.
+# GooglePlacesAutocomplete doesn't expose standard keyboard dismiss, so we tap
+# the static "Where to?" header (non-interactive text) to dismiss the keyboard.
 - tapOn:
     id: pickup-input
 - waitForAnimationToEnd
 - assertVisible:
     id: pickup-input
-- hideKeyboard
+- tapOn: 'Where to?'
+- waitForAnimationToEnd
 # Dropoff input: tap → assert still visible → dismiss
 - tapOn:
     id: dropoff-input
 - waitForAnimationToEnd
 - assertVisible:
     id: dropoff-input
-- hideKeyboard
+- tapOn: 'Where to?'
+- waitForAnimationToEnd
 - back
