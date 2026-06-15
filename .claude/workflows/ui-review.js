@@ -194,30 +194,39 @@ const MAESTRO_SCHEMA = {
   },
 };
 
-const deviceCheck =
+const deviceCheckCmd =
   platform === 'ios'
     ? 'xcrun simctl list devices booted 2>/dev/null | grep Booted'
     : 'adb devices 2>/dev/null | grep -v "List of" | grep -v "^$"';
+
+const deviceIdCmd =
+  platform === 'ios'
+    ? "xcrun simctl list devices booted 2>/dev/null | grep Booted | head -1 | grep -o '[A-F0-9-]\\{36\\}'"
+    : "adb devices 2>/dev/null | grep -v 'List of' | grep -v '^$' | head -1 | awk '{print $1}'";
 
 const maestroResults = await agent(
   `Run Maestro UI flows and return structured results.
 
 STEP 1 — Check for a connected ${platform === 'ios' ? 'iOS simulator' : 'Android emulator'}:
-Run: ${deviceCheck}
+Run: ${deviceCheckCmd}
 If output is empty, return { skipped: true, flows: [], skipReason: "No ${platform === 'ios' ? 'booted iOS simulator' : 'connected Android emulator'} found — boot one and re-run" }.
 
 STEP 2 — Check Maestro CLI:
 Run: ls ~/.maestro/bin/maestro 2>/dev/null || echo MISSING
 If output is "MISSING", return { skipped: true, flows: [], skipReason: "Maestro CLI not found at ~/.maestro/bin/maestro" }.
 
-STEP 3 — Run each flow in sequence:
+STEP 3 — Get the device ID to target explicitly (prevents Maestro defaulting to a connected Android when iOS is requested):
+Run: ${deviceIdCmd}
+Save the output as DEVICE_ID. If empty, skip --device flag.
+
+STEP 4 — Run each flow in sequence:
 export PATH="$PATH:$HOME/.maestro/bin"
 
-${allFlows.map((f) => `maestro test --env RIDER_EMAIL=$RIDER_EMAIL --env RIDER_PASSWORD=$RIDER_PASSWORD --env DRIVER_EMAIL=$DRIVER_EMAIL --env DRIVER_PASSWORD=$DRIVER_PASSWORD ${f}`).join('\n')}
+${allFlows.map((f) => `maestro --device $DEVICE_ID test --env RIDER_EMAIL=$RIDER_EMAIL --env RIDER_PASSWORD=$RIDER_PASSWORD --env DRIVER_EMAIL=$DRIVER_EMAIL --env DRIVER_PASSWORD=$DRIVER_PASSWORD ${f}`).join('\n')}
 
 Credentials (RIDER_EMAIL, RIDER_PASSWORD, DRIVER_EMAIL, DRIVER_PASSWORD) must already be set in the calling environment.
 
-STEP 4 — For each flow, record:
+STEP 5 — For each flow, record:
   name: basename of the flow path (e.g. "keyboard-inputs.yaml")
   passed: true if exit code was 0, false otherwise
   error: first error line from output if failed, empty string if passed
