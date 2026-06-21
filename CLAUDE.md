@@ -546,7 +546,10 @@ npm test               # jest
 npm run verify         # all four in sequence
 ```
 
-All four must be green before commit. CI runs the same.
+All four must be green before commit. CI runs the same. Opening a
+GitHub issue also triggers an agent that triages it, reproduces real
+bugs via headless Jest, and opens a fix PR — see
+[docs/AUTO_FIX_ISSUES.md](docs/AUTO_FIX_ISSUES.md).
 
 End-to-end UI flows live in `e2e/maestro/{auth,rider,driver}` (Maestro;
 driver=Android / rider=iOS, stage test accounts). They are not part of
