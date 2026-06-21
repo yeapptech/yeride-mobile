@@ -1,0 +1,93 @@
+name: Auto-Reproduce & Fix Issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: auto-fix-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  reproduce-and-fix:
+    name: Reproduce reported issue and open a fix PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Claude Code agent
+        uses: anthropics/claude-code-action@v1
+        id: claude
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--max-turns 30'
+          prompt: |
+            A new GitHub issue was opened in this repository.
+
+            Title: ${{ github.event.issue.title }}
+            Number: #${{ github.event.issue.number }}
+            Body:
+            ${{ github.event.issue.body }}
+
+            Follow this procedure exactly:
+
+            1. TRIAGE. Decide whether this is a *reproducible software bug*
+               (not a feature request, question, idea, or spam). If it is NOT,
+               post a brief comment on the issue saying so and explaining why,
+               then STOP. Do not change any files.
+
+            2. REPRODUCE. If it looks like a bug, try to reproduce it with a
+               HEADLESS Jest test. This is an Expo/React-Native app — Maestro
+               E2E cannot run here, so reproduce only via `npm test`. Add a
+               focused failing test under the appropriate src/**/__tests__/
+               directory that demonstrates the bug. Run `npm test` to confirm
+               it fails for the reported reason.
+
+            3. IF YOU CANNOT REPRODUCE, post a comment on the issue describing
+               exactly what you tried and what you observed, then STOP without
+               changing files.
+
+            4. FIX. If reproduced, implement the *minimal* fix that makes the
+               reproduction test pass, following the conventions in CLAUDE.md
+               (Result over throw, layer boundaries, @shared/logger, etc.).
+
+            5. VERIFY. Run `npm run verify` (typecheck + lint + format:check +
+               tests) and make it pass. Keep the new reproduction test.
+
+            6. COMMIT your changes on a new branch with a clear message
+               referencing #${{ github.event.issue.number }}. Do NOT open the
+               PR yourself — a later workflow step does that.
+
+      - name: Open PR if a fix was pushed
+        if: steps.claude.outputs.branch_name != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PAT }}
+        run: |
+          BRANCH="${{ steps.claude.outputs.branch_name }}"
+          git fetch origin "$BRANCH" main
+          AHEAD="$(git rev-list --count origin/main..origin/$BRANCH)"
+          if [ "$AHEAD" -eq 0 ]; then
+            echo "No commits on $BRANCH — agent triaged/declined or could not reproduce. No PR."
+            exit 0
+          fi
+          gh pr create \
+            --repo yeapptech/yeride-mobile \
+            --base main \
+            --head "$BRANCH" \
+            --title "Auto-fix: ${{ github.event.issue.title }}" \
+            --body "Reproduced and fixed #${{ github.event.issue.number }} via an automated agent run. A failing Jest reproduction test was added and is included in this PR. Review carefully before merging." \
+            --label "auto-fix"
