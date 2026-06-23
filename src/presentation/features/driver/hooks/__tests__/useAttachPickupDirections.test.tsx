@@ -1,6 +1,7 @@
-import { renderHook, waitFor } from '@testing-library/react-native';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import { CancellationReason } from '@domain/entities/CancellationReason';
 import { Coordinates } from '@domain/entities/Coordinates';
 import {
   DriverSnapshot,
@@ -18,6 +19,7 @@ import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
 import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
+import { NetworkError } from '@domain/errors';
 import type { BgLocationEvent } from '@domain/services';
 import { useGpsStore } from '@presentation/stores';
 import {
@@ -39,6 +41,7 @@ function usd(m: number) {
 const MIAMI = unwrap(Coordinates.create(25.7617, -80.1918));
 const FORT_LAUDERDALE = unwrap(Coordinates.create(26.1224, -80.1373));
 const DRIVER_LOC = unwrap(Coordinates.create(25.79, -80.2));
+const DRIVER_LOC_2 = unwrap(Coordinates.create(25.8, -80.21));
 const RIDE_ID = unwrap(RideId.create('attachHook1234567890a'));
 
 const DRIVER = unwrap(
@@ -134,14 +137,27 @@ function makeDispatchedRideNoDirections(): Ride {
   return unwrap(awaiting.claimForDispatch({ driver: DRIVER, at: new Date() }));
 }
 
-function locationEvent(): BgLocationEvent {
+function locationEvent(coords: Coordinates = DRIVER_LOC): BgLocationEvent {
   return {
-    coords: DRIVER_LOC,
+    coords,
     speed: null,
     odometerMeters: 0,
     timestampMs: 0,
     isMoving: true,
   };
+}
+
+function makeCancelledRide(): Ride {
+  return unwrap(
+    makeDispatchedRideNoDirections().cancel({
+      reason: unwrap(
+        CancellationReason.create({ code: 'changed_mind', reasonText: null }),
+      ),
+      by: 'rider',
+      at: new Date(),
+      odometerMeters: 0,
+    }),
+  );
 }
 
 function withContainer(
@@ -220,5 +236,76 @@ describe('useAttachPickupDirections', () => {
 
     await new Promise((r) => setTimeout(r, 30));
     expect(routes.spies.length).toBe(0);
+  });
+
+  it('clears the latch on a compute failure and retries on the next GPS tick', async () => {
+    const rides = new InMemoryRideRepository();
+    const routes = new FakeRoutesService();
+    rides.seed(makeDispatchedRideNoDirections());
+    const ride = makeDispatchedRideNoDirections();
+    // First compute fails — the hook must clear its per-rideId latch so a
+    // later GPS emit retries instead of leaving the ride permanently
+    // directions-less.
+    routes.seedError(
+      new NetworkError({
+        code: 'routes_request_timeout',
+        message: 'timed out',
+      }),
+    );
+    useGpsStore.getState().setLocation(locationEvent());
+
+    renderHook(() => useAttachPickupDirections(ride), {
+      wrapper: withContainer(rides, routes),
+    });
+
+    await waitFor(() => {
+      expect(routes.spies.length).toBe(1);
+    });
+    const afterFailure = await rides.getById(RIDE_ID);
+    expect(afterFailure.ok && afterFailure.value.pickup.directions).toBeNull();
+
+    // Next GPS tick (a fresh coordinate) re-fires the effect; seedError is
+    // one-shot, so this attempt succeeds and attaches.
+    act(() => {
+      useGpsStore.getState().setLocation(locationEvent(DRIVER_LOC_2));
+    });
+
+    await waitFor(() => {
+      expect(routes.spies.length).toBe(2);
+    });
+    const persisted = await rides.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.pickup.directions).not.toBeNull();
+    }
+  });
+
+  it('swallows an attach failure when the ride is no longer dispatched', async () => {
+    const rides = new InMemoryRideRepository();
+    const routes = new FakeRoutesService();
+    // The persisted doc moved on (rider cancelled in the claim→attach
+    // window) so attachPickupDirections is an illegal transition. The hook
+    // still computes — its prop is the stale dispatched ride — but the
+    // failed attach must be swallowed, not thrown.
+    rides.seed(makeCancelledRide());
+    useGpsStore.getState().setLocation(locationEvent());
+
+    renderHook(
+      () => useAttachPickupDirections(makeDispatchedRideNoDirections()),
+      {
+        wrapper: withContainer(rides, routes),
+      },
+    );
+
+    await waitFor(() => {
+      expect(routes.spies.length).toBe(1);
+    });
+    // No directions attached to the cancelled doc, and no error surfaced.
+    const persisted = await rides.getById(RIDE_ID);
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.value.status).toBe('cancelled');
+      expect(persisted.value.pickup.directions).toBeNull();
+    }
   });
 });
