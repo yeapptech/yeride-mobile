@@ -176,11 +176,12 @@ function makeAwaitingRide(): Ride {
 
 function makeDispatchedRide(): Ride {
   return unwrap(
-    makeAwaitingRide().dispatch({
-      driver: makeDriverSnap(),
-      pickupDirections: PICKUP_ROUTE,
-      at: new Date(),
-    }),
+    unwrap(
+      makeAwaitingRide().claimForDispatch({
+        driver: makeDriverSnap(),
+        at: new Date(),
+      }),
+    ).attachPickupDirections(PICKUP_ROUTE),
   );
 }
 
@@ -775,11 +776,9 @@ describe('useDriverMonitorViewModel', () => {
         }),
       );
       return unwrap(
-        base.dispatch({
-          driver: makeDriverSnap(),
-          pickupDirections: PICKUP_ROUTE,
-          at: new Date(),
-        }),
+        unwrap(
+          base.claimForDispatch({ driver: makeDriverSnap(), at: new Date() }),
+        ).attachPickupDirections(PICKUP_ROUTE),
       );
     }
 
@@ -821,11 +820,9 @@ describe('useDriverMonitorViewModel', () => {
       );
       return unwrap(
         unwrap(
-          base.dispatch({
-            driver: makeDriverSnap(),
-            pickupDirections: PICKUP_ROUTE,
-            at: new Date(),
-          }),
+          unwrap(
+            base.claimForDispatch({ driver: makeDriverSnap(), at: new Date() }),
+          ).attachPickupDirections(PICKUP_ROUTE),
         ).start({ odometerMeters: 1_000, at: new Date() }),
       );
     }

@@ -1,9 +1,9 @@
 import type { DriverSnapshot } from '@domain/entities/DriverSnapshot';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
-import type { Route } from '@domain/entities/Route';
 import type {
   AuthorizationError,
+  ConflictError,
   NotFoundError,
   ValidationError,
 } from '@domain/errors';
@@ -11,13 +11,15 @@ import type { RideRepository } from '@domain/repositories';
 import type { Result } from '@domain/shared/Result';
 
 /**
- * Driver accepts an awaiting_driver ride. Reads the current state, runs
- * the entity transition (which enforces the `awaiting_driver` precondition
- * + sets pickup directions + records start time), and writes back.
+ * Driver claims an awaiting_driver ride — first-come-first-served. Routes
+ * through `transitionWithClaim`, which atomically re-reads the ride and
+ * applies `claimForDispatch` only while it's still `awaiting_driver`; a
+ * driver who loses the race gets a `ConflictError('ride_already_taken')`.
  *
- * The driver app is responsible for computing pickup directions
- * (driver→pickup) via `ComputeRoutes` and passing the resulting `Route`
- * here; the use case attaches it to the entity.
+ * Pickup directions (driver→pickup) are deliberately NOT computed here —
+ * the winning driver computes them via `ComputeRoutes` and attaches them
+ * afterwards (`AttachPickupDirections`), so the claim stays on the fast
+ * path and only the winner spends a Google Routes quota unit.
  */
 export class DispatchRide {
   constructor(
@@ -28,18 +30,17 @@ export class DispatchRide {
   async execute(args: {
     rideId: RideId;
     driver: DriverSnapshot;
-    pickupDirections: Route;
   }): Promise<
-    Result<Ride, NotFoundError | AuthorizationError | ValidationError>
+    Result<
+      Ride,
+      ConflictError | NotFoundError | AuthorizationError | ValidationError
+    >
   > {
-    const current = await this.repo.getById(args.rideId);
-    if (!current.ok) return current;
-    const next = current.value.dispatch({
-      driver: args.driver,
-      pickupDirections: args.pickupDirections,
-      at: this.clock(),
+    const at = this.clock();
+    return this.repo.transitionWithClaim({
+      rideId: args.rideId,
+      expectedFromStatus: 'awaiting_driver',
+      apply: (current) => current.claimForDispatch({ driver: args.driver, at }),
     });
-    if (!next.ok) return next;
-    return this.repo.update(next.value);
   }
 }

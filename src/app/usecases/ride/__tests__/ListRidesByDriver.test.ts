@@ -155,11 +155,12 @@ function makeDispatchedRide(args: {
 }): Ride {
   const awaiting = makeAwaitingRide({ id: args.id, createdAt: args.createdAt });
   return unwrap(
-    awaiting.dispatch({
-      driver: args.driver,
-      pickupDirections: makeRoute(),
-      at: new Date(args.createdAt.getTime() + 60_000),
-    }),
+    unwrap(
+      awaiting.claimForDispatch({
+        driver: args.driver,
+        at: new Date(args.createdAt.getTime() + 60_000),
+      }),
+    ).attachPickupDirections(makeRoute()),
   );
 }
 

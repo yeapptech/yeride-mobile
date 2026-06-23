@@ -13,7 +13,6 @@ import { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
-import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
 import { InMemoryRideRepository } from '@shared/testing';
 
@@ -81,24 +80,6 @@ const ECONOMY = unwrap(
   }),
 );
 
-function makeRoute(): Route {
-  return unwrap(
-    Route.create({
-      distanceMeters: 5_000,
-      durationSeconds: 600,
-      distanceText: '3.1 mi',
-      durationText: '10 mins',
-      encodedPolyline: '_p~iF',
-      startLocation: MIAMI,
-      endLocation: FORT_LAUDERDALE,
-      routeLabels: [],
-      tollPrice: null,
-      routeToken: 'tk',
-      description: '',
-    }),
-  );
-}
-
 function makeAccepted(id: string): Ride {
   const scheduled = unwrap(
     Ride.createScheduled({
@@ -129,19 +110,17 @@ function makeAccepted(id: string): Ride {
 }
 
 describe('BeginScheduledRide', () => {
-  it('flips an accepted scheduled ride to dispatched with directions + startedAt', async () => {
+  it('flips an accepted scheduled ride to dispatched with startedAt (no directions yet)', async () => {
     const repo = new InMemoryRideRepository();
     const ride = makeAccepted('beginRide12345678901');
     await repo.create(ride);
     const sut = new BeginScheduledRide(repo, () => T_BEGIN);
-    const r = await sut.execute({
-      rideId: ride.id,
-      pickupDirections: makeRoute(),
-    });
+    const r = await sut.execute({ rideId: ride.id });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.value.status).toBe('dispatched');
-      expect(r.value.pickup.directions?.routeToken).toBe('tk');
+      // Directions are attached after the claim by the winning driver.
+      expect(r.value.pickup.directions).toBeNull();
       expect(r.value.pickupTiming.startedAt).toEqual(T_BEGIN);
     }
   });
@@ -151,23 +130,22 @@ describe('BeginScheduledRide', () => {
     const sut = new BeginScheduledRide(repo, () => T_BEGIN);
     const r = await sut.execute({
       rideId: unwrap(RideId.create('nonexistent1234567890ab')),
-      pickupDirections: makeRoute(),
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe('not_found');
   });
 
-  it('refuses to begin a ride that is not scheduled_driver_accepted', async () => {
+  it('refuses to begin a ride that is not scheduled_driver_accepted (already begun → conflict)', async () => {
     const repo = new InMemoryRideRepository();
     const ride = makeAccepted('beginRideTwice123456');
     await repo.create(ride);
     const sut = new BeginScheduledRide(repo, () => T_BEGIN);
-    await sut.execute({ rideId: ride.id, pickupDirections: makeRoute() });
-    const r2 = await sut.execute({
-      rideId: ride.id,
-      pickupDirections: makeRoute(),
-    });
+    await sut.execute({ rideId: ride.id });
+    const r2 = await sut.execute({ rideId: ride.id });
     expect(r2.ok).toBe(false);
-    if (!r2.ok) expect(r2.error.code).toBe('ride_illegal_transition');
+    if (!r2.ok) {
+      expect(r2.error.kind).toBe('conflict');
+      expect(r2.error.code).toBe('ride_already_taken');
+    }
   });
 });

@@ -144,11 +144,9 @@ function makeDispatchedRide(passengerUid: UserId, driverUid: UserId): Ride {
     }),
   );
   return unwrap(
-    awaiting.dispatch({
-      driver: driverSnap,
-      pickupDirections: route,
-      at: new Date(),
-    }),
+    unwrap(
+      awaiting.claimForDispatch({ driver: driverSnap, at: new Date() }),
+    ).attachPickupDirections(route),
   );
 }
 

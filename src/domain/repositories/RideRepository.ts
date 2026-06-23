@@ -57,9 +57,11 @@ export interface RideRepository {
   observeById(id: RideId, callback: (ride: Ride | null) => void): () => void;
 
   /**
-   * Persist a transition produced by the entity (`Ride.dispatch`,
-   * `Ride.start`, `Ride.markCompleted`, etc.). The full ride is written so
-   * the adapter can do whatever transactional work it needs.
+   * Persist a transition produced by the entity (`Ride.start`,
+   * `Ride.markCompleted`, `Ride.attachPickupDirections`, etc.). The full
+   * ride is written so the adapter can do whatever transactional work it
+   * needs. First-come-first-served claims go through `transitionWithClaim`
+   * instead (it guards the status atomically); `update` is a plain write.
    *
    * Cancel + requestPayment do NOT go through `update`; they go through
    * the Cloud Function callables below, which compute server-side state
@@ -69,6 +71,31 @@ export interface RideRepository {
     ride: Ride,
   ): Promise<
     Result<Ride, NotFoundError | AuthorizationError | ValidationError>
+  >;
+
+  /**
+   * Atomically claim/transition a ride, guarding on its current status —
+   * the first-come-first-served primitive. The adapter re-reads the ride
+   * inside a transaction; if its status no longer equals
+   * `expectedFromStatus` (e.g. another driver already claimed it) it
+   * returns a `ConflictError('ride_already_taken')` rather than clobbering
+   * the assignment. Otherwise it runs `apply` (the entity transition the
+   * app layer supplies — e.g. `r => r.claimForDispatch({ driver, at })`)
+   * and persists the result.
+   *
+   * Used by `DispatchRide`, `AcceptScheduledRide`, and `BeginScheduledRide`
+   * for true first-wins semantics. The entity transition stays in the app
+   * layer; the repository only owns the atomic read-guard-write.
+   */
+  transitionWithClaim(args: {
+    rideId: RideId;
+    expectedFromStatus: Ride['status'];
+    apply: (current: Ride) => Result<Ride, ValidationError>;
+  }): Promise<
+    Result<
+      Ride,
+      ConflictError | NotFoundError | AuthorizationError | ValidationError
+    >
   >;
 
   /**

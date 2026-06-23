@@ -14,7 +14,6 @@ import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { RideServiceId } from '@domain/entities/RideServiceId';
 import type { RideStatus } from '@domain/entities/RideStatus';
-import type { Route } from '@domain/entities/Route';
 import type { UserId } from '@domain/entities/UserId';
 import type {
   AuthorizationError,
@@ -430,19 +429,18 @@ export function useCancelRideAsDriverMutation(): UseMutationResult<
 export interface DispatchRideInput {
   readonly rideId: RideId;
   readonly driver: DriverSnapshot;
-  readonly pickupDirections: Route;
 }
 
 export function useDispatchRideMutation(): UseMutationResult<
   Ride,
-  NotFoundError | AuthorizationError | ValidationError,
+  ConflictError | NotFoundError | AuthorizationError | ValidationError,
   DispatchRideInput
 > {
   const useCases = useUseCases();
   const queryClient = useQueryClient();
   return useMutation<
     Ride,
-    NotFoundError | AuthorizationError | ValidationError,
+    ConflictError | NotFoundError | AuthorizationError | ValidationError,
     DispatchRideInput
   >({
     mutationFn: async (input: DispatchRideInput): Promise<Ride> => {
@@ -478,14 +476,14 @@ export interface AcceptScheduledRideInput {
 
 export function useAcceptScheduledRideMutation(): UseMutationResult<
   Ride,
-  NotFoundError | AuthorizationError | ValidationError,
+  ConflictError | NotFoundError | AuthorizationError | ValidationError,
   AcceptScheduledRideInput
 > {
   const useCases = useUseCases();
   const queryClient = useQueryClient();
   return useMutation<
     Ride,
-    NotFoundError | AuthorizationError | ValidationError,
+    ConflictError | NotFoundError | AuthorizationError | ValidationError,
     AcceptScheduledRideInput
   >({
     mutationFn: async (input: AcceptScheduledRideInput): Promise<Ride> => {
@@ -509,25 +507,25 @@ export function useAcceptScheduledRideMutation(): UseMutationResult<
 
 /**
  * Mutation: begin an accepted scheduled ride. Wraps `BeginScheduledRide`
- * (attaches pickup directions + flips `scheduled_driver_accepted →
- * dispatched`). Cache: byId set + both parties' lists invalidated so the
- * ride moves from Scheduled → In-progress on both sides.
+ * (atomic claim flipping `scheduled_driver_accepted → dispatched`). Pickup
+ * directions are computed + attached afterwards by the monitor's
+ * `useAttachPickupDirections`. Cache: byId set + both parties' lists
+ * invalidated so the ride moves from Scheduled → In-progress on both sides.
  */
 export interface BeginScheduledRideInput {
   readonly rideId: RideId;
-  readonly pickupDirections: Route;
 }
 
 export function useBeginScheduledRideMutation(): UseMutationResult<
   Ride,
-  NotFoundError | AuthorizationError | ValidationError,
+  ConflictError | NotFoundError | AuthorizationError | ValidationError,
   BeginScheduledRideInput
 > {
   const useCases = useUseCases();
   const queryClient = useQueryClient();
   return useMutation<
     Ride,
-    NotFoundError | AuthorizationError | ValidationError,
+    ConflictError | NotFoundError | AuthorizationError | ValidationError,
     BeginScheduledRideInput
   >({
     mutationFn: async (input: BeginScheduledRideInput): Promise<Ride> => {

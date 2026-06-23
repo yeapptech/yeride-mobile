@@ -153,11 +153,12 @@ export function makeRideAt(
   if (status === 'awaiting_driver') return r;
 
   const dispatched = unwrap(
-    r.dispatch({
-      driver: makeDriver(),
-      pickupDirections: makeRoute(),
-      at: new Date(r.createdAt.getTime() + 60_000),
-    }),
+    unwrap(
+      r.claimForDispatch({
+        driver: makeDriver(),
+        at: new Date(r.createdAt.getTime() + 60_000),
+      }),
+    ).attachPickupDirections(makeRoute()),
   );
   if (status === 'dispatched') return dispatched;
 

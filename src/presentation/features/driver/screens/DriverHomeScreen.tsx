@@ -213,7 +213,7 @@ export default function DriverHomeScreen() {
             <View className="mb-3">
               <DriverRideCardStack
                 rides={vm.availableRides}
-                driverLocation={vm.currentLocation.coordinates}
+                driverLocation={vm.liveDriverLocation}
                 onSelectRide={vm.onSelectRide}
               />
             </View>

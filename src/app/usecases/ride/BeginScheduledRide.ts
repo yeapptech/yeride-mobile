@@ -1,8 +1,8 @@
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
-import type { Route } from '@domain/entities/Route';
 import type {
   AuthorizationError,
+  ConflictError,
   NotFoundError,
   ValidationError,
 } from '@domain/errors';
@@ -10,14 +10,14 @@ import type { RideRepository } from '@domain/repositories';
 import type { Result } from '@domain/shared/Result';
 
 /**
- * Driver begins an accepted scheduled ride. Reads the current state, runs
- * the entity transition (which enforces the `scheduled_driver_accepted`
- * precondition, attaches the driver→pickup directions, and records the
- * start time), and writes back — flipping the ride to `dispatched` so it
- * enters the normal live-trip flow. Mirrors `DispatchRide`'s shape.
+ * Driver begins an accepted scheduled ride — flipping it to `dispatched`
+ * so it enters the normal live-trip flow. Routes through
+ * `transitionWithClaim` (atomic, guarded on `scheduled_driver_accepted`)
+ * so a ride the rider cancelled in the meantime fails cleanly with a
+ * ConflictError rather than clobbering the cancellation.
  *
- * The driver app computes pickup directions (driver→pickup) via
- * `ComputeRoutes` and passes the resulting `Route` here.
+ * As with `DispatchRide`, pickup directions are computed + attached
+ * afterwards via `AttachPickupDirections`, not here.
  */
 export class BeginScheduledRide {
   constructor(
@@ -27,17 +27,17 @@ export class BeginScheduledRide {
 
   async execute(args: {
     rideId: RideId;
-    pickupDirections: Route;
   }): Promise<
-    Result<Ride, NotFoundError | AuthorizationError | ValidationError>
+    Result<
+      Ride,
+      ConflictError | NotFoundError | AuthorizationError | ValidationError
+    >
   > {
-    const current = await this.repo.getById(args.rideId);
-    if (!current.ok) return current;
-    const next = current.value.beginScheduledRide({
-      pickupDirections: args.pickupDirections,
-      at: this.clock(),
+    const at = this.clock();
+    return this.repo.transitionWithClaim({
+      rideId: args.rideId,
+      expectedFromStatus: 'scheduled_driver_accepted',
+      apply: (current) => current.beginScheduledClaim({ at }),
     });
-    if (!next.ok) return next;
-    return this.repo.update(next.value);
   }
 }

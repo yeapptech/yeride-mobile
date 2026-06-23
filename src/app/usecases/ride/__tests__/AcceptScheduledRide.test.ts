@@ -132,7 +132,7 @@ describe('AcceptScheduledRide', () => {
     if (!r.ok) expect(r.error.kind).toBe('not_found');
   });
 
-  it('refuses to accept a ride that is not scheduled', async () => {
+  it('a second driver accepting an already-accepted scheduled ride loses with ConflictError', async () => {
     const repo = new InMemoryRideRepository();
     const ride = makeScheduled('schedRideTwice123456');
     await repo.create(ride);
@@ -140,6 +140,9 @@ describe('AcceptScheduledRide', () => {
     await sut.execute({ rideId: ride.id, driver: DRIVER });
     const r2 = await sut.execute({ rideId: ride.id, driver: DRIVER });
     expect(r2.ok).toBe(false);
-    if (!r2.ok) expect(r2.error.code).toBe('ride_illegal_transition');
+    if (!r2.ok) {
+      expect(r2.error.kind).toBe('conflict');
+      expect(r2.error.code).toBe('ride_already_taken');
+    }
   });
 });

@@ -8,6 +8,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   setDoc,
   startAfter,
   where,
@@ -221,6 +222,70 @@ export class FirestoreRideRepository implements RideRepository {
       return Result.ok(ride);
     } catch (e) {
       logger.error('update failed', e);
+      const code = errCode(e);
+      if (code === 'permission-denied') {
+        return Result.err(
+          new AuthorizationError({
+            code: 'ride_update_forbidden',
+            message: 'Not allowed to update this ride',
+            cause: e,
+          }),
+        );
+      }
+      throw e;
+    }
+  }
+
+  async transitionWithClaim(args: {
+    rideId: RideId;
+    expectedFromStatus: RideStatus;
+    apply: (current: Ride) => Result<Ride, ValidationError>;
+  }): Promise<
+    Result<
+      Ride,
+      ConflictError | NotFoundError | AuthorizationError | ValidationError
+    >
+  > {
+    const ref = doc(this.firestore, TRIPS, String(args.rideId));
+    try {
+      // Atomic read-guard-write: the status check + the write happen in one
+      // transaction, so a second driver racing for the same ride re-reads
+      // the now-`dispatched` doc, fails the guard, and gets a
+      // ConflictError instead of clobbering the first driver's claim. We
+      // return a `Result` OUT of the callback (never throw for domain
+      // failures) so a conflict aborts cleanly without a wasteful retry
+      // loop. `set({ merge: true })` mirrors `update` — preserves fields
+      // the rewrite doesn't track.
+      return await runTransaction<
+        Result<
+          Ride,
+          ConflictError | NotFoundError | AuthorizationError | ValidationError
+        >
+      >(this.firestore, async (tx) => {
+        const snap = await tx.get(ref);
+        const raw = snap.data();
+        if (!raw) {
+          return Result.err(this.notFound(args.rideId));
+        }
+        const current = this.toDomainOrCorrupt(String(args.rideId), raw);
+        if (!current.ok) return current;
+        if (current.value.status !== args.expectedFromStatus) {
+          return Result.err(
+            new ConflictError({
+              code: 'ride_already_taken',
+              message: `Ride ${String(args.rideId)} is no longer ${
+                args.expectedFromStatus
+              }`,
+            }),
+          );
+        }
+        const next = args.apply(current.value);
+        if (!next.ok) return next;
+        tx.set(ref, rideMapper.toDoc(next.value), { merge: true });
+        return Result.ok(next.value);
+      });
+    } catch (e) {
+      logger.error('transitionWithClaim failed', e);
       const code = errCode(e);
       if (code === 'permission-denied') {
         return Result.err(

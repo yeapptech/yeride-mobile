@@ -25,7 +25,7 @@ import type { Route } from './Route';
  * Lifecycle (primary path):
  *
  *     awaiting_driver
- *           │ dispatch(driver, pickupRoute)
+ *           │ claimForDispatch(driver)   ← directions attached after, by the winner
  *           ▼
  *     dispatched
  *           │ start(odometer)
@@ -351,25 +351,33 @@ export class Ride {
   /* ────────── transitions ────────── */
 
   /**
-   * Driver accepts the ride. Sets the driver snapshot, attaches pickup
-   * directions (driver → pickup), records `pickupTiming.startedAt`, and
-   * flips status to `'dispatched'`.
+   * Driver claims an awaiting ride. Sets the driver snapshot, records
+   * `pickupTiming.startedAt`, and flips status to `'dispatched'`. Pickup
+   * directions (driver → pickup) are deliberately NOT attached here — they
+   * are computed via the Google Routes API and attached afterwards by the
+   * winning driver (`attachPickupDirections`), so the claim stays on the
+   * fast path and only the winner spends a Routes quota unit. Run inside a
+   * Firestore transaction (the data layer's `transitionWithClaim`) so a
+   * concurrent claim by another driver fails first-come-first-served rather
+   * than clobbering the assignment.
    */
-  dispatch(args: {
+  claimForDispatch(args: {
     driver: DriverSnapshot;
-    pickupDirections: Route;
     at: Date;
   }): Result<Ride, ValidationError> {
     if (this.props.status !== 'awaiting_driver') {
       return Result.err(
-        illegal(this.props.status, 'dispatch', 'awaiting_driver → dispatched'),
+        illegal(
+          this.props.status,
+          'claimForDispatch',
+          'awaiting_driver → dispatched',
+        ),
       );
     }
     return Ride.fromProps({
       ...this.props,
       status: 'dispatched',
       driver: args.driver,
-      pickup: this.props.pickup.withDirections(args.pickupDirections),
       pickupTiming: {
         ...this.props.pickupTiming,
         startedAt: args.at,
@@ -405,25 +413,22 @@ export class Ride {
   }
 
   /**
-   * Driver begins an accepted scheduled ride when the pickup nears.
-   * Attaches the freshly-computed driver→pickup directions, records
-   * `pickupTiming.startedAt`, and flips status
+   * Driver begins an accepted scheduled ride when the pickup nears. Records
+   * `pickupTiming.startedAt` and flips status
    * `scheduled_driver_accepted → dispatched` so the ride enters the normal
    * live-trip flow (the driver snapshot is already set from
-   * `acceptSchedule`). Deliberate divergence from legacy, which drives a
-   * scheduled ride straight to `started`; the rewrite routes through
-   * `dispatched` because the monitor's en-route view and `start()` are
-   * keyed off it.
+   * `acceptSchedule`). As with `claimForDispatch`, pickup directions are
+   * attached afterwards via `attachPickupDirections`. Deliberate divergence
+   * from legacy, which drives a scheduled ride straight to `started`; the
+   * rewrite routes through `dispatched` because the monitor's en-route view
+   * and `start()` are keyed off it.
    */
-  beginScheduledRide(args: {
-    pickupDirections: Route;
-    at: Date;
-  }): Result<Ride, ValidationError> {
+  beginScheduledClaim(args: { at: Date }): Result<Ride, ValidationError> {
     if (this.props.status !== 'scheduled_driver_accepted') {
       return Result.err(
         illegal(
           this.props.status,
-          'beginScheduledRide',
+          'beginScheduledClaim',
           'scheduled_driver_accepted → dispatched',
         ),
       );
@@ -431,11 +436,34 @@ export class Ride {
     return Ride.fromProps({
       ...this.props,
       status: 'dispatched',
-      pickup: this.props.pickup.withDirections(args.pickupDirections),
       pickupTiming: {
         ...this.props.pickupTiming,
         startedAt: args.at,
       },
+    });
+  }
+
+  /**
+   * Attach the freshly-computed driver→pickup directions to a dispatched
+   * ride. Split out of `claimForDispatch` / `beginScheduledClaim` so the
+   * claim stays on the fast path and the Google Routes call happens only
+   * after assignment, by the winning driver. Valid only while
+   * `'dispatched'` — if the rider cancelled in the window between claim and
+   * attach, this returns an illegal-transition error the caller ignores.
+   */
+  attachPickupDirections(directions: Route): Result<Ride, ValidationError> {
+    if (this.props.status !== 'dispatched') {
+      return Result.err(
+        illegal(
+          this.props.status,
+          'attachPickupDirections',
+          'requires dispatched',
+        ),
+      );
+    }
+    return Ride.fromProps({
+      ...this.props,
+      pickup: this.props.pickup.withDirections(directions),
     });
   }
 

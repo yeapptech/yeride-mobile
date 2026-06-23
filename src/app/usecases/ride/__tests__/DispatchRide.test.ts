@@ -13,7 +13,6 @@ import { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
-import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
 import { InMemoryRideRepository } from '@shared/testing';
 
@@ -105,40 +104,19 @@ function makeRide(): Ride {
   );
 }
 
-function makeRoute(): Route {
-  return unwrap(
-    Route.create({
-      distanceMeters: 5_000,
-      durationSeconds: 600,
-      distanceText: '3.1 mi',
-      durationText: '10 mins',
-      encodedPolyline: '_p~iF',
-      startLocation: MIAMI,
-      endLocation: FORT_LAUDERDALE,
-      routeLabels: [],
-      tollPrice: null,
-      routeToken: 'tk',
-      description: '',
-    }),
-  );
-}
-
 describe('DispatchRide', () => {
-  it('flips status to dispatched and stores driver + pickup directions', async () => {
+  it('claims the ride: flips to dispatched, stores driver + startedAt, no directions yet', async () => {
     const repo = new InMemoryRideRepository();
     const ride = makeRide();
     await repo.create(ride);
     const sut = new DispatchRide(repo, () => T_DISPATCH);
-    const r = await sut.execute({
-      rideId: ride.id,
-      driver: DRIVER,
-      pickupDirections: makeRoute(),
-    });
+    const r = await sut.execute({ rideId: ride.id, driver: DRIVER });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.value.status).toBe('dispatched');
       expect(r.value.driver?.stripeAccountId).toBe('acct_abc');
-      expect(r.value.pickup.directions?.routeToken).toBe('tk');
+      // Directions are attached AFTER the claim by the winning driver.
+      expect(r.value.pickup.directions).toBeNull();
       expect(r.value.pickupTiming.startedAt).toEqual(T_DISPATCH);
     }
   });
@@ -149,28 +127,24 @@ describe('DispatchRide', () => {
     const r = await sut.execute({
       rideId: unwrap(RideId.create('nonexistent1234567890ab')),
       driver: DRIVER,
-      pickupDirections: makeRoute(),
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe('not_found');
   });
 
-  it('refuses to dispatch a ride that has already been dispatched', async () => {
+  it('a second driver claiming an already-claimed ride loses with ConflictError', async () => {
     const repo = new InMemoryRideRepository();
     const ride = makeRide();
     await repo.create(ride);
     const sut = new DispatchRide(repo, () => T_DISPATCH);
-    await sut.execute({
-      rideId: ride.id,
-      driver: DRIVER,
-      pickupDirections: makeRoute(),
-    });
-    const r2 = await sut.execute({
-      rideId: ride.id,
-      driver: DRIVER,
-      pickupDirections: makeRoute(),
-    });
-    expect(r2.ok).toBe(false);
-    if (!r2.ok) expect(r2.error.code).toBe('ride_illegal_transition');
+    const first = await sut.execute({ rideId: ride.id, driver: DRIVER });
+    expect(first.ok).toBe(true);
+
+    const second = await sut.execute({ rideId: ride.id, driver: DRIVER });
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.error.kind).toBe('conflict');
+      expect(second.error.code).toBe('ride_already_taken');
+    }
   });
 });

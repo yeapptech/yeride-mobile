@@ -17,7 +17,6 @@ import { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
-import { Route } from '@domain/entities/Route';
 import { StripeAccountId } from '@domain/entities/StripeAccountId';
 import { makeDriver } from '@domain/entities/User';
 import { UserId } from '@domain/entities/UserId';
@@ -136,25 +135,9 @@ function makeDispatchedRide(): Ride {
       ),
     }),
   );
-  const route = unwrap(
-    Route.create({
-      distanceMeters: 5_000,
-      durationSeconds: 600,
-      distanceText: '3.1 mi',
-      durationText: '10 mins',
-      encodedPolyline: '_p~iF',
-      startLocation: MIAMI,
-      endLocation: FORT_LAUDERDALE,
-      routeLabels: [],
-      tollPrice: null,
-      routeToken: 'tk',
-      description: '',
-    }),
-  );
   return unwrap(
-    awaiting.dispatch({
+    awaiting.claimForDispatch({
       driver: otherDriver,
-      pickupDirections: route,
       at: new Date(),
     }),
   );
@@ -287,7 +270,7 @@ describe('useDriverDispatchViewModel', () => {
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
 
-  it('starts in loading until ride + user + pickup route resolve', async () => {
+  it('reaches ready once ride + user resolve (no Google route on the path)', async () => {
     const setup = await setupSeededState();
     const { result } = renderHook(
       () =>
@@ -297,13 +280,12 @@ describe('useDriverDispatchViewModel', () => {
         }),
       { wrapper: withTestContainer(setup) },
     );
-    // Initial render: subscription has emitted (in-memory fake is sync) but
-    // the route query still races. Wait for ready.
+    // No pickup-route gate anymore — accept/decline paints as soon as the
+    // ride doc + driver profile resolve.
     await waitFor(() => {
       expect(result.current.status).toBe('ready');
     });
     expect(result.current.ride).not.toBeNull();
-    expect(result.current.pickupRoute).not.toBeNull();
   });
 
   it("flips to 'gone' when the ride leaves awaiting_driver mid-decision", async () => {
@@ -476,7 +458,7 @@ describe('useDriverDispatchViewModel', () => {
     }
   });
 
-  it('stays loading when driver location is null', async () => {
+  it('reaches ready even without a driver location (the claim does not need it)', async () => {
     const setup = await setupSeededState();
     const { result } = renderHook(
       () =>
@@ -486,11 +468,59 @@ describe('useDriverDispatchViewModel', () => {
         }),
       { wrapper: withTestContainer(setup) },
     );
-    // Without a driver location we can't compute the pickup route, so we
-    // never leave 'loading'. Wait a tick to confirm the status stayed put.
-    await new Promise((r) => setTimeout(r, 50));
-    expect(result.current.status).toBe('loading');
-    expect(result.current.pickupRoute).toBeNull();
+    // Driver location only feeds the Haversine distance label now — it's no
+    // longer a gate, so the panel still reaches 'ready'.
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+  });
+
+  it("onAccept that loses the claim race flips to 'gone' without navigating to the monitor", async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+
+    // Another driver claims the ride first: awaiting_driver → dispatched.
+    await act(async () => {
+      await setup.ridesRepo.transitionWithClaim({
+        rideId: RIDE_ID,
+        expectedFromStatus: 'awaiting_driver',
+        apply: (current) =>
+          current.claimForDispatch({
+            driver: unwrap(
+              DriverSnapshot.create({
+                id: unwrap(UserId.create('rivalDriverxxxxxxxxxxxxxxxxx')),
+                name: unwrap(PersonName.create({ first: 'Rival', last: 'D' })),
+                email: unwrap(Email.create('rival@yeapp.tech')),
+                phoneNumber: unwrap(PhoneNumber.create('+14155558888')),
+                stripeAccountId: 'acct_rival',
+                pushToken: null,
+                avatarUrl: null,
+                vehicle: null,
+              }),
+            ),
+            at: new Date(),
+          }),
+      });
+    });
+
+    act(() => {
+      result.current.onAccept();
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('gone');
+    });
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it("action is 'accept_schedule' for a scheduled ride; onAccept accepts and goes back (no monitor)", async () => {

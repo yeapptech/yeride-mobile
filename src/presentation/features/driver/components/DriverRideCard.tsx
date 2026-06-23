@@ -2,6 +2,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
+import { formatMilesAway } from '@presentation/utils/formatDistance';
 
 /**
  * Single ride-card the driver sees in the DriverHome bottom panel when a
@@ -69,11 +70,4 @@ export function DriverRideCard({
       )}
     </Pressable>
   );
-}
-
-function formatMilesAway(meters: number): string {
-  const miles = meters / 1609.344;
-  if (miles < 0.1) return 'Right here';
-  if (miles < 10) return `${miles.toFixed(1)} mi away`;
-  return `${Math.round(miles)} mi away`;
 }
