@@ -373,6 +373,42 @@ describe('useDriverDispatchViewModel', () => {
     }
   });
 
+  it('ignores a repeat onAccept after a successful claim (no spurious "gone")', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(
+      () =>
+        useDriverDispatchViewModel({
+          rideId: RIDE_ID,
+          driverLocation: DRIVER_LOCATION,
+        }),
+      { wrapper: withTestContainer(setup) },
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+
+    // First tap wins the claim and navigates to the monitor.
+    act(() => {
+      result.current.onAccept();
+    });
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledTimes(1);
+    });
+
+    // Double-tap: must be a no-op. Without the anyPending/anySuccess guard the
+    // second claim re-reads the now-dispatched doc, loses the awaiting_driver
+    // guard, returns ConflictError, and flips the winner to 'gone'.
+    act(() => {
+      result.current.onAccept();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(result.current.status).not.toBe('gone');
+  });
+
   it("bakes the driver's pushToken into the dispatch snapshot when the user has one", async () => {
     const setup = await setupSeededState({
       driverOverrides: {

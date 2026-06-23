@@ -212,6 +212,11 @@ export function useDriverDispatchViewModel(
     if (!subscribedRide) return;
     if (cannotAcceptReason !== null) return;
     if (action === null) return;
+    // A claim is already in flight or has already won — ignore repeat taps so
+    // the winning driver never fires a second transitionWithClaim that would
+    // re-read the now-dispatched doc, miss the awaiting_driver guard, and read
+    // as 'Already taken'.
+    if (anyPending || anySuccess) return;
 
     // Begin: the ride is already this driver's (reached from their own
     // Scheduled section). Atomic claim → dispatched, then drop into the
@@ -312,6 +317,8 @@ export function useDriverDispatchViewModel(
     subscribedRide,
     action,
     cannotAcceptReason,
+    anyPending,
+    anySuccess,
     rideId,
     dispatchMutation,
     acceptScheduleMutation,

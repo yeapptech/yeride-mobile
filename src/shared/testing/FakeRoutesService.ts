@@ -15,7 +15,9 @@ import { Result } from '@domain/shared/Result';
  * Google. Configurable behaviour:
  *
  *   - `seed(routes)` — return this exact list on the next call.
- *   - `seedError(error)` — return a Result.err with this domain error.
+ *   - `seedError(error)` — return a Result.err with this domain error (one-shot).
+ *   - `seedPersistentError(error)` — fail every call until reset (for testing
+ *     bounded-retry callers without re-seeding between attempts).
  *   - by default, returns one default-shaped route.
  *
  * The fake also captures every call so tests can assert that the use case
@@ -30,12 +32,21 @@ export class FakeRoutesService implements RoutesService {
     | { type: 'error'; error: NetworkError | NotFoundError | ValidationError }
     | null = null;
 
+  private persistentError:
+    | NetworkError
+    | NotFoundError
+    | ValidationError
+    | null = null;
+
   async computeRoutes(
     args: ComputeRoutesArgs,
   ): Promise<
     Result<readonly Route[], NetworkError | NotFoundError | ValidationError>
   > {
     this.spies.push(args);
+    if (this.persistentError) {
+      return Result.err(this.persistentError);
+    }
     if (this.nextResult?.type === 'error') {
       const e = this.nextResult.error;
       this.nextResult = null;
@@ -59,9 +70,16 @@ export class FakeRoutesService implements RoutesService {
     this.nextResult = { type: 'error', error };
   }
 
+  seedPersistentError(
+    error: NetworkError | NotFoundError | ValidationError,
+  ): void {
+    this.persistentError = error;
+  }
+
   reset(): void {
     this.spies = [];
     this.nextResult = null;
+    this.persistentError = null;
   }
 }
 

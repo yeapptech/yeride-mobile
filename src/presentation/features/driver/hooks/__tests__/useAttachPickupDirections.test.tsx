@@ -308,4 +308,49 @@ describe('useAttachPickupDirections', () => {
       expect(persisted.value.pickup.directions).toBeNull();
     }
   });
+
+  it('stops recomputing after the attempt cap on a persistent compute failure', async () => {
+    const rides = new InMemoryRideRepository();
+    const routes = new FakeRoutesService();
+    rides.seed(makeDispatchedRideNoDirections());
+    const ride = makeDispatchedRideNoDirections();
+    routes.seedPersistentError(
+      new NetworkError({
+        code: 'routes_request_timeout',
+        message: 'timed out',
+      }),
+    );
+    useGpsStore.getState().setLocation(locationEvent());
+
+    renderHook(() => useAttachPickupDirections(ride), {
+      wrapper: withContainer(rides, routes),
+    });
+
+    // First attempt fires on mount.
+    await waitFor(() => {
+      expect(routes.spies.length).toBe(1);
+    });
+
+    // Drive more GPS ticks than the cap (distinct coords each). Retries
+    // continue only up to MAX_ATTACH_ATTEMPTS, then stop.
+    const ticks = [
+      unwrap(Coordinates.create(25.81, -80.22)),
+      unwrap(Coordinates.create(25.82, -80.23)),
+      unwrap(Coordinates.create(25.83, -80.24)),
+      unwrap(Coordinates.create(25.84, -80.25)),
+    ];
+    for (const c of ticks) {
+      act(() => {
+        useGpsStore.getState().setLocation(locationEvent(c));
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+    }
+
+    // Capped at 3 compute calls despite 5 GPS ticks; no directions attached.
+    expect(routes.spies.length).toBe(3);
+    const persisted = await rides.getById(RIDE_ID);
+    expect(persisted.ok && persisted.value.pickup.directions).toBeNull();
+  });
 });

@@ -7,6 +7,9 @@ import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('AttachPickupDirections');
 
+/** Max driver→pickup route computations per ride before giving up (best-effort). */
+const MAX_ATTACH_ATTEMPTS = 3;
+
 /**
  * Post-claim pickup-directions hook for the driver monitor.
  *
@@ -20,14 +23,20 @@ const logger = LOG.extend('AttachPickupDirections');
  *
  * Fires once per ride: guarded by `ride.status === 'dispatched'`,
  * `ride.pickup.directions === null`, an available live coordinate, and a
- * per-rideId ref. On a compute/attach failure the ref is cleared so a later
- * GPS emit retries; on success the attached directions make the guard
- * short-circuit, so it never recomputes.
+ * per-rideId ref. On a no-route attempt (compute failure or empty result) the
+ * ref is cleared so a later GPS emit retries — up to `MAX_ATTACH_ATTEMPTS`,
+ * after which it gives up so a persistent Routes failure doesn't recompute
+ * (and burn a quota unit) on every GPS tick. On success the attached
+ * directions make the guard short-circuit, so it never recomputes.
  */
 export function useAttachPickupDirections(ride: Ride | null): void {
   const useCases = useUseCases();
   const driverCoords = useGpsCurrentLocation();
   const attemptedRideRef = useRef<string | null>(null);
+  const failuresRef = useRef<{ rideId: string; count: number }>({
+    rideId: '',
+    count: 0,
+  });
 
   useEffect(() => {
     if (!ride) return;
@@ -38,6 +47,9 @@ export function useAttachPickupDirections(ride: Ride | null): void {
     const rideKey = String(ride.id);
     if (attemptedRideRef.current === rideKey) return;
     attemptedRideRef.current = rideKey;
+    if (failuresRef.current.rideId !== rideKey) {
+      failuresRef.current = { rideId: rideKey, count: 0 };
+    }
 
     // No abort-on-cleanup: the effect re-runs on every GPS tick, and the
     // latch above already dedupes by rideId. Letting an in-flight attempt
@@ -49,15 +61,23 @@ export function useAttachPickupDirections(ride: Ride | null): void {
         origin: { coordinates: driverCoords },
         destination: { coordinates: ride.pickup.location },
       });
-      if (!routesR.ok) {
-        // Per-attempt failure — clear the latch so the next GPS emit retries.
-        logger.warn('computeRoutes (pickup) failed', routesR.error);
-        attemptedRideRef.current = null;
-        return;
-      }
-      const route = routesR.value[0];
+      const route = routesR.ok ? routesR.value[0] : undefined;
       if (!route) {
-        attemptedRideRef.current = null;
+        if (!routesR.ok) {
+          logger.warn('computeRoutes (pickup) failed', routesR.error);
+        }
+        // No usable route this attempt. Clear the latch so the next GPS emit
+        // retries — but only up to MAX_ATTACH_ATTEMPTS, then give up (pickup
+        // directions are best-effort; the ride is operable without them) so a
+        // persistent failure doesn't recompute on every GPS tick.
+        failuresRef.current.count += 1;
+        if (failuresRef.current.count < MAX_ATTACH_ATTEMPTS) {
+          attemptedRideRef.current = null;
+        } else {
+          logger.warn('attachPickupDirections: giving up after max attempts', {
+            rideId: rideKey,
+          });
+        }
         return;
       }
       const attachR = await useCases.attachPickupDirections.execute({
