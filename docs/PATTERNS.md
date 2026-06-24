@@ -55,6 +55,43 @@ driver status view.
   driver-side (gated on `isDriverCode`). They diverge on the
   available code list (`driver_no_show` rider-only;
   `passenger_no_show` driver-only) and on copy.
+- **First-come-first-served atomic claim.** Accepting an available
+  ride routes `DispatchRide` (and `AcceptScheduledRide` /
+  `BeginScheduledRide`) through `RideRepository.transitionWithClaim`
+  — a Firestore `runTransaction` that re-reads + status-guards INSIDE
+  the transaction and returns `ConflictError('ride_already_taken')` on
+  a lost race instead of clobbering the winner's assignment. The `Ride`
+  claim methods (`claimForDispatch` / `beginScheduledClaim`) are
+  directions-free so the claim writes instantly; the doc shape is
+  byte-identical to the prior `update` (no Firestore-rules change). The
+  loser's VM flips to the existing "Already taken" panel. This is a
+  genuine improvement over legacy, which used a transaction but did NOT
+  guard status and would overwrite an already-dispatched trip.
+- **Pickup directions are deferred + best-effort.**
+  `useDriverDispatchViewModel` does NOT compute the driver→pickup
+  Google route — its loading gate is user + ride only, which is what
+  makes accept/decline paint instantly. Only the WINNING driver
+  computes + attaches the route post-claim, via `useAttachPickupDirections`
+  (the `AttachPickupDirections` use case) mounted on the monitor, so
+  only the winner spends a Routes quota unit. The hook fires once per
+  ride (per-rideId latch), retries on the next GPS emit when compute
+  fails, but caps total attempts at `MAX_ATTACH_ATTEMPTS` so a
+  persistent Routes failure doesn't burn quota on every GPS tick.
+  `pickup.directions` is nullable and every consumer null-guards, so a
+  `dispatched` ride with no route yet is fully operable (ETA fills in
+  when the route lands).
+- **Double-tap claim guard.** `onAccept` early-returns while a claim
+  mutation is pending or has already won
+  (`anyPending || anySuccess`), so the winning driver can't fire a
+  second `transitionWithClaim` that would re-read the now-`dispatched`
+  doc, miss the `awaiting_driver` guard, and read as "Already taken." A
+  genuine rival-lost-race still flips to `'gone'`.
+- **DriverHome nearest-first ordering.** Available rides sort
+  nearest-first by LIVE GPS Haversine distance
+  (`useGpsCurrentLocation`), re-ordering as the driver moves, while the
+  Firestore availability subscription stays keyed on the STABLE
+  foreground coord so it doesn't re-subscribe per GPS tick.
+  `formatMilesAway` lives in `@presentation/utils/formatDistance`.
 - **DriverMonitor map polyline rules.** The map keeps a fixed pool
   of always-mounted children (the `<Map/>` component's invariant).
   Drive visibility via props:
