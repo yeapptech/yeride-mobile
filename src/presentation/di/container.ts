@@ -30,6 +30,7 @@ import { ProcessTip } from '@app/usecases/payment/ProcessTip';
 import { RefreshConnectAccountStatus } from '@app/usecases/payment/RefreshConnectAccountStatus';
 import { SetDefaultPaymentMethod } from '@app/usecases/payment/SetDefaultPaymentMethod';
 import { AcceptScheduledRide } from '@app/usecases/ride/AcceptScheduledRide';
+import { AttachPickupDirections } from '@app/usecases/ride/AttachPickupDirections';
 import { BeginScheduledRide } from '@app/usecases/ride/BeginScheduledRide';
 import { CancelRideByDriver } from '@app/usecases/ride/CancelRideByDriver';
 import { CancelRideByRider } from '@app/usecases/ride/CancelRideByRider';
@@ -182,6 +183,7 @@ export interface UseCases {
   dispatchRide: DispatchRide;
   acceptScheduledRide: AcceptScheduledRide;
   beginScheduledRide: BeginScheduledRide;
+  attachPickupDirections: AttachPickupDirections;
   startRide: StartRide;
   requestPayment: RequestPayment;
   cancelRideByRider: CancelRideByRider;
@@ -352,6 +354,7 @@ export function makeUseCases(args: {
     dispatchRide: new DispatchRide(args.rides, clock),
     acceptScheduledRide: new AcceptScheduledRide(args.rides),
     beginScheduledRide: new BeginScheduledRide(args.rides, clock),
+    attachPickupDirections: new AttachPickupDirections(args.rides),
     startRide: new StartRide(args.rides, clock),
     requestPayment: new RequestPayment(args.rides),
     cancelRideByRider: new CancelRideByRider(args.rides),

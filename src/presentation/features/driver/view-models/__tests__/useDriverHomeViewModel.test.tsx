@@ -165,6 +165,33 @@ function makeAwaitingRide(args: { id: string }): Ride {
   );
 }
 
+function makeAwaitingRideAt(id: string, location: Coordinates): Ride {
+  return unwrap(
+    Ride.create({
+      id: unwrap(RideId.create(id)),
+      passenger: PASSENGER,
+      rideService: ECONOMY_SNAPSHOT,
+      pickup: unwrap(
+        Endpoint.create({
+          location,
+          address: 'pickup',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      dropoff: unwrap(
+        Endpoint.create({
+          location: FORT_LAUDERDALE,
+          address: 'dropoff',
+          placeName: null,
+          directions: null,
+        }),
+      ),
+      createdAt: new Date(),
+    }),
+  );
+}
+
 // A valid 17-char VIN with correct check digit (legacy fixture).
 const VALID_VIN = '1HGBH41JXMN109186';
 
@@ -400,6 +427,34 @@ describe('useDriverHomeViewModel', () => {
     );
   });
 
+  it('orders available rides nearest-first by live Haversine distance', async () => {
+    const setup = await setupSeededState();
+    // Driver foreground location is MIAMI (the expo-location mock). Seed the
+    // FAR ride first so insertion order is [far, near]; sorting must flip it.
+    setup.ridesRepo.seed(
+      makeAwaitingRideAt('rideFar0000000000001a', FORT_LAUDERDALE),
+    );
+    setup.ridesRepo.seed(makeAwaitingRideAt('rideNear000000000001a', MIAMI));
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+
+    act(() => {
+      result.current.onToggleOnline();
+    });
+
+    await waitFor(() => {
+      expect(result.current.availableRides).toHaveLength(2);
+    });
+    expect(result.current.availableRides.map((r) => String(r.id))).toEqual([
+      'rideNear000000000001a',
+      'rideFar0000000000001a',
+    ]);
+  });
+
   it('toggling offline tears down the subscription (rides go back to empty)', async () => {
     const setup = await setupSeededState();
     setup.ridesRepo.seed(makeAwaitingRide({ id: 'rideToTearDown1234ab' }));
@@ -533,11 +588,12 @@ describe('useDriverHomeViewModel', () => {
       }),
     );
     return unwrap(
-      makeAwaitingRide({ id }).dispatch({
-        driver: driverSnap,
-        pickupDirections: route,
-        at: new Date(),
-      }),
+      unwrap(
+        makeAwaitingRide({ id }).claimForDispatch({
+          driver: driverSnap,
+          at: new Date(),
+        }),
+      ).attachPickupDirections(route),
     );
   }
 

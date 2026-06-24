@@ -1,14 +1,13 @@
 import { useNavigation } from '@react-navigation/native';
-import { useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
 import { DriverSnapshot } from '@domain/entities/DriverSnapshot';
 import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type { RideStatus } from '@domain/entities/RideStatus';
-import type { Route } from '@domain/entities/Route';
 import type { User } from '@domain/entities/User';
+import { ConflictError } from '@domain/errors';
 import { useUseCases } from '@presentation/di';
 import { useFirestoreSubscription } from '@presentation/hooks';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
@@ -39,19 +38,21 @@ const logger = LOG.extend('DriverDispatchVM');
  *   - Driver location is passed in (the screen reads `useCurrentLocation`
  *     and feeds it down). Keeps this VM testable without an
  *     `expo-location` mock — the parent screen already owns location for
- *     the map.
- *   - `useQuery` wrapping `computeRoutes(driver → ride.pickup)` for the
- *     pickup-route preview. Re-fetches if the rideId or driver location
- *     changes.
- *   - `useDispatchRideMutation` — the accept handler. On success: writes
- *     `useDriverStatusStore.setMode('dispatched')` and replaces the
- *     navigation stack with `DriverMonitor` so back-nav doesn't bounce
- *     the driver back into the dispatch screen mid-trip.
+ *     the map. Used only for the Haversine "X mi to pickup" label.
+ *   - `useDispatchRideMutation` — the accept handler. NO Google Routes
+ *     call here: the screen must paint accept/decline instantly. The
+ *     winning driver computes + attaches the driver→pickup directions
+ *     AFTER the claim, in the monitor (`useAttachPickupDirections`). On
+ *     success: writes `useDriverStatusStore.setMode('dispatched')` and
+ *     replaces the navigation stack with `DriverMonitor` so back-nav
+ *     doesn't bounce the driver back into the dispatch screen mid-trip.
  *
  * No dispatch model with offer-timeouts; YeRide is driver-pull (drivers
- * pick from the available list; whichever accepts first wins the entity
- * transition). The race-condition handling is reactive — the live
- * `ObserveRide` flips us to `'gone'` rather than polling or counting down.
+ * pick from the available list; whichever accepts first wins the atomic
+ * `transitionWithClaim`). A driver who loses the race gets a
+ * `ConflictError('ride_already_taken')` from the mutation → we flip to
+ * `'gone'` (the "Already taken" panel). The live `ObserveRide` is a second
+ * line of defence that also flips us to `'gone'` when the status drifts.
  */
 
 export type DriverDispatchStatus =
@@ -88,7 +89,6 @@ function actionForStatus(status: RideStatus): DispatchAction | null {
 export interface UseDriverDispatchViewModel {
   readonly status: DriverDispatchStatus;
   readonly ride: Ride | null;
-  readonly pickupRoute: Route | null;
   readonly user: User | null;
   readonly driverLocation: Coordinates | null;
   readonly cannotAcceptReason: CannotAcceptReason | null;
@@ -150,34 +150,11 @@ export function useDriverDispatchViewModel(
     acceptScheduleMutation.isSuccess ||
     beginMutation.isSuccess;
 
-  // Pickup-route preview: driver's current location → ride's pickup. Skipped
-  // when we don't yet have both; the screen falls back to the `'loading'`
-  // state. Cache is keyed on lat/lng (rounded by ride.queries' `available`
-  // pattern would be over-engineering here — this is one-shot).
-  const pickupRouteQuery = useQuery({
-    queryKey: [
-      'route',
-      'pickup',
-      String(rideId),
-      driverLocation?.latitude ?? null,
-      driverLocation?.longitude ?? null,
-    ],
-    queryFn: async (): Promise<Route | null> => {
-      if (!subscribedRide || !driverLocation) return null;
-      const r = await useCases.computeRoutes.execute({
-        origin: { coordinates: driverLocation },
-        destination: { coordinates: subscribedRide.pickup.location },
-      });
-      if (!r.ok) {
-        logger.warn('computeRoutes failed', r.error);
-        return null;
-      }
-      return r.value[0] ?? null;
-    },
-    enabled: subscribedRide !== null && driverLocation !== null,
-  });
-
-  const pickupRoute = pickupRouteQuery.data ?? null;
+  // Set when a claim mutation fails with ConflictError — another driver
+  // won the race. Forces `'gone'` (the "Already taken" panel) authoritatively
+  // rather than waiting on the live ObserveRide subscription to notice the
+  // status drift.
+  const [claimFailed, setClaimFailed] = useState(false);
 
   // Status derivation. Order matters:
   //   1. `'gone'` — ride was taken by someone else (status flipped off
@@ -194,11 +171,13 @@ export function useDriverDispatchViewModel(
   }, [user]);
 
   const status = useMemo<DriverDispatchStatus>(() => {
-    // 'gone' takes priority once we've pinned an intent: either the ride
-    // started in a non-actionable status, or it drifted off the pinned
-    // status (taken by another driver / cancelled). Guarded by
-    // !anySuccess/!anyPending so our own successful transition (which
-    // changes the status) doesn't read as 'gone' before we navigate.
+    // 'gone' takes priority: we lost the claim race (ConflictError) OR,
+    // once we've pinned an intent, the ride started in a non-actionable
+    // status or drifted off the pinned status (taken by another driver /
+    // cancelled). Guarded by !anySuccess/!anyPending so our own successful
+    // transition (which changes the status) doesn't read as 'gone' before
+    // we navigate.
+    if (claimFailed) return 'gone';
     if (
       subscribedRide !== null &&
       intentStatus !== null &&
@@ -210,17 +189,15 @@ export function useDriverDispatchViewModel(
     }
     if (anyPending) return 'accepting';
     if (cannotAcceptReason !== null) return 'cannot_accept';
-    if (
-      userQuery.isLoading ||
-      subscribedRide === null ||
-      driverLocation === null ||
-      pickupRouteQuery.isLoading ||
-      pickupRoute === null
-    ) {
+    // Gate only on the fast reads — user profile + the ride doc. The
+    // driver→pickup route is NOT awaited here (it's computed after the
+    // claim); this is what makes accept/decline paint immediately.
+    if (userQuery.isLoading || subscribedRide === null) {
       return 'loading';
     }
     return 'ready';
   }, [
+    claimFailed,
     subscribedRide,
     intentStatus,
     action,
@@ -228,9 +205,6 @@ export function useDriverDispatchViewModel(
     anySuccess,
     cannotAcceptReason,
     userQuery.isLoading,
-    driverLocation,
-    pickupRouteQuery.isLoading,
-    pickupRoute,
   ]);
 
   const onAccept = useCallback(() => {
@@ -238,20 +212,28 @@ export function useDriverDispatchViewModel(
     if (!subscribedRide) return;
     if (cannotAcceptReason !== null) return;
     if (action === null) return;
+    // A claim is already in flight or has already won — ignore repeat taps so
+    // the winning driver never fires a second transitionWithClaim that would
+    // re-read the now-dispatched doc, miss the awaiting_driver guard, and read
+    // as 'Already taken'.
+    if (anyPending || anySuccess) return;
 
     // Begin: the ride is already this driver's (reached from their own
-    // Scheduled section). Attach the freshly-computed pickup route and
-    // flip to dispatched, then drop into the existing monitor flow.
+    // Scheduled section). Atomic claim → dispatched, then drop into the
+    // monitor flow (which computes + attaches the pickup route).
     if (action === 'begin') {
-      if (!pickupRoute) return;
       beginMutation.mutate(
-        { rideId, pickupDirections: pickupRoute },
+        { rideId },
         {
           onSuccess: () => {
             setMode('dispatched');
             navigation.replace('DriverMonitor', { rideId: String(rideId) });
           },
           onError: (e: unknown) => {
+            if (e instanceof ConflictError) {
+              setClaimFailed(true);
+              return;
+            }
             logger.warn('beginScheduledRide failed', e);
           },
         },
@@ -294,6 +276,10 @@ export function useDriverDispatchViewModel(
             navigation.goBack();
           },
           onError: (e: unknown) => {
+            if (e instanceof ConflictError) {
+              setClaimFailed(true);
+              return;
+            }
             logger.warn('acceptScheduledRide failed', e);
           },
         },
@@ -301,13 +287,11 @@ export function useDriverDispatchViewModel(
       return;
     }
 
-    // action === 'accept' (awaiting_driver) — immediate dispatch.
-    if (!pickupRoute) return;
+    // action === 'accept' (awaiting_driver) — atomic claim, no Google call.
     dispatchMutation.mutate(
       {
         rideId,
         driver: snapshotR.value,
-        pickupDirections: pickupRoute,
       },
       {
         onSuccess: () => {
@@ -315,10 +299,15 @@ export function useDriverDispatchViewModel(
           // Replace (not push) so back-nav goes to DriverHome rather
           // than bouncing the driver into the now-stale dispatch
           // screen. The status-router inside DriverMonitor renders the
-          // appropriate view from the live ride.
+          // appropriate view from the live ride, and
+          // useAttachPickupDirections fills in the pickup route.
           navigation.replace('DriverMonitor', { rideId: String(rideId) });
         },
         onError: (e: unknown) => {
+          if (e instanceof ConflictError) {
+            setClaimFailed(true);
+            return;
+          }
           logger.warn('dispatchRide failed', e);
         },
       },
@@ -327,8 +316,9 @@ export function useDriverDispatchViewModel(
     user,
     subscribedRide,
     action,
-    pickupRoute,
     cannotAcceptReason,
+    anyPending,
+    anySuccess,
     rideId,
     dispatchMutation,
     acceptScheduleMutation,
@@ -344,7 +334,6 @@ export function useDriverDispatchViewModel(
   return {
     status,
     ride: subscribedRide,
-    pickupRoute,
     user,
     driverLocation,
     cannotAcceptReason,

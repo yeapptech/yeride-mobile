@@ -174,11 +174,9 @@ describe('useInProgressRidesSubscription', () => {
     const awaiting = makeAwaiting('driverRoleSub12345ab');
     await rides.create(awaiting);
     const dispatched = unwrap(
-      awaiting.dispatch({
-        driver: DRIVER,
-        pickupDirections: makeRoute(),
-        at: new Date(),
-      }),
+      unwrap(
+        awaiting.claimForDispatch({ driver: DRIVER, at: new Date() }),
+      ).attachPickupDirections(makeRoute()),
     );
     await rides.update(dispatched);
 

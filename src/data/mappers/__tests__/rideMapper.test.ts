@@ -237,11 +237,9 @@ describe('domain → doc → domain round-trip', () => {
 
   it('preserves a dispatched ride with driver + pickup directions', () => {
     const dispatched = unwrap(
-      freshRide().dispatch({
-        driver: DRIVER,
-        pickupDirections: makeRoute(),
-        at: T_DISPATCH,
-      }),
+      unwrap(
+        freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
+      ).attachPickupDirections(makeRoute()),
     );
     const doc = toDoc(dispatched);
     const parsed = unwrap(parseRideDoc(doc));
@@ -258,11 +256,7 @@ describe('domain → doc → domain round-trip', () => {
   it('preserves a started ride with pickup odometer + elapsed time', () => {
     const started = unwrap(
       unwrap(
-        freshRide().dispatch({
-          driver: DRIVER,
-          pickupDirections: makeRoute(),
-          at: T_DISPATCH,
-        }),
+        freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
       ).start({ odometerMeters: 1_500, at: T_PICKUP }),
     );
     const doc = toDoc(started);
@@ -281,11 +275,7 @@ describe('domain → doc → domain round-trip', () => {
       unwrap(
         unwrap(
           unwrap(
-            freshRide().dispatch({
-              driver: DRIVER,
-              pickupDirections: makeRoute(),
-              at: T_DISPATCH,
-            }),
+            freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
           ).start({ odometerMeters: 1_500, at: T_PICKUP }),
         ).requestPayment({ odometerMeters: 7_500, at: T_COMPLETE }),
       ).markCompleted(),

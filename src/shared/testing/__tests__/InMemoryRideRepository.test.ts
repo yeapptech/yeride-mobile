@@ -15,7 +15,6 @@ import { RideId } from '@domain/entities/RideId';
 import { RideListCursor } from '@domain/entities/RideListCursor';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
-import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
 import { NetworkError } from '@domain/errors';
 
@@ -129,24 +128,6 @@ function makeRide(args: {
   );
 }
 
-function makeRoute(): Route {
-  return unwrap(
-    Route.create({
-      distanceMeters: 5_000,
-      durationSeconds: 600,
-      distanceText: '3.1 mi',
-      durationText: '10 mins',
-      encodedPolyline: '_p~iF',
-      startLocation: MIAMI,
-      endLocation: FORT_LAUDERDALE,
-      routeLabels: [],
-      tollPrice: null,
-      routeToken: 'tk',
-      description: '',
-    }),
-  );
-}
-
 describe('InMemoryRideRepository.create', () => {
   it('stores a new ride and emits to observers', async () => {
     const repo = new InMemoryRideRepository();
@@ -186,9 +167,8 @@ describe('InMemoryRideRepository.update', () => {
       observed.push(r);
     });
     const dispatched = unwrap(
-      ride.dispatch({
+      ride.claimForDispatch({
         driver: DRIVER,
-        pickupDirections: makeRoute(),
         at: new Date(),
       }),
     );
@@ -203,6 +183,61 @@ describe('InMemoryRideRepository.update', () => {
     const repo = new InMemoryRideRepository();
     const ride = makeRide({ id: 'tripIdAbcDef1234567890', pickup: MIAMI });
     const r = await repo.update(ride);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('not_found');
+  });
+});
+
+describe('InMemoryRideRepository.transitionWithClaim', () => {
+  it('applies the transition when the current status matches', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripClaim12345678901a', pickup: MIAMI });
+    await repo.create(ride);
+
+    const r = await repo.transitionWithClaim({
+      rideId: ride.id,
+      expectedFromStatus: 'awaiting_driver',
+      apply: (current) =>
+        current.claimForDispatch({ driver: DRIVER, at: new Date() }),
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.status).toBe('dispatched');
+  });
+
+  it('returns ConflictError when the status no longer matches (already claimed)', async () => {
+    const repo = new InMemoryRideRepository();
+    const ride = makeRide({ id: 'tripClaim2nd123456789', pickup: MIAMI });
+    await repo.create(ride);
+
+    const first = await repo.transitionWithClaim({
+      rideId: ride.id,
+      expectedFromStatus: 'awaiting_driver',
+      apply: (current) =>
+        current.claimForDispatch({ driver: DRIVER, at: new Date() }),
+    });
+    expect(first.ok).toBe(true);
+
+    const second = await repo.transitionWithClaim({
+      rideId: ride.id,
+      expectedFromStatus: 'awaiting_driver',
+      apply: (current) =>
+        current.claimForDispatch({ driver: DRIVER, at: new Date() }),
+    });
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.error.kind).toBe('conflict');
+      expect(second.error.code).toBe('ride_already_taken');
+    }
+  });
+
+  it('returns NotFoundError for an unknown ride', async () => {
+    const repo = new InMemoryRideRepository();
+    const r = await repo.transitionWithClaim({
+      rideId: unwrap(RideId.create('nonexistent1234567890ab')),
+      expectedFromStatus: 'awaiting_driver',
+      apply: (current) =>
+        current.claimForDispatch({ driver: DRIVER, at: new Date() }),
+    });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.kind).toBe('not_found');
   });
@@ -285,9 +320,8 @@ describe('InMemoryRideRepository.subscribeAvailableRides', () => {
     expect(calls[0]).toHaveLength(1); // initial: ride is available
 
     const dispatched = unwrap(
-      ride.dispatch({
+      ride.claimForDispatch({
         driver: DRIVER,
-        pickupDirections: makeRoute(),
         at: new Date(),
       }),
     );
@@ -551,18 +585,16 @@ describe('InMemoryRideRepository.listByDriver', () => {
     // persists the new driver field — same as production flow.
     await repo.update(
       unwrap(
-        a.dispatch({
+        a.claimForDispatch({
           driver: DRIVER,
-          pickupDirections: makeRoute(),
           at: new Date(),
         }),
       ),
     );
     await repo.update(
       unwrap(
-        b.dispatch({
+        b.claimForDispatch({
           driver: DRIVER,
-          pickupDirections: makeRoute(),
           at: new Date(),
         }),
       ),
@@ -594,9 +626,8 @@ describe('InMemoryRideRepository.listByDriver', () => {
     await repo.create(ride);
     await repo.update(
       unwrap(
-        ride.dispatch({
+        ride.claimForDispatch({
           driver: DRIVER,
-          pickupDirections: makeRoute(),
           at: new Date(),
         }),
       ),
@@ -845,9 +876,8 @@ describe('InMemoryRideRepository — observeInProgressRidesByDriver', () => {
     await repo.create(toDispatch);
     await repo.update(
       unwrap(
-        toDispatch.dispatch({
+        toDispatch.claimForDispatch({
           driver: DRIVER,
-          pickupDirections: makeRoute(),
           at: new Date(),
         }),
       ),
@@ -877,9 +907,8 @@ describe('InMemoryRideRepository — observeInProgressRidesByDriver', () => {
     await repo.create(ride);
     await repo.update(
       unwrap(
-        ride.dispatch({
+        ride.claimForDispatch({
           driver: DRIVER,
-          pickupDirections: makeRoute(),
           at: new Date(),
         }),
       ),
@@ -902,9 +931,8 @@ describe('InMemoryRideRepository — observeInProgressRidesByDriver', () => {
 
     await repo.update(
       unwrap(
-        ride.dispatch({
+        ride.claimForDispatch({
           driver: DRIVER,
-          pickupDirections: makeRoute(),
           at: new Date(),
         }),
       ),
@@ -1004,8 +1032,7 @@ describe('InMemoryRideRepository — observeScheduledRidesByDriver', () => {
 
     await repo.update(
       unwrap(
-        accepted.beginScheduledRide({
-          pickupDirections: makeRoute(),
+        accepted.beginScheduledClaim({
           at: new Date(),
         }),
       ),

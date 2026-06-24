@@ -134,11 +134,9 @@ function makeStartedRide(): Ride {
   );
   return unwrap(
     unwrap(
-      base.dispatch({
-        driver: driverSnap,
-        pickupDirections: pickupRoute,
-        at: new Date(),
-      }),
+      unwrap(
+        base.claimForDispatch({ driver: driverSnap, at: new Date() }),
+      ).attachPickupDirections(pickupRoute),
     ).start({ odometerMeters: 1_000, at: new Date() }),
   );
 }

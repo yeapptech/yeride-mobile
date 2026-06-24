@@ -135,11 +135,9 @@ function makeDispatchedRide(): Ride {
     }),
   );
   return unwrap(
-    awaiting.dispatch({
-      driver: DRIVER_SNAPSHOT,
-      pickupDirections: route,
-      at: new Date(),
-    }),
+    unwrap(
+      awaiting.claimForDispatch({ driver: DRIVER_SNAPSHOT, at: new Date() }),
+    ).attachPickupDirections(route),
   );
 }
 

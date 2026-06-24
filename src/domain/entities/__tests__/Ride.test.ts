@@ -144,35 +144,47 @@ describe('Ride.create', () => {
   });
 });
 
-describe('Ride.dispatch', () => {
-  it('flips status to dispatched and records driver + pickup directions + start time', () => {
-    const r = freshRide().dispatch({
+describe('Ride.claimForDispatch', () => {
+  it('flips status to dispatched and records driver + start time WITHOUT directions', () => {
+    const r = freshRide().claimForDispatch({
       driver: DRIVER,
-      pickupDirections: makeRoute(),
       at: T_DISPATCH,
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.value.status).toBe('dispatched');
       expect(r.value.driver?.stripeAccountId).toBe('acct_abc');
-      expect(r.value.pickup.directions).not.toBeNull();
+      // Directions are attached AFTER the claim, by the winning driver.
+      expect(r.value.pickup.directions).toBeNull();
       expect(r.value.pickupTiming.startedAt).toEqual(T_DISPATCH);
     }
   });
 
-  it('rejects dispatch on a non-awaiting_driver ride', () => {
+  it('rejects claimForDispatch on a non-awaiting_driver ride', () => {
     const dispatched = unwrap(
-      freshRide().dispatch({
-        driver: DRIVER,
-        pickupDirections: makeRoute(),
-        at: T_DISPATCH,
-      }),
+      freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
     );
-    const r = dispatched.dispatch({
-      driver: DRIVER,
-      pickupDirections: makeRoute(),
-      at: T_DISPATCH,
-    });
+    const r = dispatched.claimForDispatch({ driver: DRIVER, at: T_DISPATCH });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('ride_illegal_transition');
+  });
+});
+
+describe('Ride.attachPickupDirections', () => {
+  it('attaches directions to a dispatched ride', () => {
+    const dispatched = unwrap(
+      freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
+    );
+    const r = dispatched.attachPickupDirections(makeRoute());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.status).toBe('dispatched');
+      expect(r.value.pickup.directions).not.toBeNull();
+    }
+  });
+
+  it('rejects attaching directions when not dispatched', () => {
+    const r = freshRide().attachPickupDirections(makeRoute());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe('ride_illegal_transition');
   });
@@ -181,11 +193,7 @@ describe('Ride.dispatch', () => {
 describe('Ride.start', () => {
   it('flips dispatched → started and computes elapsed seconds from dispatch', () => {
     const dispatched = unwrap(
-      freshRide().dispatch({
-        driver: DRIVER,
-        pickupDirections: makeRoute(),
-        at: T_DISPATCH,
-      }),
+      freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
     );
     const r = dispatched.start({ odometerMeters: 1_500, at: T_PICKUP });
     expect(r.ok).toBe(true);
@@ -206,11 +214,7 @@ describe('Ride.start', () => {
 
   it('rejects negative odometer', () => {
     const dispatched = unwrap(
-      freshRide().dispatch({
-        driver: DRIVER,
-        pickupDirections: makeRoute(),
-        at: T_DISPATCH,
-      }),
+      freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
     );
     const r = dispatched.start({ odometerMeters: -1, at: T_PICKUP });
     expect(r.ok).toBe(false);
@@ -222,11 +226,7 @@ describe('Ride.requestPayment', () => {
   it('flips started → payment_requested and records dropoff completion', () => {
     const started = unwrap(
       unwrap(
-        freshRide().dispatch({
-          driver: DRIVER,
-          pickupDirections: makeRoute(),
-          at: T_DISPATCH,
-        }),
+        freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
       ).start({ odometerMeters: 1_500, at: T_PICKUP }),
     );
     const r = started.requestPayment({
@@ -253,11 +253,7 @@ describe('Ride.requestPayment', () => {
   it('rejects an odometer that decreased from pickup-complete', () => {
     const started = unwrap(
       unwrap(
-        freshRide().dispatch({
-          driver: DRIVER,
-          pickupDirections: makeRoute(),
-          at: T_DISPATCH,
-        }),
+        freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
       ).start({ odometerMeters: 5_000, at: T_PICKUP }),
     );
     const r = started.requestPayment({
@@ -274,11 +270,7 @@ describe('Ride.markCompleted', () => {
     const requested = unwrap(
       unwrap(
         unwrap(
-          freshRide().dispatch({
-            driver: DRIVER,
-            pickupDirections: makeRoute(),
-            at: T_DISPATCH,
-          }),
+          freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
         ).start({ odometerMeters: 1_500, at: T_PICKUP }),
       ).requestPayment({ odometerMeters: 7_500, at: T_COMPLETE }),
     );
@@ -299,11 +291,7 @@ describe('Ride.markPaymentFailed', () => {
     const requested = unwrap(
       unwrap(
         unwrap(
-          freshRide().dispatch({
-            driver: DRIVER,
-            pickupDirections: makeRoute(),
-            at: T_DISPATCH,
-          }),
+          freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
         ).start({ odometerMeters: 1_500, at: T_PICKUP }),
       ).requestPayment({ odometerMeters: 7_500, at: T_COMPLETE }),
     );
@@ -335,11 +323,7 @@ describe('Ride.cancel', () => {
 
   it('cancels from dispatched', () => {
     const dispatched = unwrap(
-      freshRide().dispatch({
-        driver: DRIVER,
-        pickupDirections: makeRoute(),
-        at: T_DISPATCH,
-      }),
+      freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
     );
     const r = dispatched.cancel({
       reason: reasonFor('driver_no_show'),
@@ -355,11 +339,7 @@ describe('Ride.cancel', () => {
       unwrap(
         unwrap(
           unwrap(
-            freshRide().dispatch({
-              driver: DRIVER,
-              pickupDirections: makeRoute(),
-              at: T_DISPATCH,
-            }),
+            freshRide().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
           ).start({ odometerMeters: 1_500, at: T_PICKUP }),
         ).requestPayment({ odometerMeters: 7_500, at: T_COMPLETE }),
       ).markCompleted(),
@@ -495,7 +475,7 @@ describe('Ride.acceptSchedule', () => {
   });
 });
 
-describe('Ride.beginScheduledRide', () => {
+describe('Ride.beginScheduledClaim', () => {
   const SCHEDULED_AT = new Date(T0.getTime() + 30 * 60_000);
 
   function acceptedScheduled() {
@@ -513,37 +493,29 @@ describe('Ride.beginScheduledRide', () => {
     return unwrap(scheduled.acceptSchedule({ driver: DRIVER }));
   }
 
-  it('flips scheduled_driver_accepted → dispatched with pickup directions + startedAt', () => {
-    const r = acceptedScheduled().beginScheduledRide({
-      pickupDirections: makeRoute(),
-      at: T_DISPATCH,
-    });
+  it('flips scheduled_driver_accepted → dispatched with startedAt (directions attached after)', () => {
+    const r = acceptedScheduled().beginScheduledClaim({ at: T_DISPATCH });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.value.status).toBe('dispatched');
       expect(r.value.driver?.stripeAccountId).toBe('acct_abc');
-      expect(r.value.pickup.directions?.routeToken).toBe('tk');
+      // Directions are attached after the claim, by the winning driver.
+      expect(r.value.pickup.directions).toBeNull();
       expect(r.value.pickupTiming.startedAt).toEqual(T_DISPATCH);
     }
   });
 
   it('lets start() run after begin (precondition is dispatched)', () => {
     const dispatched = unwrap(
-      acceptedScheduled().beginScheduledRide({
-        pickupDirections: makeRoute(),
-        at: T_DISPATCH,
-      }),
+      acceptedScheduled().beginScheduledClaim({ at: T_DISPATCH }),
     );
     const started = dispatched.start({ odometerMeters: 1000, at: T_PICKUP });
     expect(started.ok).toBe(true);
     if (started.ok) expect(started.value.status).toBe('started');
   });
 
-  it('rejects beginScheduledRide from a non-accepted status', () => {
-    const r = freshRide().beginScheduledRide({
-      pickupDirections: makeRoute(),
-      at: T_DISPATCH,
-    });
+  it('rejects beginScheduledClaim from a non-accepted status', () => {
+    const r = freshRide().beginScheduledClaim({ at: T_DISPATCH });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe('ride_illegal_transition');
   });

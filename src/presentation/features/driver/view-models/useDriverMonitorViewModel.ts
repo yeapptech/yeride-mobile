@@ -32,6 +32,8 @@ import {
 } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
+import { useAttachPickupDirections } from '../hooks/useAttachPickupDirections';
+
 const logger = LOG.extend('DriverMonitorVM');
 
 /**
@@ -203,6 +205,11 @@ export function useDriverMonitorViewModel(
     [useCases, rideId],
   );
   const ride = useFirestoreSubscription<Ride | null>(subscribeRide, null);
+
+  // Post-claim: compute + attach the driver→pickup directions (the claim
+  // intentionally skipped the Google Routes call so accept/decline paints
+  // instantly). Fills the pickup polyline + ETA once we're here.
+  useAttachPickupDirections(ride);
 
   // ── Audit-event log (primed for the future events panel) ───────
   const subscribeEvents = useCallback(

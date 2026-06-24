@@ -74,6 +74,7 @@ export class InMemoryRideRepository implements RideRepository {
   public spies = {
     create: 0,
     update: 0,
+    transitionWithClaim: 0,
     requestPayment: 0,
     cancel: 0,
     lastCancelArgs: null as null | {
@@ -171,6 +172,40 @@ export class InMemoryRideRepository implements RideRepository {
     this.notifyScheduled();
     this.notifyInProgress();
     return Result.ok(ride);
+  }
+
+  async transitionWithClaim(args: {
+    rideId: RideId;
+    expectedFromStatus: RideStatus;
+    apply: (current: Ride) => Result<Ride, ValidationError>;
+  }): Promise<
+    Result<
+      Ride,
+      ConflictError | NotFoundError | AuthorizationError | ValidationError
+    >
+  > {
+    this.spies.transitionWithClaim += 1;
+    const key = String(args.rideId);
+    const current = this.rides.get(key);
+    if (!current) {
+      return Result.err(this.notFound(args.rideId));
+    }
+    if (current.status !== args.expectedFromStatus) {
+      return Result.err(
+        new ConflictError({
+          code: 'ride_already_taken',
+          message: `Ride ${key} is no longer ${args.expectedFromStatus}`,
+        }),
+      );
+    }
+    const next = args.apply(current);
+    if (!next.ok) return next;
+    this.rides.set(key, next.value);
+    this.notifyRide(next.value);
+    this.notifyAvailable();
+    this.notifyScheduled();
+    this.notifyInProgress();
+    return Result.ok(next.value);
   }
 
   async listByPassenger(args: {
@@ -447,6 +482,7 @@ export class InMemoryRideRepository implements RideRepository {
     this.spies = {
       create: 0,
       update: 0,
+      transitionWithClaim: 0,
       requestPayment: 0,
       cancel: 0,
       lastCancelArgs: null,

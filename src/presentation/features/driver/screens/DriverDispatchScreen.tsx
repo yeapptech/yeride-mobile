@@ -4,13 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
-import {
-  Map,
-  type MapMarkerProps,
-  type MapRoute,
-} from '@presentation/components/map';
+import { Map, type MapMarkerProps } from '@presentation/components/map';
 import { useCurrentLocation } from '@presentation/hooks';
 import type { DriverStackScreenProps } from '@presentation/navigation/types';
+import { formatMilesAway } from '@presentation/utils/formatDistance';
 
 import { useDriverDispatchViewModel } from '../view-models/useDriverDispatchViewModel';
 import type {
@@ -101,9 +98,14 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
       }
     : null;
 
-  const pickupMapRoute: MapRoute | null = vm.pickupRoute
-    ? { id: 'pickup', encodedPolyline: vm.pickupRoute.encodedPolyline }
-    : null;
+  // Haversine "X mi away" to pickup — no Google call. The driver→pickup
+  // route + polyline are computed AFTER the claim, in DriverMonitor.
+  const pickupDistanceText =
+    currentLocation.coordinates && vm.ride
+      ? formatMilesAway(
+          currentLocation.coordinates.distanceTo(vm.ride.pickup.location),
+        )
+      : null;
 
   return (
     <View className="flex-1 bg-background">
@@ -113,7 +115,7 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
         dropoff={null}
         driver={driverMarker}
         selectedRoute={null}
-        pickupRoute={pickupMapRoute}
+        pickupRoute={null}
         alternativeRoutes={[]}
       />
 
@@ -128,7 +130,7 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
             ride={vm.ride}
             cannotAcceptReason={vm.cannotAcceptReason}
             driverLocation={currentLocation.coordinates}
-            pickupEtaText={vm.pickupRoute?.durationText ?? null}
+            pickupDistanceText={pickupDistanceText}
             onAccept={vm.onAccept}
             onDecline={vm.onDecline}
           />
@@ -144,7 +146,7 @@ interface DispatchPanelProps {
   readonly ride: Ride | null;
   readonly cannotAcceptReason: CannotAcceptReason | null;
   readonly driverLocation: Coordinates | null;
-  readonly pickupEtaText: string | null;
+  readonly pickupDistanceText: string | null;
   readonly onAccept: () => void;
   readonly onDecline: () => void;
 }
@@ -155,7 +157,7 @@ function DispatchPanel({
   ride,
   cannotAcceptReason,
   driverLocation,
-  pickupEtaText,
+  pickupDistanceText,
   onAccept,
   onDecline,
 }: DispatchPanelProps) {
@@ -234,9 +236,9 @@ function DispatchPanel({
             <Text className="text-sm font-semibold text-foreground">
               {ride.rideService.name}
             </Text>
-            {pickupEtaText && (
+            {pickupDistanceText && (
               <Text className="text-xs text-muted-foreground">
-                {pickupEtaText} to pickup
+                {pickupDistanceText}
               </Text>
             )}
           </View>

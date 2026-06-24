@@ -17,7 +17,7 @@ import { Route } from '@domain/entities/Route';
 import { UserId } from '@domain/entities/UserId';
 import { InMemoryRideRepository } from '@shared/testing';
 
-import { ObserveInProgressRides } from '../ObserveInProgressRides';
+import { AttachPickupDirections } from '../AttachPickupDirections';
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
   if (!r.ok) throw r.error;
@@ -27,21 +27,10 @@ function usd(m: number) {
   return unwrap(Money.fromMajor(m, 'USD'));
 }
 
+const T_DISPATCH = new Date('2026-04-27T12:01:00Z');
 const MIAMI = unwrap(Coordinates.create(25.7617, -80.1918));
 const FORT_LAUDERDALE = unwrap(Coordinates.create(26.1224, -80.1373));
 
-const PASSENGER = unwrap(
-  PassengerSnapshot.create({
-    id: unwrap(UserId.create('aaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
-    name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
-    email: unwrap(Email.create('ada@yeapp.tech')),
-    phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
-    pushToken: null,
-    avatarUrl: null,
-    stripeCustomerId: null,
-    defaultPaymentMethod: null,
-  }),
-);
 const DRIVER = unwrap(
   DriverSnapshot.create({
     id: unwrap(UserId.create('bbbbbbbbbbbbbbbbbbbbbbbbbbbb')),
@@ -64,25 +53,36 @@ const DRIVER = unwrap(
     ),
   }),
 );
-const ECONOMY = unwrap(
-  RideServiceSnapshot.create({
-    id: unwrap(RideServiceId.create('economy')),
-    name: 'Economy',
-    baseFare: usd(2.5),
-    minimumFare: usd(5),
-    cancelationFee: usd(2),
-    costPerKm: usd(1.25),
-    costPerMinute: usd(0.2),
-    seatCapacity: 4,
-  }),
-);
 
-function makeAwaiting(id: string): Ride {
+function makeAwaiting(): Ride {
+  const passenger = unwrap(
+    PassengerSnapshot.create({
+      id: unwrap(UserId.create('aaaaaaaaaaaaaaaaaaaaaaaaaaaa')),
+      name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
+      email: unwrap(Email.create('ada@yeapp.tech')),
+      phoneNumber: unwrap(PhoneNumber.create('+14155551111')),
+      pushToken: null,
+      avatarUrl: null,
+      stripeCustomerId: null,
+      defaultPaymentMethod: null,
+    }),
+  );
   return unwrap(
     Ride.create({
-      id: unwrap(RideId.create(id)),
-      passenger: PASSENGER,
-      rideService: ECONOMY,
+      id: unwrap(RideId.create('attachDir12345678901')),
+      passenger,
+      rideService: unwrap(
+        RideServiceSnapshot.create({
+          id: unwrap(RideServiceId.create('economy')),
+          name: 'Economy',
+          baseFare: usd(2.5),
+          minimumFare: usd(5),
+          cancelationFee: usd(2),
+          costPerKm: usd(1.25),
+          costPerMinute: usd(0.2),
+          seatCapacity: 4,
+        }),
+      ),
       pickup: unwrap(
         Endpoint.create({
           location: MIAMI,
@@ -103,6 +103,7 @@ function makeAwaiting(id: string): Ride {
     }),
   );
 }
+
 function makeRoute(): Route {
   return unwrap(
     Route.create({
@@ -121,59 +122,48 @@ function makeRoute(): Route {
   );
 }
 
-describe('ObserveInProgressRides', () => {
-  it('rider role delivers the passenger LIVE rides', async () => {
+describe('AttachPickupDirections', () => {
+  it('attaches directions to a dispatched ride', async () => {
     const repo = new InMemoryRideRepository();
-    await repo.create(makeAwaiting('AAAAAAAAAAAAAAAAAAAA'));
-
-    const sut = new ObserveInProgressRides(repo);
-    const seen: Ride[][] = [];
-    const unsub = sut.execute({
-      userId: PASSENGER.id,
-      role: 'rider',
-      callback: (rs) => seen.push([...rs]),
-    });
-    expect(seen[0]).toHaveLength(1);
-    expect(seen[0]?.[0]?.status).toBe('awaiting_driver');
-    unsub();
-  });
-
-  it('driver role delivers only dispatched-to-this-driver rides', async () => {
-    const repo = new InMemoryRideRepository();
-    const ride = makeAwaiting('BBBBBBBBBBBBBBBBBBBB');
-    await repo.create(ride);
-    await repo.update(
-      unwrap(
-        unwrap(
-          ride.claimForDispatch({ driver: DRIVER, at: new Date() }),
-        ).attachPickupDirections(makeRoute()),
-      ),
+    const dispatched = unwrap(
+      makeAwaiting().claimForDispatch({ driver: DRIVER, at: T_DISPATCH }),
     );
+    await repo.create(dispatched);
+    const sut = new AttachPickupDirections(repo);
 
-    const sut = new ObserveInProgressRides(repo);
-    const seen: Ride[][] = [];
-    const unsub = sut.execute({
-      userId: DRIVER.id,
-      role: 'driver',
-      callback: (rs) => seen.push([...rs]),
+    const r = await sut.execute({
+      rideId: dispatched.id,
+      directions: makeRoute(),
     });
-    const latest = seen[seen.length - 1] ?? [];
-    expect(latest).toHaveLength(1);
-    expect(latest[0]?.status).toBe('dispatched');
-    unsub();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.status).toBe('dispatched');
+      expect(r.value.pickup.directions?.routeToken).toBe('tk');
+    }
   });
 
-  it('stops emitting after unsubscribe', async () => {
+  it('rejects attaching to a non-dispatched ride (e.g. still awaiting)', async () => {
     const repo = new InMemoryRideRepository();
-    const sut = new ObserveInProgressRides(repo);
-    const seen: Ride[][] = [];
-    const unsub = sut.execute({
-      userId: PASSENGER.id,
-      role: 'rider',
-      callback: (rs) => seen.push([...rs]),
+    const awaiting = makeAwaiting();
+    await repo.create(awaiting);
+    const sut = new AttachPickupDirections(repo);
+
+    const r = await sut.execute({
+      rideId: awaiting.id,
+      directions: makeRoute(),
     });
-    unsub();
-    await repo.create(makeAwaiting('CCCCCCCCCCCCCCCCCCCC'));
-    expect(seen).toHaveLength(1);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('ride_illegal_transition');
+  });
+
+  it('returns NotFoundError for an unknown ride', async () => {
+    const repo = new InMemoryRideRepository();
+    const sut = new AttachPickupDirections(repo);
+    const r = await sut.execute({
+      rideId: unwrap(RideId.create('nonexistent1234567890ab')),
+      directions: makeRoute(),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('not_found');
   });
 });

@@ -118,11 +118,9 @@ function makeRide(): Ride {
     }),
   );
   return unwrap(
-    base.dispatch({
-      driver: driverSnap,
-      pickupDirections: pickupRoute,
-      at: new Date(),
-    }),
+    unwrap(
+      base.claimForDispatch({ driver: driverSnap, at: new Date() }),
+    ).attachPickupDirections(pickupRoute),
   );
 }
 

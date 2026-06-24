@@ -3,6 +3,7 @@ import type { Ride } from '@domain/entities/Ride';
 import type { RideId } from '@domain/entities/RideId';
 import type {
   AuthorizationError,
+  ConflictError,
   NotFoundError,
   ValidationError,
 } from '@domain/errors';
@@ -10,12 +11,13 @@ import type { RideRepository } from '@domain/repositories';
 import type { Result } from '@domain/shared/Result';
 
 /**
- * Driver accepts a scheduled ride. Reads the current state, runs the
- * entity transition (which enforces the `scheduled` precondition + sets
- * the driver snapshot), and writes back. No pickup directions are attached
- * — that happens at begin time (`BeginScheduledRide`). Mirrors
- * `DispatchRide`'s shape; driver eligibility (active vehicle + Stripe) is
- * gated in the view-model, as it is for immediate dispatch.
+ * Driver accepts a scheduled ride — first-come-first-served. Routes through
+ * `transitionWithClaim` (atomic, guarded on `scheduled`) so the first
+ * driver to accept wins and any later driver gets a
+ * `ConflictError('ride_already_taken')`. No pickup directions are attached
+ * — that happens at begin time (`BeginScheduledRide` → then
+ * `AttachPickupDirections`). Driver eligibility (active vehicle + Stripe)
+ * is gated in the view-model, as it is for immediate dispatch.
  */
 export class AcceptScheduledRide {
   constructor(private readonly repo: RideRepository) {}
@@ -24,12 +26,15 @@ export class AcceptScheduledRide {
     rideId: RideId;
     driver: DriverSnapshot;
   }): Promise<
-    Result<Ride, NotFoundError | AuthorizationError | ValidationError>
+    Result<
+      Ride,
+      ConflictError | NotFoundError | AuthorizationError | ValidationError
+    >
   > {
-    const current = await this.repo.getById(args.rideId);
-    if (!current.ok) return current;
-    const next = current.value.acceptSchedule({ driver: args.driver });
-    if (!next.ok) return next;
-    return this.repo.update(next.value);
+    return this.repo.transitionWithClaim({
+      rideId: args.rideId,
+      expectedFromStatus: 'scheduled',
+      apply: (current) => current.acceptSchedule({ driver: args.driver }),
+    });
   }
 }

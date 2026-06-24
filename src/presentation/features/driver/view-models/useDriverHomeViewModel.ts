@@ -28,6 +28,7 @@ import {
   useActiveVehicleId,
   useDriverMode,
   useDriverStatusStore,
+  useGpsCurrentLocation,
   useGpsPermissionStatus,
   useServiceAreaStore,
 } from '@presentation/stores';
@@ -87,6 +88,12 @@ export interface UseDriverHomeViewModel {
    */
   readonly noActiveVehicle: boolean;
   readonly availableRides: readonly Ride[];
+  /**
+   * Live driver coordinate (BG-geolocation while online; foreground read
+   * before the stream emits). Feeds the card stack so the Haversine
+   * distance label updates as the driver moves. `null` until any fix.
+   */
+  readonly liveDriverLocation: Coordinates | null;
   readonly inProgressRides: readonly Ride[];
   readonly scheduledRides: readonly Ride[];
   readonly permissionStatus: LocationPermission;
@@ -172,12 +179,34 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     [rideServicesQuery.data],
   );
 
-  const availableRides = useAvailableRidesQuery({
+  // The Firestore subscription stays keyed on the STABLE foreground read
+  // (`currentLocation.coordinates`) so the `onSnapshot` doesn't tear down +
+  // rebuild on every GPS tick. Distance display + sort use the LIVE GPS
+  // coordinate below.
+  const availableRidesRaw = useAvailableRidesQuery({
     driverId: user?.id ?? null,
     services: offeredServices,
     driverLocation: currentLocation.coordinates,
     enabled: mode === 'online_idle',
   });
+
+  // Live driver position (BG-geolocation stream while online), falling back
+  // to the one-shot foreground read before the stream emits. Drives the
+  // constantly-updating Haversine distance + nearest-first ordering.
+  const liveDriverLocation =
+    useGpsCurrentLocation() ?? currentLocation.coordinates;
+
+  // Nearest-first ordering by live Haversine distance. Recomputed as the
+  // driver moves (cheap for the handful of in-radius rides). Falls back to
+  // the unsorted list when we don't yet have a coordinate.
+  const availableRides = useMemo<readonly Ride[]>(() => {
+    if (!liveDriverLocation) return availableRidesRaw;
+    return [...availableRidesRaw].sort(
+      (a, b) =>
+        liveDriverLocation.distanceTo(a.pickup.location) -
+        liveDriverLocation.distanceTo(b.pickup.location),
+    );
+  }, [availableRidesRaw, liveDriverLocation]);
 
   // Mirror the resolved active area into the global store so other
   // surfaces (e.g. DriverDispatch later) can read it without re-querying.
@@ -314,6 +343,7 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     activeVehicle: activeVehicleQuery.data ?? null,
     noActiveVehicle,
     availableRides,
+    liveDriverLocation,
     inProgressRides,
     scheduledRides,
     permissionStatus: currentLocation.permissionStatus,
