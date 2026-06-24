@@ -160,12 +160,17 @@ reviewer (no Critical/Important after the follow-up test + fix commits).
 - **Time-based backoff for the post-claim retry.** A fixed attempt cap
   is sufficient and simpler (no timers / fake-timers); directions are
   best-effort.
-- **Device validation.** Maestro check on the Android driver client
-  (instant accept/decline, live nearest-first ordering, loser "Already
-  taken", post-claim pickup polyline) and confirming the deployed
-  `yeapp-stage` Firestore rules accept the claim writes (expected —
-  identical write shape) belong to `PHASE_10_CUTOVER_PLAN.md`'s manual
-  pass.
+- **Device validation.** The loser "Already taken" path now has a
+  Maestro flow — `e2e/maestro/driver/dispatch-already-taken.yaml` (opens
+  the dispatch screen for an awaiting ride, then asserts the drift-to-
+  `gone` "Already taken" panel after the ride leaves `awaiting_driver`
+  via a rival claim or a rider cancel; two-device recipe in
+  `e2e/maestro/README.md`). Still device-run (not part of
+  `npm run verify`). The remaining device checks — instant
+  accept/decline, live nearest-first ordering, post-claim pickup
+  polyline — and confirming the deployed `yeapp-stage` Firestore rules
+  accept the claim writes (expected — identical write shape) belong to
+  `PHASE_10_CUTOVER_PLAN.md`'s manual pass.
 
 ## Acceptance criteria — checked
 

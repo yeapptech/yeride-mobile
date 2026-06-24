@@ -44,19 +44,20 @@ maestro -e PICKUP="9251 W Sunrise Blvd, Plantation" \
 
 ## Flows
 
-| Flow                                | What it does                                                                                              |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `auth/sign-in.yaml`                 | Sign in from "Welcome back" (env `EMAIL`/`PASSWORD`).                                                     |
-| `auth/sign-out.yaml`                | Sign out from a tabbed surface.                                                                           |
-| `auth/dismiss-soft-asks.yaml`       | Dismiss dev-client launcher + push soft-ask.                                                              |
-| `_lib/tap-tab.yaml`                 | Cross-platform bottom-tab tap (text on Android, point on iOS).                                            |
-| `driver/walkthrough.yaml`           | Driver tabs + trip detail + vehicles (read-only, screenshots).                                            |
-| `driver/accept-and-complete.yaml`   | Dispatch → accept → arrive → start → **charge** → complete (env `RIDE_ID`).                               |
-| `driver/accept-scheduled-ride.yaml` | Accept a scheduled ride → Home Scheduled → **Begin** → DriverMonitor (env `RIDE_ID`; no charge).          |
-| `rider/walkthrough.yaml`            | Rider tabs Home/Activity/Wallet/Profile (read-only).                                                      |
-| `rider/book-ride.yaml`              | Book an Economy ride → awaiting-driver (creates a **real** ride).                                         |
-| `rider/book-scheduled-ride.yaml`    | Book a **scheduled** Economy ride → "Ride Scheduled!" (creates a real `scheduled` ride; env `DAY_LABEL`). |
-| `rider/cancel-ride.yaml`            | Cancel the active ride (reason: changed mind).                                                            |
+| Flow                                 | What it does                                                                                                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth/sign-in.yaml`                  | Sign in from "Welcome back" (env `EMAIL`/`PASSWORD`).                                                                                                                           |
+| `auth/sign-out.yaml`                 | Sign out from a tabbed surface.                                                                                                                                                 |
+| `auth/dismiss-soft-asks.yaml`        | Dismiss dev-client launcher + push soft-ask.                                                                                                                                    |
+| `_lib/tap-tab.yaml`                  | Cross-platform bottom-tab tap (text on Android, point on iOS).                                                                                                                  |
+| `driver/walkthrough.yaml`            | Driver tabs + trip detail + vehicles (read-only, screenshots).                                                                                                                  |
+| `driver/accept-and-complete.yaml`    | Dispatch → accept → arrive → start → **charge** → complete (env `RIDE_ID`).                                                                                                     |
+| `driver/accept-scheduled-ride.yaml`  | Accept a scheduled ride → Home Scheduled → **Begin** → DriverMonitor (env `RIDE_ID`; no charge).                                                                                |
+| `driver/dispatch-already-taken.yaml` | Loser path: open dispatch for an awaiting ride, it leaves `awaiting_driver` (rival claim / rider cancel) → **"Already taken"** panel → back to Home (env `RIDE_ID`; no charge). |
+| `rider/walkthrough.yaml`             | Rider tabs Home/Activity/Wallet/Profile (read-only).                                                                                                                            |
+| `rider/book-ride.yaml`               | Book an Economy ride → awaiting-driver (creates a **real** ride).                                                                                                               |
+| `rider/book-scheduled-ride.yaml`     | Book a **scheduled** Economy ride → "Ride Scheduled!" (creates a real `scheduled` ride; env `DAY_LABEL`).                                                                       |
+| `rider/cancel-ride.yaml`             | Cancel the active ride (reason: changed mind).                                                                                                                                  |
 
 ## Two-device paired E2E
 
@@ -70,6 +71,17 @@ simulator is the **rider**.
 3. Android: `accept-and-complete` with `-e RIDE_ID=<that id>`.
 4. iOS: the receipt appears; scroll the receipt up before tapping a tip preset
    (the tip row sits behind the sticky footer until you scroll).
+
+**Loser / "Already taken" variant** (`driver/dispatch-already-taken.yaml`) —
+exercises the first-come-first-served claim's drift-to-`gone` path:
+
+1. iOS: `sign-in` as rider → `book-ride` (capture the `rideId`).
+2. Android: start `dispatch-already-taken` with `-e RIDE_ID=<that id>`. It opens
+   the dispatch screen (accept visible) and then waits up to 60s for the
+   "Already taken" panel.
+3. iOS: while Android is waiting, run `rider/cancel-ride.yaml` (or have a second
+   driver accept the ride). The driver's live `ObserveRide` drifts off
+   `awaiting_driver` → the panel appears and the flow dismisses back to Home.
 
 ## Gotchas discovered
 

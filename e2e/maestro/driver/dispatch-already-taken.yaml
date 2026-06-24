@@ -1,0 +1,42 @@
+appId: app.yeride.dev
+# Drives the LOSER path of the first-come-first-served claim: a driver opens the
+# dispatch screen for an awaiting ride, the ride then leaves `awaiting_driver`,
+# and the dispatch VM's live ObserveRide subscription flips the screen to the
+# "Already taken" panel WITHOUT charging or navigating into the monitor.
+#
+# Preconditions:
+#   - Signed in as a driver with Stripe Connect + an active vehicle, ONLINE.
+#   - An `awaiting_driver` ride in the driver's service area shows as a
+#     `driver-ride-card-${RIDE_ID}` card. Seed it with rider/book-ride.yaml and
+#     pass its id via env RIDE_ID. (If the card is missing right after signing
+#     in already-online, toggle Go offline -> Go online once to re-subscribe.)
+#   - DURING the dispatch-screen dwell (the wait below) the ride must leave
+#     `awaiting_driver`: a rival driver accepts it, OR run rider/cancel-ride.yaml
+#     on the rider device. Both produce the same 'gone' state via the live
+#     subscription drifting off the pinned `awaiting_driver` intent. The 60s
+#     wait gives time to switch to the rider device and trigger it.
+# Charges nothing — no claim succeeds on this device.
+---
+# Open the dispatch screen for the awaiting ride. It must paint accept/decline
+# INSTANTLY — the fix removed the pre-accept Google Routes call that used to
+# hang this screen on "Loading ride…".
+- tapOn:
+    id: 'driver-ride-card-${RIDE_ID}'
+- assertVisible:
+    id: 'driver-dispatch-accept'
+- takeScreenshot: driver-dispatch-ready
+# The ride leaves awaiting_driver (rival claim / rider cancel). The dispatch
+# VM's live ObserveRide drifts off the pinned intent and flips to 'gone' — the
+# "Already taken" panel — without us ever tapping accept.
+- extendedWaitUntil:
+    visible:
+      id: 'driver-dispatch-back-home'
+    timeout: 60000
+- assertVisible: 'Already taken'
+- takeScreenshot: driver-already-taken
+# Dismiss returns to DriverHome (back in the queue) — no monitor, no charge.
+- tapOn:
+    id: 'driver-dispatch-back-home'
+- assertVisible:
+    id: 'driver-home-online-toggle'
+- takeScreenshot: driver-back-home-after-already-taken
