@@ -50,6 +50,7 @@ maestro -e PICKUP="9251 W Sunrise Blvd, Plantation" \
 | `auth/sign-out.yaml`                 | Sign out from a tabbed surface.                                                                                                                                                 |
 | `auth/dismiss-soft-asks.yaml`        | Dismiss dev-client launcher + push soft-ask.                                                                                                                                    |
 | `_lib/tap-tab.yaml`                  | Cross-platform bottom-tab tap (text on Android, point on iOS).                                                                                                                  |
+| `_lib/cancel-awaiting-ride.yaml`     | Cancel the rider's awaiting ride via point taps (iOS-safe trigger for the "Already taken" path; `cancel-ride.yaml` is the Android testID variant).                              |
 | `driver/walkthrough.yaml`            | Driver tabs + trip detail + vehicles (read-only, screenshots).                                                                                                                  |
 | `driver/accept-and-complete.yaml`    | Dispatch → accept → arrive → start → **charge** → complete (env `RIDE_ID`).                                                                                                     |
 | `driver/accept-scheduled-ride.yaml`  | Accept a scheduled ride → Home Scheduled → **Begin** → DriverMonitor (env `RIDE_ID`; no charge).                                                                                |
@@ -79,9 +80,14 @@ exercises the first-come-first-served claim's drift-to-`gone` path:
 2. Android: start `dispatch-already-taken` with `-e RIDE_ID=<that id>`. It opens
    the dispatch screen (accept visible) and then waits up to 60s for the
    "Already taken" panel.
-3. iOS: while Android is waiting, run `rider/cancel-ride.yaml` (or have a second
-   driver accept the ride). The driver's live `ObserveRide` drifts off
-   `awaiting_driver` → the panel appears and the flow dismisses back to Home.
+3. iOS: while Android is waiting, run `_lib/cancel-awaiting-ride.yaml` (point-tap
+   cancel — Maestro can't match the cancel sheet's testIDs on iOS, so the testID
+   variant `rider/cancel-ride.yaml` is Android-only). Or have a second driver
+   accept the ride. The driver's live `ObserveRide` drifts off `awaiting_driver`
+   → the panel appears and the flow dismisses back to Home.
+
+This paired run was verified green on 2026-06-24 (Android driver +
+iOS rider).
 
 ## Gotchas discovered
 
@@ -113,6 +119,12 @@ exercises the first-come-first-served claim's drift-to-`gone` path:
   (tabs are evenly spaced at y≈96% — Home 12%, Activity 37%, Wallet/Earnings
   62%, Profile 87%). So `*/walkthrough.yaml` now run on both platforms. If the
   tab count or order changes, update the point percentages in that helper.
+- On **iOS**, Maestro's view hierarchy does **not expose the contents of RN
+  bottom sheets** (e.g. the rider/driver `CancelReasonSheet` reason rows +
+  confirm button) — neither `id:` nor `text:` matchers find them, though the
+  same `testID`s resolve fine on Android. Drive those sheets by **point tap** on
+  iOS (the button that _opens_ the sheet, like `awaiting-cancel`, is matchable;
+  only the sheet's own contents are opaque). See `_lib/cancel-awaiting-ride.yaml`.
 - The **schedule picker** (`book-scheduled-ride.yaml`) drives the Android
   **native** date + time dialogs, which have no testIDs. The date dialog is a
   Material calendar for the current month; each day cell exposes an

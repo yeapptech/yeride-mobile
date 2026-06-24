@@ -1,0 +1,22 @@
+appId: app.yeride.dev
+# Cancel the rider's current awaiting ride — the out-of-band trigger for the
+# FCFS "Already taken" loser path (driver/dispatch-already-taken.yaml).
+#
+# Opens the cancel sheet by testID (matchable on both platforms), then completes
+# it by POINT tap: Maestro's iOS view hierarchy does NOT expose this bottom
+# sheet's contents (the reason rows + confirm button), so id/text matchers fail
+# there. rider/cancel-ride.yaml is the testID-based (Android) variant.
+#
+# Point coordinates are tuned to a portrait phone: the first reason row
+# ("Changed my mind", ~49% height) and the "Cancel ride" confirm button
+# (bottom-right, ~75%/94%). Any rider-allowed reason works as the trigger, so a
+# slightly-off tap on an adjacent row is still fine.
+---
+- tapOn:
+    id: 'awaiting-cancel'
+- waitForAnimationToEnd
+- tapOn:
+    point: 50%, 49%
+- tapOn:
+    point: 75%, 94%
+- waitForAnimationToEnd

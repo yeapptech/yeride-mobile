@@ -1,10 +1,19 @@
 appId: app.yeride.dev
-# Cancels the active ride from the rider "awaiting driver" monitor (reason: changed mind).
+# Cancels the active ride from the rider "awaiting driver" monitor (reason:
+# changed mind). Android-targeted: Maestro can't match this bottom sheet's
+# testIDs on iOS — use _lib/cancel-awaiting-ride.yaml (point taps) for an iOS
+# rider.
 ---
 - assertVisible:
     id: 'awaiting-cancel'
 - tapOn:
     id: 'awaiting-cancel'
+# Wait for the cancel sheet to animate in — tapping a reason before it settles
+# misses the row.
+- extendedWaitUntil:
+    visible:
+      id: 'cancel-reason-changed_mind'
+    timeout: 8000
 - tapOn:
     id: 'cancel-reason-changed_mind'
 - tapOn:
