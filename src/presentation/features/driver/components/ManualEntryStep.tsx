@@ -298,7 +298,7 @@ export function ManualEntryStep({
         accessibilityRole="button"
         accessibilityState={{ disabled: !isValid || isSubmitting }}
         testID="manual-submit"
-        className={`mt-4 items-center rounded-xl px-4 py-3 ${
+        className={`mt-4 items-center rounded-2xl px-4 py-3 ${
           !isValid || isSubmitting ? 'bg-muted' : 'bg-primary'
         }`}
       >

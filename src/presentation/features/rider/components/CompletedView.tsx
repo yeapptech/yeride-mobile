@@ -1,10 +1,11 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import type { Money } from '@domain/entities/Money';
 import type { Ride } from '@domain/entities/Ride';
 import { FareCalculator } from '@domain/services';
 import { FareEstimate } from '@presentation/components/route';
 import { BottomSheetHeader } from '@presentation/components/trip/BottomSheetHeader';
+import { Button } from '@presentation/components/ui/Button';
 
 /**
  * Status view for `completed` and `payment_requested`.
@@ -92,16 +93,11 @@ export function CompletedView({ ride, onViewReceipt }: CompletedViewProps) {
       </View>
 
       <View className="border-t border-border px-4 py-3">
-        <Pressable
+        <Button
+          label="View receipt"
           onPress={onViewReceipt}
-          accessibilityRole="button"
-          className="items-center rounded-2xl bg-primary px-4 py-4"
           testID="completed-view-receipt"
-        >
-          <Text className="text-base font-extrabold text-primary-foreground">
-            View receipt
-          </Text>
-        </Pressable>
+        />
       </View>
     </View>
   );

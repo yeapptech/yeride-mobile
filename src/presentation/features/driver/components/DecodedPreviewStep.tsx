@@ -81,7 +81,7 @@ export function DecodedPreviewStep({
           accessibilityLabel="Confirm vehicle and register"
           accessibilityState={{ disabled: isSubmitting }}
           testID="decoded-preview-confirm"
-          className={`flex-1 items-center rounded-xl px-4 py-3 ${
+          className={`flex-1 items-center rounded-2xl px-4 py-3 ${
             isSubmitting ? 'bg-muted' : 'bg-primary'
           }`}
         >
@@ -98,7 +98,7 @@ export function DecodedPreviewStep({
           disabled={isSubmitting}
           accessibilityRole="button"
           testID="decoded-preview-edit-manually"
-          className="items-center rounded-xl border border-border px-4 py-3"
+          className="items-center rounded-2xl border border-border px-4 py-3"
         >
           <Text className="text-base font-medium text-foreground">
             Edit manually

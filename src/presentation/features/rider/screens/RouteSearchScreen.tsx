@@ -1,16 +1,12 @@
-import {
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-  useColorScheme,
-} from 'react-native';
+import { ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import type {
   GooglePlaceData,
   GooglePlaceDetail,
 } from 'react-native-google-places-autocomplete';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { Button } from '@presentation/components/ui/Button';
 
 import {
   useRouteSearchViewModel,
@@ -115,26 +111,12 @@ export default function RouteSearchScreen() {
 
       <SafeAreaView edges={['bottom']}>
         <View className="border-t border-border px-4 py-3">
-          <Pressable
+          <Button
+            label="Continue"
             onPress={vm.goToRouteSelect}
             disabled={!vm.canContinue}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !vm.canContinue }}
-            className={`items-center rounded-2xl px-4 py-4 ${
-              vm.canContinue ? 'bg-primary' : 'bg-muted'
-            }`}
             testID="route-search-continue"
-          >
-            <Text
-              className={`text-base font-extrabold ${
-                vm.canContinue
-                  ? 'text-primary-foreground'
-                  : 'text-muted-foreground'
-              }`}
-            >
-              Continue
-            </Text>
-          </Pressable>
+          />
         </View>
       </SafeAreaView>
     </SafeAreaView>
