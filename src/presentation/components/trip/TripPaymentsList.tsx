@@ -56,7 +56,7 @@ function statusPillClass(s: TripPaymentStatus): string {
     case 'succeeded':
       return 'bg-success/10 text-success';
     case 'failed':
-      return 'bg-destructive/10 text-destructive';
+      return 'bg-error/10 text-error';
     case 'refunded':
       return 'bg-muted text-muted-foreground';
   }
@@ -150,7 +150,7 @@ export function TripPaymentsList({ payments, testID }: TripPaymentsListProps) {
             </Text>
           </View>
           <Text
-            className={`text-sm font-semibold ${p.type === 'refund' ? 'text-destructive' : 'text-foreground'}`}
+            className={`text-sm font-semibold ${p.type === 'refund' ? 'text-error' : 'text-foreground'}`}
           >
             {p.type === 'refund' ? `−${p.amount.format()}` : p.amount.format()}
           </Text>

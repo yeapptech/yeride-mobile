@@ -80,7 +80,7 @@ export default function RideScheduledConfirmationScreen({
           accessibilityRole="button"
           accessibilityLabel="Got it"
           onPress={handleDone}
-          className="rounded-lg bg-primary px-6 py-3 active:opacity-80"
+          className="rounded-2xl bg-primary px-6 py-3 active:opacity-80"
         >
           <Text className="text-center text-base font-semibold text-primary-foreground">
             Got it

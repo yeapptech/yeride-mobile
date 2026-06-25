@@ -73,7 +73,7 @@ export function VinEntryStep({
         testID="vin-enter-manually"
         className="mt-3 self-start"
       >
-        <Text className="text-sm text-primary">Enter manually instead</Text>
+        <Text className="text-sm text-brand-deep">Enter manually instead</Text>
       </Pressable>
     </View>
   );

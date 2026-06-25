@@ -237,7 +237,7 @@ export function ChatModal({
                 accessibilityLabel="Close chat"
                 testID="chat-modal-close"
               >
-                <Text className="text-sm font-semibold text-primary">
+                <Text className="text-sm font-semibold text-brand-deep">
                   Close
                 </Text>
               </Pressable>

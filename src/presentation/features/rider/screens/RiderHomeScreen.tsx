@@ -174,6 +174,7 @@ export default function RiderHomeScreen() {
                     key={String(place.id)}
                     onPress={() => vm.goToSavedPlace(place)}
                     accessibilityRole="button"
+                    testID={`rider-home-saved-place-${String(place.id)}`}
                     className="flex-row items-center gap-3 py-3"
                   >
                     <View className="h-9 w-9 items-center justify-center rounded-full bg-honey">

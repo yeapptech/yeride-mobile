@@ -81,8 +81,8 @@ export default function ActivityScreen() {
   // Phase 10 turn 7 — rider-side Scheduled section. Renders above the
   // Recent Rides list when at least one scheduled ride exists; hidden
   // when empty (matches legacy `ScheduledTrips` returning null on
-  // empty). Lives as a `ListHeaderComponent` on the TripList so
-  // pull-to-refresh + the empty-state still work uniformly.
+  // empty). Rendered as a sibling above the date-grouped SectionList —
+  // it runs off its own subscription, independent of the history query.
   const scheduledHeader =
     vm.scheduledRides.length > 0 ? (
       <View
@@ -158,8 +158,8 @@ export default function ActivityScreen() {
     );
   }
 
-  // Empty + ready both render via TripList so pull-to-refresh works
-  // even on the empty state.
+  // Empty + ready both render via the SectionList so pull-to-refresh
+  // works even on the empty state.
   return (
     <SafeAreaView
       edges={['top']}

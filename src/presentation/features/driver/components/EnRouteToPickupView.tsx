@@ -119,12 +119,12 @@ export function EnRouteToPickupView({
           accessibilityRole="button"
           accessibilityLabel="Open navigation"
           accessibilityState={{ disabled: launchNavigationDisabled }}
-          className={`items-center rounded-xl border border-primary px-4 py-3 ${
+          className={`items-center rounded-2xl border border-primary px-4 py-3 ${
             launchNavigationDisabled ? 'opacity-60' : ''
           }`}
           testID="en-route-launch-navigation"
         >
-          <Text className="text-base font-semibold text-primary">
+          <Text className="text-base font-semibold text-brand-deep">
             Open navigation
           </Text>
         </Pressable>

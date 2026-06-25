@@ -77,7 +77,7 @@ export default function DriverEarningsScreen() {
             onPress={state.onRetry}
             accessibilityRole="button"
             testID="earnings-retry"
-            className="rounded-full bg-primary px-6 py-3"
+            className="rounded-2xl bg-primary px-6 py-3"
           >
             <Text className="text-base font-semibold text-primary-foreground">
               Retry
@@ -107,7 +107,7 @@ export default function DriverEarningsScreen() {
             disabled={state.isOnboarding}
             accessibilityRole="button"
             testID="earnings-setup-payouts"
-            className="rounded-full bg-primary px-6 py-3"
+            className="rounded-2xl bg-primary px-6 py-3"
           >
             {state.isOnboarding ? (
               <ActivityIndicator size="small" />
@@ -150,7 +150,7 @@ export default function DriverEarningsScreen() {
               disabled={state.isOnboarding}
               accessibilityRole="button"
               testID="earnings-continue-setup"
-              className="rounded-full bg-primary px-6 py-3"
+              className="rounded-2xl bg-primary px-6 py-3"
             >
               {state.isOnboarding ? (
                 <ActivityIndicator size="small" />

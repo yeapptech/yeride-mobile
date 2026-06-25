@@ -82,7 +82,7 @@ function statusPillBgClass(status: Ride['status']): string {
       return 'bg-success/10';
     case 'cancelled':
     case 'payment_failed':
-      return 'bg-destructive/10';
+      return 'bg-error/10';
     case 'payment_requested':
     case 'awaiting_driver':
       return 'bg-muted';
@@ -101,13 +101,13 @@ function statusPillTextClass(status: Ride['status']): string {
       return 'text-success';
     case 'cancelled':
     case 'payment_failed':
-      return 'text-destructive';
+      return 'text-error';
     case 'payment_requested':
     case 'awaiting_driver':
       return 'text-muted-foreground';
     case 'dispatched':
     case 'started':
-      return 'text-primary';
+      return 'text-brand-deep';
     case 'scheduled':
     case 'scheduled_driver_accepted':
       return 'text-secondary';
