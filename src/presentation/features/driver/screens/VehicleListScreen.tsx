@@ -126,6 +126,9 @@ function EmptyState({ onAddVehicle }: { readonly onAddVehicle: () => void }) {
       className="flex-1 items-center justify-center px-6"
       testID="vehicle-list-empty"
     >
+      <View className="mb-3 h-16 w-16 items-center justify-center rounded-full bg-honey">
+        <Text className="text-3xl">🚗</Text>
+      </View>
       <Text className="text-lg font-semibold text-foreground">
         No vehicles registered
       </Text>

@@ -2,16 +2,18 @@ import { useNavigation } from '@react-navigation/native';
 import { useMemo } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
+  RefreshControl,
   ScrollView,
+  SectionList,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import type { Ride } from '@domain/entities/Ride';
 import { DevToolsSection } from '@presentation/components/dev/DevToolsSection';
 import { TripCard } from '@presentation/components/trip/TripCard';
-import { TripList } from '@presentation/components/trip/TripList';
+import { Button } from '@presentation/components/ui/Button';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 import { useCurrentUserId } from '@presentation/stores/useSessionStore';
 
@@ -63,20 +65,14 @@ export default function ActivityScreen() {
   const footer = (
     <View className="pt-2">
       {vm.canLoadMore && (
-        <Pressable
-          testID="activity-load-more"
+        <Button
+          label="Load more"
+          variant="secondary"
           onPress={vm.onLoadMore}
-          disabled={vm.isLoadingMore}
-          className="mb-3 items-center rounded-lg border border-border bg-card px-4 py-3 active:opacity-70"
-        >
-          {vm.isLoadingMore ? (
-            <ActivityIndicator />
-          ) : (
-            <Text className="text-sm font-semibold text-foreground">
-              Load more
-            </Text>
-          )}
-        </Pressable>
+          loading={vm.isLoadingMore}
+          testID="activity-load-more"
+          className="mb-3"
+        />
       )}
       <DevToolsSection />
     </View>
@@ -148,7 +144,7 @@ export default function ActivityScreen() {
             testID="activity-error"
             className="flex-1 items-center justify-center p-6"
           >
-            <Text className="text-base font-semibold text-destructive">
+            <Text className="text-base font-semibold text-error">
               Couldn&rsquo;t load your activity
             </Text>
             <Text className="mt-2 text-center text-sm text-muted-foreground">
@@ -171,26 +167,39 @@ export default function ActivityScreen() {
       testID="activity-screen"
     >
       {scheduledHeader}
-      <View className="border-b border-border px-4 py-3">
-        <Text className="text-lg font-semibold text-foreground">
-          Recent rides
-        </Text>
-      </View>
-      <TripList
-        rides={vm.rides}
-        viewerRole="rider"
-        onSelectRide={vm.onSelectRide}
-        refreshing={vm.isRefreshing}
-        onRefresh={() => {
-          // Wrap the async VM callback so the prop type is `() => void`
-          // — FlatList's RefreshControl doesn't await the promise.
-          void vm.onRefresh();
-        }}
+      <SectionList
+        testID="activity-trip-list"
+        sections={groupRidesByDay(vm.rides)}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={({ item }) => (
+          <TripCard ride={item} viewerRole="rider" onPress={vm.onSelectRide} />
+        )}
+        renderSectionHeader={({ section }) => (
+          <Text className="bg-background px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {section.title}
+          </Text>
+        )}
+        stickySectionHeadersEnabled={false}
+        contentContainerStyle={
+          vm.rides.length === 0 ? { flexGrow: 1, padding: 8 } : { padding: 8 }
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={vm.isRefreshing}
+            onRefresh={() => {
+              // RefreshControl doesn't await; wrap the async VM callback.
+              void vm.onRefresh();
+            }}
+          />
+        }
         ListEmptyComponent={
           <View
             testID="activity-empty"
             className="flex-1 items-center justify-center p-6"
           >
+            <View className="mb-3 h-16 w-16 items-center justify-center rounded-full bg-honey">
+              <Text className="text-3xl">🚗</Text>
+            </View>
             <Text className="text-base font-semibold text-foreground">
               No recent rides
             </Text>
@@ -200,8 +209,44 @@ export default function ActivityScreen() {
           </View>
         }
         ListFooterComponent={footer}
-        testID="activity-trip-list"
       />
     </SafeAreaView>
   );
+}
+
+function startOfDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Group rides into date sections (Today / Yesterday / "Mon D") for the
+ * Activity SectionList, preserving the incoming newest-first order.
+ */
+function groupRidesByDay(
+  rides: readonly Ride[],
+): { title: string; data: Ride[] }[] {
+  const today = startOfDay(new Date());
+  const yesterday = startOfDay(new Date(today.getTime() - 86_400_000));
+  const sections: { title: string; data: Ride[] }[] = [];
+  for (const ride of rides) {
+    const day = startOfDay(ride.createdAt);
+    const title =
+      day.getTime() === today.getTime()
+        ? 'Today'
+        : day.getTime() === yesterday.getTime()
+          ? 'Yesterday'
+          : day.toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+            });
+    const last = sections[sections.length - 1];
+    if (last !== undefined && last.title === title) {
+      last.data.push(ride);
+    } else {
+      sections.push({ title, data: [ride] });
+    }
+  }
+  return sections;
 }
