@@ -15,28 +15,28 @@ import { HomeRideSections } from '@presentation/components/trip/HomeRideSections
 import { useRiderHomeViewModel } from '../view-models/useRiderHomeViewModel';
 
 /**
- * RiderHomeScreen — full-bleed map with a "Where to?" CTA and a bounded
- * scrollable sheet listing the rider's in-progress + scheduled rides
- * (`HomeRideSections`); tapping a row opens the live monitor. No
- * auto-resume redirect — the rider chooses when to enter the monitor.
+ * RiderHomeScreen — Uber-familiar home: a full-bleed map with a bottom sheet
+ * that holds a greeting, a "Where to?" search field, the rider's in-progress +
+ * scheduled rides (`HomeRideSections`), and their saved places (Home / Work).
+ * Tapping a saved place prefills it as the dropoff and opens RouteSearch;
+ * tapping a ride row opens its live monitor. No auto-resume redirect — the
+ * rider chooses when to enter the monitor.
  *
  * Status states (driven by the view-model):
  *
  *   'loading'            — user query or location read in flight. Spinner.
  *   'permission_denied'  — location permission denied. Friendly prompt
- *                          + "Open settings" CTA.
+ *                          + "Try again" CTA.
  *   'out_of_coverage'    — rider sits outside every service area we
  *                          know about. Friendly "we don't operate
  *                          here yet" copy.
  *   'ready'              — map renders, "Where to?" enabled.
- *
- * The map shows the rider's location pin (slot reused from the shared
- * Map's "pickup" slot — visually a gold dot is fine for "you are here"
- * in turn 3.3; turn 3.4 stylizes a custom view inside Marker).
  */
 export default function RiderHomeScreen() {
   const vm = useRiderHomeViewModel();
   const { height: windowHeight } = useWindowDimensions();
+
+  const greeting = timeOfDayGreeting();
 
   const initialRegion = vm.currentLocation.coordinates
     ? {
@@ -117,51 +117,103 @@ export default function RiderHomeScreen() {
         )}
       </SafeAreaView>
 
-      {/* Bottom action panel */}
-      <SafeAreaView
-        edges={['bottom']}
-        className="absolute left-0 right-0 bottom-0"
-      >
-        <View className="mx-4 mb-4 rounded-2xl bg-card shadow-lg">
+      {/* Bottom sheet */}
+      <SafeAreaView edges={['bottom']} className="absolute inset-x-0 bottom-0">
+        <View className="rounded-t-3xl bg-card shadow-lg">
+          {/* Grab handle */}
+          <View className="items-center pb-1 pt-3">
+            <View className="h-1 w-10 rounded-full bg-border" />
+          </View>
           <ScrollView
-            style={{ maxHeight: windowHeight * 0.6 }}
-            contentContainerStyle={{ padding: 16 }}
+            style={{ maxHeight: windowHeight * 0.62 }}
+            contentContainerStyle={{
+              paddingHorizontal: 20,
+              paddingTop: 8,
+              paddingBottom: 20,
+            }}
             showsVerticalScrollIndicator={false}
           >
             {vm.user && (
-              <Text className="mb-3 text-base text-foreground">
-                Hi, {vm.user.name.first} 👋
+              <Text className="mb-3 text-xl font-extrabold tracking-tight text-brand-deep">
+                {greeting}, {vm.user.name.first} 🐝
               </Text>
             )}
+
+            {/* "Where to?" search field */}
             <Pressable
               onPress={vm.goToRouteSearch}
               disabled={vm.status !== 'ready'}
               accessibilityRole="button"
               accessibilityState={{ disabled: vm.status !== 'ready' }}
-              className={`items-center rounded-xl px-4 py-4 ${
-                vm.status === 'ready' ? 'bg-primary' : 'bg-muted'
+              className={`flex-row items-center gap-3 rounded-2xl bg-muted px-4 py-4 ${
+                vm.status === 'ready' ? '' : 'opacity-60'
               }`}
               testID="rider-home-where-to"
             >
-              <Text
-                className={`text-base font-semibold ${
-                  vm.status === 'ready'
-                    ? 'text-primary-foreground'
-                    : 'text-muted-foreground'
-                }`}
-              >
+              <Text className="text-base">🔍</Text>
+              <Text className="flex-1 text-base font-semibold text-muted-foreground">
                 Where to?
               </Text>
             </Pressable>
+
             <HomeRideSections
               inProgressRides={vm.inProgressRides}
               scheduledRides={vm.scheduledRides}
               viewerRole="rider"
               onSelectRide={(ride: Ride) => vm.resumeRide(String(ride.id))}
             />
+
+            {vm.savedPlaces.length > 0 && (
+              <View className="mt-4">
+                <View className="mb-2 h-px bg-border" />
+                <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Saved places
+                </Text>
+                {vm.savedPlaces.map((place) => (
+                  <Pressable
+                    key={String(place.id)}
+                    onPress={() => vm.goToSavedPlace(place)}
+                    accessibilityRole="button"
+                    className="flex-row items-center gap-3 py-3"
+                  >
+                    <View className="h-9 w-9 items-center justify-center rounded-full bg-honey">
+                      <Text className="text-base text-honey-foreground">
+                        {savedPlaceIcon(place.label)}
+                      </Text>
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-[15px] font-bold text-foreground">
+                        {place.label}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        className="text-xs text-muted-foreground"
+                      >
+                        {place.address.label}
+                      </Text>
+                    </View>
+                    <Text className="text-lg text-muted-foreground">›</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </ScrollView>
         </View>
       </SafeAreaView>
     </View>
   );
+}
+
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function savedPlaceIcon(label: string): string {
+  const l = label.toLowerCase();
+  if (l.includes('home')) return '🏠';
+  if (l.includes('work') || l.includes('office')) return '💼';
+  return '📍';
 }

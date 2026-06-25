@@ -47,13 +47,16 @@ export function RideServicesList({
           <Pressable
             key={String(service.id)}
             onPress={() => onSelect(service.id)}
-            className={`mb-2 flex-row items-center rounded-xl border px-4 py-3 ${
+            className={`mb-2 flex-row items-center gap-3 rounded-2xl border px-4 py-3 ${
               isSelected ? 'border-primary bg-primary/10' : 'border-border'
             }`}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
             testID={`ride-service-${String(service.id)}`}
           >
+            <View className="h-10 w-10 items-center justify-center rounded-full bg-honey">
+              <Text className="text-lg">🚗</Text>
+            </View>
             <View className="flex-1">
               <View className="flex-row items-center gap-2">
                 <Text className="text-base font-semibold text-foreground">

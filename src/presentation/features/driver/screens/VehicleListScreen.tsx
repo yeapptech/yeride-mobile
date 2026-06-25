@@ -135,7 +135,7 @@ function EmptyState({ onAddVehicle }: { readonly onAddVehicle: () => void }) {
         onPress={onAddVehicle}
         accessibilityRole="button"
         testID="vehicle-list-empty-cta"
-        className="mt-4 rounded-xl bg-primary px-6 py-3"
+        className="mt-4 rounded-2xl bg-primary px-6 py-3"
       >
         <Text className="text-base font-semibold text-primary-foreground">
           Register your first vehicle

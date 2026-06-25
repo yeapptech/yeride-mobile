@@ -68,7 +68,7 @@ export function CompletedView({ ride, onClose }: CompletedViewProps) {
           onPress={onClose}
           accessibilityRole="button"
           accessibilityLabel="Close trip"
-          className="items-center rounded-xl bg-primary px-4 py-4"
+          className="items-center rounded-2xl bg-primary px-4 py-4"
           testID="completed-close"
         >
           <Text className="text-base font-semibold text-primary-foreground">

@@ -251,7 +251,7 @@ export default function RouteSelectScreen() {
               disabled: !vm.canConfirm || vm.isSubmitting,
               busy: vm.isSubmitting,
             }}
-            className={`items-center rounded-xl px-4 py-3 ${
+            className={`items-center rounded-2xl px-4 py-4 ${
               vm.canConfirm && !vm.isSubmitting ? 'bg-primary' : 'bg-muted'
             }`}
             testID="route-select-confirm"
@@ -260,7 +260,7 @@ export default function RouteSelectScreen() {
               <ActivityIndicator size="small" />
             ) : (
               <Text
-                className={`text-base font-semibold ${
+                className={`text-base font-extrabold ${
                   vm.canConfirm
                     ? 'text-primary-foreground'
                     : 'text-muted-foreground'

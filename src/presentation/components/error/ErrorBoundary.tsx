@@ -193,7 +193,7 @@ function FallbackUI({ error, onReset }: FallbackUIProps) {
           accessibilityLabel="Try again"
           onPress={onReset}
           testID="error-boundary-try-again"
-          className="items-center rounded-xl bg-primary px-4 py-3"
+          className="items-center rounded-2xl bg-primary px-4 py-3"
         >
           <Text className="text-base font-semibold text-primary-foreground">
             Try again

@@ -95,10 +95,10 @@ export function CompletedView({ ride, onViewReceipt }: CompletedViewProps) {
         <Pressable
           onPress={onViewReceipt}
           accessibilityRole="button"
-          className="items-center rounded-xl bg-primary px-4 py-3"
+          className="items-center rounded-2xl bg-primary px-4 py-4"
           testID="completed-view-receipt"
         >
-          <Text className="text-base font-semibold text-primary-foreground">
+          <Text className="text-base font-extrabold text-primary-foreground">
             View receipt
           </Text>
         </Pressable>

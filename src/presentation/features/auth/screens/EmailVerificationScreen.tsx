@@ -49,7 +49,7 @@ export function EmailVerificationScreen(
             void resend();
           }}
           disabled={resending}
-          className="bg-primary rounded-lg px-6 py-3 mb-4 active:opacity-70 disabled:opacity-50"
+          className="bg-primary rounded-2xl px-6 py-3 mb-4 active:opacity-70 disabled:opacity-50"
         >
           <Text className="text-primary-foreground font-semibold">
             {resending ? 'Resending…' : 'Resend email'}

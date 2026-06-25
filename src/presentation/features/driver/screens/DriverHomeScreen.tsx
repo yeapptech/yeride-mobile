@@ -165,7 +165,7 @@ export default function DriverHomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Register a vehicle"
                 testID="driver-home-register-vehicle"
-                className="items-center rounded-xl bg-primary px-4 py-4"
+                className="items-center rounded-2xl bg-primary px-4 py-4"
               >
                 <Text className="text-base font-semibold text-primary-foreground">
                   Register a vehicle

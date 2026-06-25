@@ -48,7 +48,7 @@ export function ForgotPasswordScreen(
               </Text>
               <Pressable
                 onPress={goBack}
-                className="bg-primary rounded-lg px-6 py-3 self-start active:opacity-70"
+                className="bg-primary rounded-2xl px-6 py-3 self-start active:opacity-70"
               >
                 <Text className="text-primary-foreground font-semibold">
                   Back to sign in
@@ -75,7 +75,7 @@ export function ForgotPasswordScreen(
                   void submit(email);
                 }}
                 disabled={submitting}
-                className="bg-primary rounded-lg px-6 py-4 mb-4 active:opacity-70 disabled:opacity-50"
+                className="bg-primary rounded-2xl px-6 py-4 mb-4 active:opacity-70 disabled:opacity-50"
               >
                 <View className="flex-row items-center justify-center">
                   {submitting && (

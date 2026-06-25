@@ -160,10 +160,10 @@ export function PaymentFailedView({
           <Pressable
             onPress={onPressOpenWallet}
             accessibilityRole="button"
-            className="items-center rounded-xl bg-primary px-4 py-3"
+            className="items-center rounded-2xl bg-primary px-4 py-4"
             testID="payment-failed-open-wallet"
           >
-            <Text className="text-base font-semibold text-primary-foreground">
+            <Text className="text-base font-extrabold text-primary-foreground">
               Open Wallet
             </Text>
           </Pressable>
@@ -172,10 +172,10 @@ export function PaymentFailedView({
           <Pressable
             onPress={onPressContactSupport}
             accessibilityRole="button"
-            className="items-center rounded-xl bg-primary px-4 py-3"
+            className="items-center rounded-2xl bg-primary px-4 py-4"
             testID="payment-failed-contact-support-primary"
           >
-            <Text className="text-base font-semibold text-primary-foreground">
+            <Text className="text-base font-extrabold text-primary-foreground">
               Contact support
             </Text>
           </Pressable>

@@ -2,7 +2,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
+import { Endpoint } from '@domain/entities/Endpoint';
 import type { Ride } from '@domain/entities/Ride';
+import type { SavedPlace } from '@domain/entities/SavedPlace';
 import type { ServiceArea } from '@domain/entities/ServiceArea';
 import type { User } from '@domain/entities/User';
 import { UserLocation } from '@domain/entities/UserLocation';
@@ -19,7 +21,7 @@ import {
   useScheduledRidesSubscription,
   useUpdateLocationMutation,
 } from '@presentation/queries';
-import { useServiceAreaStore } from '@presentation/stores';
+import { useServiceAreaStore, useTripDraftStore } from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RiderHomeVM');
@@ -60,9 +62,13 @@ export interface UseRiderHomeViewModel {
   readonly inProgressRides: readonly Ride[];
   /** Live list of the rider's scheduled rides (next-soonest-first). */
   readonly scheduledRides: readonly Ride[];
+  /** The rider's saved places (Home / Work / …) for the home quick-rows. */
+  readonly savedPlaces: readonly SavedPlace[];
   readonly permissionStatus: LocationPermission;
   /** Tap handler: push to RouteSearch. */
   goToRouteSearch: () => void;
+  /** Tap handler: prefill a saved place as the dropoff, then open RouteSearch. */
+  goToSavedPlace: (place: SavedPlace) => void;
   /** Tap handler: open a ride's live monitor. */
   resumeRide: (rideId: string) => void;
   /** Re-request location permission and re-read. */
@@ -79,6 +85,7 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   const updateLocationMutation = useUpdateLocationMutation();
   const setReady = useServiceAreaStore((s) => s.setReady);
   const setActiveArea = useServiceAreaStore((s) => s.setActiveArea);
+  const setDropoff = useTripDraftStore((s) => s.setDropoff);
 
   const user = userQuery.data ?? null;
   const activeServiceArea = activeAreaQuery.data ?? null;
@@ -128,9 +135,32 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
     });
   }, [user, currentLocation.coordinates, updateLocationMutation]);
 
+  const savedPlaces = useMemo<readonly SavedPlace[]>(
+    () => user?.savedPlaces ?? [],
+    [user],
+  );
+
   const goToRouteSearch = useCallback(() => {
     navigation.navigate('RouteSearch');
   }, [navigation]);
+
+  const goToSavedPlace = useCallback(
+    (place: SavedPlace) => {
+      const endpointR = Endpoint.create({
+        location: place.address.coordinates,
+        address: place.address.label,
+        placeName: place.label,
+        directions: null,
+      });
+      if (!endpointR.ok) {
+        logger.warn('goToSavedPlace: endpoint build failed', endpointR.error);
+        return;
+      }
+      setDropoff(endpointR.value);
+      navigation.navigate('RouteSearch');
+    },
+    [setDropoff, navigation],
+  );
 
   const resumeRide = useCallback(
     (rideId: string) => {
@@ -173,8 +203,10 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
     activeServiceArea,
     inProgressRides,
     scheduledRides,
+    savedPlaces,
     permissionStatus: currentLocation.permissionStatus,
     goToRouteSearch,
+    goToSavedPlace,
     resumeRide,
     refreshLocation: currentLocation.refresh,
   };

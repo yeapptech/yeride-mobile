@@ -120,13 +120,13 @@ export default function RouteSearchScreen() {
             disabled={!vm.canContinue}
             accessibilityRole="button"
             accessibilityState={{ disabled: !vm.canContinue }}
-            className={`items-center rounded-xl px-4 py-3 ${
+            className={`items-center rounded-2xl px-4 py-4 ${
               vm.canContinue ? 'bg-primary' : 'bg-muted'
             }`}
             testID="route-search-continue"
           >
             <Text
-              className={`text-base font-semibold ${
+              className={`text-base font-extrabold ${
                 vm.canContinue
                   ? 'text-primary-foreground'
                   : 'text-muted-foreground'
@@ -206,19 +206,22 @@ function renderEmptyAutocomplete() {
  * don't reach into the widget, so this is plain RN style. Computed at
  * render time so values respond to the system color scheme.
  *
- * Token mapping (from tailwind.config.js):
- *   border.DEFAULT / border.dark    → #e5e5e5 / #404040
- *   card.DEFAULT   / card.dark      → #ffffff / #1f1f1f
- *   muted.foreground / muted.dark-foreground → #737373 / #a3a3a3
+ * Token mapping (kept in sync with global.css; light / dark):
+ *   field (input fill) → #f4f0e7 / #2f2114
+ *   card  (list bg)    → #fffcf5 / #241910
+ *   border             → #ece4d6 / #3a2c1c
+ *   foreground         → #2b1f12 / #f6efe2
+ *   muted-foreground   → #8a7c63 / #b3a489
  */
 function buildAutocompleteStyles(isDark: boolean): {
   styles: object;
   placeholderTextColor: string;
 } {
-  const border = isDark ? '#404040' : '#e5e5e5';
-  const card = isDark ? '#1f1f1f' : '#ffffff';
-  const fg = isDark ? '#ffffff' : '#000000';
-  const placeholderTextColor = isDark ? '#a3a3a3' : '#737373';
+  const border = isDark ? '#3a2c1c' : '#ece4d6';
+  const card = isDark ? '#241910' : '#fffcf5';
+  const field = isDark ? '#2f2114' : '#f4f0e7';
+  const fg = isDark ? '#f6efe2' : '#2b1f12';
+  const placeholderTextColor = isDark ? '#b3a489' : '#8a7c63';
   return {
     placeholderTextColor,
     styles: {
@@ -226,18 +229,16 @@ function buildAutocompleteStyles(isDark: boolean): {
         backgroundColor: 'transparent',
       },
       textInput: {
-        height: 44,
+        height: 48,
         fontSize: 16,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: border,
-        paddingHorizontal: 12,
-        backgroundColor: card,
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        backgroundColor: field,
         color: fg,
       },
       listView: {
         backgroundColor: card,
-        borderRadius: 8,
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: border,
         marginTop: 4,
@@ -245,7 +246,7 @@ function buildAutocompleteStyles(isDark: boolean): {
       },
       row: {
         paddingVertical: 12,
-        paddingHorizontal: 12,
+        paddingHorizontal: 14,
       },
       description: {
         fontSize: 14,

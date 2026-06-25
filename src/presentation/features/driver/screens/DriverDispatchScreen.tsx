@@ -190,7 +190,7 @@ function DispatchPanel({
           onPress={onDecline}
           accessibilityRole="button"
           accessibilityLabel="Back to home"
-          className="items-center rounded-xl bg-primary px-4 py-4"
+          className="items-center rounded-2xl bg-primary px-4 py-4"
           testID="driver-dispatch-back-home"
         >
           <Text className="text-base font-semibold text-primary-foreground">

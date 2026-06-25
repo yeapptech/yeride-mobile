@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 
+import { Address } from '@domain/entities/Address';
 import { Coordinates } from '@domain/entities/Coordinates';
 import { Email } from '@domain/entities/Email';
 import { Endpoint } from '@domain/entities/Endpoint';
@@ -12,12 +13,14 @@ import { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
 import { RideServiceId } from '@domain/entities/RideServiceId';
 import { RideServiceSnapshot } from '@domain/entities/RideServiceSnapshot';
+import { SavedPlace, SavedPlaceId } from '@domain/entities/SavedPlace';
 import { ServiceArea } from '@domain/entities/ServiceArea';
 import { ServiceAreaId } from '@domain/entities/ServiceAreaId';
 import { makeRider } from '@domain/entities/User';
 import type { UserId } from '@domain/entities/UserId';
 import { useServiceAreaStore } from '@presentation/stores/useServiceAreaStore';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
+import { useTripDraftStore } from '@presentation/stores/useTripDraftStore';
 import {
   InMemoryAuthRepository,
   InMemoryRideRepository,
@@ -150,7 +153,25 @@ function makeScheduledRiderRide(uid: UserId, id: string): Ride {
   );
 }
 
-async function setupSeededState(): Promise<{
+function makeSavedPlace(label: string, id: string): SavedPlace {
+  return unwrap(
+    SavedPlace.create({
+      id: unwrap(SavedPlaceId.create(id)),
+      label,
+      address: unwrap(
+        Address.create({
+          label: `${label} address`,
+          coordinates: unwrap(Coordinates.create(25.77, -80.19)),
+          placeId: `place_${id}`,
+        }),
+      ),
+    }),
+  );
+}
+
+async function setupSeededState(opts?: {
+  savedPlaces?: readonly SavedPlace[];
+}): Promise<{
   authRepo: InMemoryAuthRepository;
   usersRepo: InMemoryUserRepository;
   serviceAreasRepo: InMemoryServiceAreaRepository;
@@ -178,7 +199,7 @@ async function setupSeededState(): Promise<{
     name: unwrap(PersonName.create({ first: 'Ada', last: 'Lovelace' })),
     phone: unwrap(PhoneNumber.create('+14155551111')),
     avatarUrl: null,
-    savedPlaces: [],
+    savedPlaces: opts?.savedPlaces ?? [],
     createdAt: new Date(),
     updatedAt: new Date(),
     stripeCustomerId: null,
@@ -222,6 +243,7 @@ describe('useRiderHomeViewModel', () => {
     mockNavigate.mockClear();
     mockReset.mockClear();
     useServiceAreaStore.getState().reset();
+    useTripDraftStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
   });
 
@@ -308,6 +330,44 @@ describe('useRiderHomeViewModel', () => {
     await waitFor(() => {
       expect(result.current.scheduledRides).toHaveLength(1);
     });
+  });
+
+  it('exposes the user saved places (Home / Work)', async () => {
+    const places = [
+      makeSavedPlace('Home', 'home000000000001'),
+      makeSavedPlace('Work', 'work000000000001'),
+    ];
+    const setup = await setupSeededState({ savedPlaces: places });
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    expect(result.current.savedPlaces.map((p) => p.label)).toEqual([
+      'Home',
+      'Work',
+    ]);
+  });
+
+  it('goToSavedPlace prefills the draft dropoff and opens RouteSearch', async () => {
+    const home = makeSavedPlace('Home', 'home000000000001');
+    const setup = await setupSeededState({ savedPlaces: [home] });
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.savedPlaces).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.goToSavedPlace(home);
+    });
+
+    const dropoff = useTripDraftStore.getState().dropoff;
+    expect(dropoff?.placeName).toBe('Home');
+    expect(dropoff?.address).toBe('Home address');
+    expect(mockNavigate).toHaveBeenCalledWith('RouteSearch');
   });
 
   it('does NOT auto-route to RideMonitor when an in-progress ride exists', async () => {

@@ -47,7 +47,7 @@ export default function RideScheduledConfirmationScreen({
           </Text>
         </View>
 
-        <View className="rounded-2xl border border-border bg-card p-5 dark:bg-card-dark">
+        <View className="rounded-2xl border border-border bg-card p-5">
           <View className="mb-3 flex-row items-center">
             <Text
               testID="ride-scheduled-confirmation-datetime"

@@ -123,7 +123,7 @@ export function RegisterScreen(_props: AuthStackScreenProps<'Register'>) {
           <Pressable
             onPress={onSubmit}
             disabled={submitting}
-            className="bg-primary rounded-lg px-6 py-4 mb-6 active:opacity-70 disabled:opacity-50"
+            className="bg-primary rounded-2xl px-6 py-4 mb-6 active:opacity-70 disabled:opacity-50"
           >
             <View className="flex-row items-center justify-center">
               {submitting && (

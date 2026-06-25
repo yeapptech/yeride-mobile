@@ -3,21 +3,33 @@
 @tailwind utilities;
 
 /*
- * "Honey and the Bee" design system — see REFACTOR_PLAN.md (carry-forward from
- * the legacy yeride app's docs/DESIGN_SYSTEM.md).
+ * YeRide design system — "Cab Yellow + UPS Pullman Brown".
+ * See docs/superpowers/specs/2026-06-24-ui-redesign-design-language.md.
  *
  * Tokens are stored as RGB channel triplets (no leading #) so Tailwind's
  * `<alpha-value>` substitution works for opacity modifiers like `bg-success/10`.
  * tailwind.config.js wraps each one as `rgb(var(--token) / <alpha-value>)`.
+ * Dark mode swaps the values below via prefers-color-scheme (tailwind
+ * darkMode:'media'), so surface/field/border/honey tokens theme automatically
+ * without per-screen `dark:` variants.
  */
 :root {
   --background: 255 255 255; /* #ffffff */
-  --foreground: 0 0 0; /* #000000 */
-  --primary: 249 201 1; /* #f9c901 honey gold */
-  --primary-foreground: 0 0 0; /* #000000 — black on gold meets WCAG AA-large with headroom */
-  --brand-deep: 107 71 1; /* #6b4701 */
-  --brand-warm: 152 91 16; /* #985b10 */
-  --brand-muted: 137 104 0; /* #896800 */
+  --foreground: 43 31 18; /* #2b1f12 warm ink */
+  --primary: 247 183 49; /* #f7b731 cab yellow */
+  --primary-foreground: 58 39 5; /* #3a2705 dark brown on yellow — AAA */
+  --brand-deep: 100 65 23; /* #644117 UPS Pullman brown — headings/wordmark */
+  --brand-warm: 138 91 16; /* #8a5b10 */
+  --brand-muted: 138 124 99; /* #8a7c63 */
+
+  --card: 255 252 245; /* #fffcf5 cream surface (sheets/cards) */
+  --card-foreground: 43 31 18; /* #2b1f12 */
+  --muted: 244 240 231; /* #f4f0e7 field / muted surface */
+  --muted-foreground: 138 124 99; /* #8a7c63 */
+  --border: 236 228 214; /* #ece4d6 hairlines/dividers */
+  --honey: 253 239 200; /* #fdefc8 chip/badge background */
+  --honey-foreground: 100 65 23; /* #644117 */
+
   --success: 21 128 61; /* #15803d — darkened from #16a34a for AA-normal on white */
   --warning: 180 83 9; /* #b45309 — darkened from #d97706 for AA-normal on white */
   --error: 220 38 38; /* #dc2626 */
@@ -26,11 +38,22 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: 0 0 0; /* #000000 */
-    --foreground: 255 255 255; /* #ffffff */
-    --primary: 246 224 0; /* #f6e000 — more luminous on black */
-    /* --primary-foreground stays #000000 (inherited) */
-    /* brown brand tokens intentionally inherit — dark enough for both modes */
+    --background: 24 16 9; /* #181009 Pullman-brown base (not neutral black) */
+    --foreground: 246 239 226; /* #f6efe2 cream */
+    --primary: 250 194 60; /* #fac23c — more luminous cab yellow on brown */
+    /* --primary-foreground stays #3a2705 (inherited) */
+    --brand-deep: 250 194 60; /* flips to cab yellow so headings show on dark */
+    --brand-warm: 217 162 58; /* #d9a23a */
+    --brand-muted: 179 164 137; /* #b3a489 */
+
+    --card: 36 25 16; /* #241910 dark surface */
+    --card-foreground: 246 239 226; /* #f6efe2 */
+    --muted: 47 33 20; /* #2f2114 */
+    --muted-foreground: 179 164 137; /* #b3a489 */
+    --border: 58 44 28; /* #3a2c1c */
+    --honey: 58 42 24; /* #3a2a18 */
+    --honey-foreground: 250 194 60; /* #fac23c */
+
     --success: 34 197 94; /* #22c55e */
     --warning: 251 191 36; /* #fbbf24 */
     --error: 248 113 113; /* #f87171 */

@@ -232,7 +232,7 @@ function StateOverlay({ stateKind, errorMessage, onRetry }: StateOverlayProps) {
               onPress={onRetry}
               accessibilityRole="button"
               accessibilityLabel="Retry navigation"
-              className="rounded-xl bg-primary px-4 py-3"
+              className="rounded-2xl bg-primary px-4 py-3"
               testID="driver-navigation-retry"
             >
               <Text className="text-sm font-semibold text-primary-foreground">

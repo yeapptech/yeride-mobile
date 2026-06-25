@@ -168,7 +168,7 @@ export function ScheduleDatetimePicker({
       testID="schedule-datetime-picker"
     >
       <View className="flex-1 justify-end bg-black/50">
-        <View className="rounded-t-3xl bg-card p-6 dark:bg-card-dark">
+        <View className="rounded-t-3xl bg-card p-6">
           <View className="mb-6 flex-row items-center justify-between">
             <Text className="text-xl font-semibold text-foreground">
               {title}
