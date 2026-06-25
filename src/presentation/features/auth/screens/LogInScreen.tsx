@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormField } from '@presentation/components/form/FormField';
+import { Button } from '@presentation/components/ui/Button';
 import type { AuthStackScreenProps } from '@presentation/navigation/types';
 
 import { useLogInViewModel } from '../view-models/useLogInViewModel';
@@ -66,20 +66,12 @@ export function LogInScreen(_props: AuthStackScreenProps<'LogIn'>) {
             <Text className="mb-4 text-error text-sm">{error}</Text>
           )}
 
-          <Pressable
+          <Button
+            label="Sign in"
             onPress={onSubmit}
-            disabled={submitting}
-            className="bg-primary rounded-lg px-6 py-4 mb-4 active:opacity-70 disabled:opacity-50"
-          >
-            <View className="flex-row items-center justify-center">
-              {submitting && (
-                <ActivityIndicator size="small" color="#000" className="mr-2" />
-              )}
-              <Text className="text-primary-foreground font-semibold text-base">
-                Sign in
-              </Text>
-            </View>
-          </Pressable>
+            loading={submitting}
+            className="mb-4"
+          />
 
           <Pressable onPress={goToForgotPassword} className="mb-6 self-center">
             <Text className="text-info text-sm">Forgot password?</Text>

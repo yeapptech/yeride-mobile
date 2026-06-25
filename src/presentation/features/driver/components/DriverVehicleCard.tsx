@@ -41,7 +41,7 @@ export function DriverVehicleCard({
       accessibilityLabel={`Vehicle ${label}`}
       accessibilityState={{ selected: isActive }}
       testID={`vehicle-card-${String(vehicle.vin)}`}
-      className={`mb-3 rounded-xl bg-card p-4 ${
+      className={`mb-3 rounded-2xl bg-card p-4 ${
         isActive ? 'border-2 border-primary' : 'border border-border'
       }`}
     >
@@ -63,9 +63,9 @@ export function DriverVehicleCard({
               {label}
             </Text>
             {isActive && (
-              <View className="rounded bg-success/15 px-2 py-0.5">
-                <Text className="text-xs font-semibold text-success">
-                  ACTIVE
+              <View className="rounded-full bg-honey px-2 py-0.5">
+                <Text className="text-[10px] font-bold uppercase text-honey-foreground">
+                  Active
                 </Text>
               </View>
             )}

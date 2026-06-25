@@ -20,6 +20,7 @@ import {
   CardBrandBadge,
   formatBrand,
 } from '@presentation/components/payment/CardBrandBadge';
+import { Button } from '@presentation/components/ui/Button';
 import type {
   RiderStackNavigation,
   RiderStackScreenProps,
@@ -269,7 +270,8 @@ function LoadedReceipt({
           {pdfShareEnabled && (
             <ShareReceiptCta state={pdfVM.state} testID="receipt-share-cta" />
           )}
-          <Pressable
+          <Button
+            label="Done"
             onPress={() =>
               // Reset (rather than `popToTop`) so the rider always lands
               // back on RiderTabs regardless of how they reached the
@@ -281,14 +283,8 @@ function LoadedReceipt({
                 routes: [{ name: 'RiderTabs' }],
               })
             }
-            accessibilityRole="button"
-            className="items-center rounded-xl bg-primary px-4 py-3"
             testID="receipt-done"
-          >
-            <Text className="text-base font-semibold text-primary-foreground">
-              Done
-            </Text>
-          </Pressable>
+          />
         </View>
       </SafeAreaView>
     </SafeAreaView>

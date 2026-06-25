@@ -168,7 +168,7 @@ export function ScheduleDatetimePicker({
       testID="schedule-datetime-picker"
     >
       <View className="flex-1 justify-end bg-black/50">
-        <View className="rounded-t-3xl bg-card p-6 dark:bg-card-dark">
+        <View className="rounded-t-3xl bg-card p-6">
           <View className="mb-6 flex-row items-center justify-between">
             <Text className="text-xl font-semibold text-foreground">
               {title}
@@ -201,7 +201,7 @@ export function ScheduleDatetimePicker({
             {error !== null && (
               <Text
                 testID="schedule-datetime-picker-error"
-                className="mt-2 text-sm text-destructive"
+                className="mt-2 text-sm text-error"
               >
                 {error}
               </Text>
@@ -239,7 +239,7 @@ export function ScheduleDatetimePicker({
             accessibilityRole="button"
             accessibilityLabel={buttonText}
             onPress={handleSchedule}
-            className="rounded-lg bg-primary px-6 py-4 active:opacity-80"
+            className="rounded-2xl bg-primary px-6 py-4 active:opacity-80"
           >
             <Text className="text-center text-lg font-semibold text-primary-foreground">
               {buttonText}

@@ -72,7 +72,9 @@ function AuthenticatedNavigator() {
 function SplashScreen() {
   return (
     <View className="flex-1 items-center justify-center bg-background">
-      <Text className="text-3xl font-bold text-primary mb-4">YeRide Next</Text>
+      <Text className="text-3xl font-bold text-brand-deep mb-4">
+        YeRide Next
+      </Text>
       <ActivityIndicator size="large" />
     </View>
   );
@@ -95,7 +97,7 @@ function UserLoadErrorScreen({ onRetry }: UserLoadErrorScreenProps) {
       </Text>
       <Pressable
         onPress={onRetry}
-        className="mb-3 rounded-lg bg-primary px-6 py-3"
+        className="mb-3 rounded-2xl bg-primary px-6 py-3"
         accessibilityRole="button"
       >
         <Text className="font-semibold text-primary-foreground">Retry</Text>

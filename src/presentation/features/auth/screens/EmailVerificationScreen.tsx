@@ -1,6 +1,7 @@
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Button } from '@presentation/components/ui/Button';
 import type { VerifyEmailStackScreenProps } from '@presentation/navigation/types';
 
 import { useEmailVerificationViewModel } from '../view-models/useEmailVerificationViewModel';
@@ -44,17 +45,14 @@ export function EmailVerificationScreen(
           <Text className="mb-4 text-error text-sm">{error}</Text>
         )}
 
-        <Pressable
+        <Button
+          label={resending ? 'Resending…' : 'Resend email'}
           onPress={() => {
             void resend();
           }}
           disabled={resending}
-          className="bg-primary rounded-lg px-6 py-3 mb-4 active:opacity-70 disabled:opacity-50"
-        >
-          <Text className="text-primary-foreground font-semibold">
-            {resending ? 'Resending…' : 'Resend email'}
-          </Text>
-        </Pressable>
+          className="mb-4"
+        />
 
         <Pressable
           onPress={() => {

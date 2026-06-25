@@ -20,21 +20,20 @@ module.exports = {
         warning: 'rgb(var(--warning) / <alpha-value>)',
         error: 'rgb(var(--error) / <alpha-value>)',
         info: 'rgb(var(--info) / <alpha-value>)',
+        // card / muted / border / honey moved to CSS-variable tokens (global.css)
+        // so they theme via prefers-color-scheme without per-screen `dark:` variants.
         card: {
-          DEFAULT: '#ffffff',
-          foreground: '#000000',
-          dark: '#1f1f1f',
-          'dark-foreground': '#ffffff',
+          DEFAULT: 'rgb(var(--card) / <alpha-value>)',
+          foreground: 'rgb(var(--card-foreground) / <alpha-value>)',
         },
         muted: {
-          DEFAULT: '#f5f5f5',
-          foreground: '#737373',
-          dark: '#2a2a2a',
-          'dark-foreground': '#a3a3a3',
+          DEFAULT: 'rgb(var(--muted) / <alpha-value>)',
+          foreground: 'rgb(var(--muted-foreground) / <alpha-value>)',
         },
-        border: {
-          DEFAULT: '#e5e5e5',
-          dark: '#404040',
+        border: 'rgb(var(--border) / <alpha-value>)',
+        honey: {
+          DEFAULT: 'rgb(var(--honey) / <alpha-value>)',
+          foreground: 'rgb(var(--honey-foreground) / <alpha-value>)',
         },
       },
     },

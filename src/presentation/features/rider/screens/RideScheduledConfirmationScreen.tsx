@@ -47,7 +47,7 @@ export default function RideScheduledConfirmationScreen({
           </Text>
         </View>
 
-        <View className="rounded-2xl border border-border bg-card p-5 dark:bg-card-dark">
+        <View className="rounded-2xl border border-border bg-card p-5">
           <View className="mb-3 flex-row items-center">
             <Text
               testID="ride-scheduled-confirmation-datetime"
@@ -80,7 +80,7 @@ export default function RideScheduledConfirmationScreen({
           accessibilityRole="button"
           accessibilityLabel="Got it"
           onPress={handleDone}
-          className="rounded-lg bg-primary px-6 py-3 active:opacity-80"
+          className="rounded-2xl bg-primary px-6 py-3 active:opacity-80"
         >
           <Text className="text-center text-base font-semibold text-primary-foreground">
             Got it

@@ -8,6 +8,7 @@ import {
 } from 'react-native-safe-area-context';
 
 import { Coordinates } from '@domain/entities/Coordinates';
+import { Button } from '@presentation/components/ui/Button';
 import type {
   DriverStackNavigation,
   DriverStackScreenProps,
@@ -228,17 +229,12 @@ function StateOverlay({ stateKind, errorMessage, onRetry }: StateOverlayProps) {
             </Text>
           )}
           <View className="mt-4 flex-row gap-3">
-            <Pressable
+            <Button
+              label="Try again"
               onPress={onRetry}
-              accessibilityRole="button"
               accessibilityLabel="Retry navigation"
-              className="rounded-xl bg-primary px-4 py-3"
               testID="driver-navigation-retry"
-            >
-              <Text className="text-sm font-semibold text-primary-foreground">
-                Try again
-              </Text>
-            </Pressable>
+            />
           </View>
         </View>
       )}

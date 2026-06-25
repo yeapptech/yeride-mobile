@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormField } from '@presentation/components/form/FormField';
+import { Button } from '@presentation/components/ui/Button';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
 
 import { useUserProfileViewModel } from '../view-models/useUserProfileViewModel';
@@ -74,8 +75,8 @@ export function UserProfileScreen() {
         >
           {/* Avatar placeholder — Phase 9 */}
           <View className="items-center mb-6">
-            <View className="w-24 h-24 rounded-full bg-muted items-center justify-center mb-2">
-              <Text className="text-2xl text-muted-foreground">
+            <View className="w-24 h-24 rounded-full bg-honey items-center justify-center mb-2">
+              <Text className="text-2xl font-bold text-honey-foreground">
                 {user.name.first.slice(0, 1)}
                 {user.name.last.slice(0, 1)}
               </Text>
@@ -85,6 +86,9 @@ export function UserProfileScreen() {
             </Text>
           </View>
 
+          <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Account
+          </Text>
           <Text className="text-sm text-muted-foreground mb-1">Email</Text>
           <Text className="text-base text-foreground mb-4">
             {user.email.value}
@@ -125,40 +129,39 @@ export function UserProfileScreen() {
             <Text className="mb-4 text-error text-sm">{error}</Text>
           )}
 
-          <Pressable
+          <Button
+            label="Save changes"
             onPress={onSubmit}
-            disabled={submitting}
-            className="bg-primary rounded-lg px-6 py-3 mb-3 active:opacity-70 disabled:opacity-50"
-          >
-            <View className="flex-row items-center justify-center">
-              {submitting && (
-                <ActivityIndicator size="small" color="#000" className="mr-2" />
-              )}
-              <Text className="text-primary-foreground font-semibold">
-                Save changes
-              </Text>
-            </View>
-          </Pressable>
+            loading={submitting}
+            className="mb-3"
+          />
 
           {user.role === 'driver' && (
             <>
               <View className="mt-8 mb-4 border-t border-border" />
-              <Text className="text-sm text-muted-foreground mb-2">Driver</Text>
+              <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Driver
+              </Text>
               <Pressable
                 onPress={() => navigation.navigate('Vehicles')}
                 accessibilityRole="button"
                 testID="profile-vehicles-link"
-                className="mb-2 flex-row items-center justify-between rounded-lg border border-border px-4 py-3"
+                className="mb-2 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3"
               >
-                <Text className="text-base text-foreground">My vehicles</Text>
-                <Text className="text-sm text-muted-foreground">›</Text>
+                <View className="h-9 w-9 items-center justify-center rounded-full bg-honey">
+                  <Text className="text-base text-honey-foreground">🚗</Text>
+                </View>
+                <Text className="flex-1 text-base font-medium text-foreground">
+                  My vehicles
+                </Text>
+                <Text className="text-lg text-muted-foreground">›</Text>
               </Pressable>
             </>
           )}
 
           <View className="mt-8 mb-4 border-t border-border" />
 
-          <Text className="text-sm text-muted-foreground mb-2">
+          <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Saved places
           </Text>
           <Text className="text-xs text-muted-foreground mb-6">
@@ -169,9 +172,15 @@ export function UserProfileScreen() {
             onPress={() => {
               void signOut();
             }}
-            className="self-center mb-6"
+            accessibilityRole="button"
+            className="mb-6 flex-row items-center gap-3 rounded-2xl border border-error/30 px-4 py-3"
           >
-            <Text className="text-error text-sm">Sign out</Text>
+            <View className="h-9 w-9 items-center justify-center rounded-full bg-error/10">
+              <Text className="text-base">⏻</Text>
+            </View>
+            <Text className="flex-1 text-base font-semibold text-error">
+              Sign out
+            </Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>

@@ -47,9 +47,9 @@ import { decodePolyline, type DecodedPoint } from './decodePolyline';
  *   - It doesn't compute fits / region animations. The caller can pass
  *     an explicit `region` to recenter; an imperative ref-based fit-to-
  *     coordinates API can land later if a real consumer needs it.
- *   - It doesn't render marker labels or branded pin styles. That's
- *     intentional in turn 3.2 — the map should look right with default
- *     pins so we can prove the harness, then turn 3.3+ stylize.
+ *   - Markers use brand-tinted default pins (cab yellow / Pullman brown,
+ *     see PIN_* below) via `pinColor`; it doesn't render custom marker
+ *     views or labels.
  *
  * ## Provider
  *
@@ -161,9 +161,16 @@ const REGION_EPSILON = 1e-5;
  * design-system convention (Tailwind classes don't reach into native map
  * primitives).
  */
-const STROKE_SELECTED = '#f9c901'; // --primary (brand gold)
+const STROKE_SELECTED = '#f7b731'; // --primary (cab yellow)
 const STROKE_PICKUP = '#15803d'; // --success (green)
 const STROKE_ALT = '#9CA3AF'; // gray-400
+
+// Default marker pin tints per slot. Native map primitives can't read Tailwind
+// tokens, so these mirror the design-language brand colors; call sites may still
+// override via `marker.color`.
+const PIN_PICKUP = '#f7b731'; // --primary (cab yellow)
+const PIN_DROPOFF = '#644117'; // --brand-deep (UPS Pullman brown)
+const PIN_DRIVER = '#f7b731'; // --primary (cab yellow)
 
 export function Map({
   initialRegion,
@@ -311,14 +318,14 @@ export function Map({
 
             tracksViewChanges={false} for performance — without it, every
             subview update on the MapView re-renders all custom markers.
-            Default Marker pins are platform-native; turn 3.3+ swaps in
-            branded views inside the Marker. */}
+            Pins use brand tints (PIN_* above) via `pinColor`; a custom
+            branded marker view can replace them later if needed. */}
         <Marker
           key="pickup-marker"
           coordinate={pickup ? toCoord(pickup.coordinates) : HIDDEN_COORD}
           opacity={pickup ? 1 : 0}
           tracksViewChanges={false}
-          {...(pickup?.color ? { pinColor: pickup.color } : {})}
+          pinColor={pickup?.color ?? PIN_PICKUP}
           {...(pickup?.title ? { title: pickup.title } : {})}
         />
         <Marker
@@ -326,7 +333,7 @@ export function Map({
           coordinate={dropoff ? toCoord(dropoff.coordinates) : HIDDEN_COORD}
           opacity={dropoff ? 1 : 0}
           tracksViewChanges={false}
-          {...(dropoff?.color ? { pinColor: dropoff.color } : {})}
+          pinColor={dropoff?.color ?? PIN_DROPOFF}
           {...(dropoff?.title ? { title: dropoff.title } : {})}
         />
         <Marker
@@ -335,7 +342,7 @@ export function Map({
           opacity={driver ? 1 : 0}
           anchor={{ x: 0.5, y: 0.5 }}
           tracksViewChanges={false}
-          {...(driver?.color ? { pinColor: driver.color } : {})}
+          pinColor={driver?.color ?? PIN_DRIVER}
           {...(driver?.title ? { title: driver.title } : {})}
         />
       </MapView>

@@ -45,7 +45,7 @@ export function RouteSelector({
         <Pressable
           key={route.routeToken || `route-${String(index)}`}
           onPress={() => onSelect(index)}
-          className={`min-w-[150px] rounded-xl border px-3 py-2 ${
+          className={`min-w-[150px] rounded-2xl border px-3 py-2 ${
             index === selectedIndex
               ? 'border-primary bg-primary/10'
               : 'border-border'

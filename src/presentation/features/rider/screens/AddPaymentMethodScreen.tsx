@@ -32,7 +32,7 @@ export default function AddPaymentMethodScreen() {
     return (
       <SafeAreaView className="flex-1 bg-background px-6">
         <View className="flex-1 items-center justify-center">
-          <Text className="mb-2 text-2xl font-bold text-destructive">
+          <Text className="mb-2 text-2xl font-bold text-error">
             Payments unavailable
           </Text>
           <Text className="text-center text-sm text-muted-foreground">
@@ -61,9 +61,9 @@ export default function AddPaymentMethodScreen() {
           {state.kind === 'error' ? (
             <View
               testID="add-pm-error-banner"
-              className="mt-4 rounded-xl border border-destructive bg-destructive/10 px-4 py-3"
+              className="mt-4 rounded-xl border border-error bg-error/10 px-4 py-3"
             >
-              <Text className="text-sm font-medium text-destructive">
+              <Text className="text-sm font-medium text-error">
                 {errorMessage(state.error)}
               </Text>
               <Pressable
@@ -72,7 +72,7 @@ export default function AddPaymentMethodScreen() {
                 testID="add-pm-error-dismiss"
                 className="mt-1 self-start"
               >
-                <Text className="text-xs font-medium text-destructive underline">
+                <Text className="text-xs font-medium text-error underline">
                   Dismiss
                 </Text>
               </Pressable>

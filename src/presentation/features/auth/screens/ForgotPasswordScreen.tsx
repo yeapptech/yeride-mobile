@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormField } from '@presentation/components/form/FormField';
+import { Button } from '@presentation/components/ui/Button';
 import type { AuthStackScreenProps } from '@presentation/navigation/types';
 
 import { useForgotPasswordViewModel } from '../view-models/useForgotPasswordViewModel';
@@ -46,14 +46,11 @@ export function ForgotPasswordScreen(
                 Check your inbox at {email} and follow the link to set a new
                 password. The email may take a minute to arrive.
               </Text>
-              <Pressable
+              <Button
+                label="Back to sign in"
                 onPress={goBack}
-                className="bg-primary rounded-lg px-6 py-3 self-start active:opacity-70"
-              >
-                <Text className="text-primary-foreground font-semibold">
-                  Back to sign in
-                </Text>
-              </Pressable>
+                className="self-start"
+              />
             </View>
           ) : (
             <>
@@ -70,26 +67,14 @@ export function ForgotPasswordScreen(
                 <Text className="mb-4 text-error text-sm">{error}</Text>
               )}
 
-              <Pressable
+              <Button
+                label="Send reset link"
                 onPress={() => {
                   void submit(email);
                 }}
-                disabled={submitting}
-                className="bg-primary rounded-lg px-6 py-4 mb-4 active:opacity-70 disabled:opacity-50"
-              >
-                <View className="flex-row items-center justify-center">
-                  {submitting && (
-                    <ActivityIndicator
-                      size="small"
-                      color="#000"
-                      className="mr-2"
-                    />
-                  )}
-                  <Text className="text-primary-foreground font-semibold">
-                    Send reset link
-                  </Text>
-                </View>
-              </Pressable>
+                loading={submitting}
+                className="mb-4"
+              />
 
               <Pressable onPress={goBack} className="self-center">
                 <Text className="text-info text-sm">Back to sign in</Text>

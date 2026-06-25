@@ -8,6 +8,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Button } from '@presentation/components/ui/Button';
+
 import { WalletCardRow } from '../components/WalletCardRow';
 import { useWalletViewModel } from '../view-models/useWalletViewModel';
 
@@ -33,7 +35,7 @@ export default function WalletScreen() {
     return (
       <SafeAreaView className="flex-1 bg-background px-6">
         <View className="flex-1 items-center justify-center">
-          <Text className="mb-2 text-2xl font-bold text-destructive">
+          <Text className="mb-2 text-2xl font-bold text-error">
             Wallet unavailable
           </Text>
           <Text className="text-center text-sm text-muted-foreground">
@@ -65,16 +67,7 @@ export default function WalletScreen() {
           <Text className="mb-6 text-center text-sm text-muted-foreground">
             {state.error.message ?? 'Network error'}
           </Text>
-          <Pressable
-            onPress={state.onRetry}
-            accessibilityRole="button"
-            testID="wallet-retry"
-            className="rounded-full bg-primary px-6 py-3"
-          >
-            <Text className="text-base font-semibold text-primary-foreground">
-              Retry
-            </Text>
-          </Pressable>
+          <Button label="Retry" onPress={state.onRetry} testID="wallet-retry" />
         </View>
       </SafeAreaView>
     );
@@ -87,6 +80,9 @@ export default function WalletScreen() {
           <Text className="text-2xl font-bold text-foreground">Wallet</Text>
         </View>
         <View className="flex-1 items-center justify-center">
+          <View className="mb-3 h-16 w-16 items-center justify-center rounded-full bg-honey">
+            <Text className="text-3xl">💳</Text>
+          </View>
           <Text className="mb-2 text-lg font-semibold text-foreground">
             No payment methods
           </Text>
@@ -94,16 +90,11 @@ export default function WalletScreen() {
             Add a card to start riding. We&apos;ll charge it automatically when
             each trip ends.
           </Text>
-          <Pressable
+          <Button
+            label="Add card"
             onPress={state.onAdd}
-            accessibilityRole="button"
             testID="wallet-empty-add"
-            className="rounded-full bg-primary px-6 py-3"
-          >
-            <Text className="text-base font-semibold text-primary-foreground">
-              Add card
-            </Text>
-          </Pressable>
+          />
         </View>
       </SafeAreaView>
     );

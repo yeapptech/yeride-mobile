@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Role } from '@domain/entities/Role';
 import { FormField } from '@presentation/components/form/FormField';
+import { Button } from '@presentation/components/ui/Button';
 import type { AuthStackScreenProps } from '@presentation/navigation/types';
 
 import { useRegisterViewModel } from '../view-models/useRegisterViewModel';
@@ -120,20 +120,12 @@ export function RegisterScreen(_props: AuthStackScreenProps<'Register'>) {
             <Text className="mb-4 text-error text-sm">{error}</Text>
           )}
 
-          <Pressable
+          <Button
+            label="Create account"
             onPress={onSubmit}
-            disabled={submitting}
-            className="bg-primary rounded-lg px-6 py-4 mb-6 active:opacity-70 disabled:opacity-50"
-          >
-            <View className="flex-row items-center justify-center">
-              {submitting && (
-                <ActivityIndicator size="small" color="#000" className="mr-2" />
-              )}
-              <Text className="text-primary-foreground font-semibold text-base">
-                Create account
-              </Text>
-            </View>
-          </Pressable>
+            loading={submitting}
+            className="mb-6"
+          />
 
           <View className="flex-row justify-center">
             <Text className="text-muted-foreground text-sm">

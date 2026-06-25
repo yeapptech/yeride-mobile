@@ -21,6 +21,7 @@ import {
   RouteSelector,
 } from '@presentation/components/route';
 import { ScheduleDatetimePicker } from '@presentation/components/trip/ScheduleDatetimePicker';
+import { Button } from '@presentation/components/ui/Button';
 import type { RiderStackNavigation } from '@presentation/navigation/types';
 
 import { useRouteSelectViewModel } from '../view-models/useRouteSelectViewModel';
@@ -222,7 +223,8 @@ export default function RouteSelectScreen() {
               {vm.submitError}
             </Text>
           )}
-          <Pressable
+          <Button
+            label={vm.scheduledPickupAt ? 'Schedule ride' : 'Confirm ride'}
             onPress={() => {
               void (async () => {
                 const result = await vm.confirm();
@@ -245,31 +247,10 @@ export default function RouteSelectScreen() {
                 }
               })();
             }}
-            disabled={!vm.canConfirm || vm.isSubmitting}
-            accessibilityRole="button"
-            accessibilityState={{
-              disabled: !vm.canConfirm || vm.isSubmitting,
-              busy: vm.isSubmitting,
-            }}
-            className={`items-center rounded-xl px-4 py-3 ${
-              vm.canConfirm && !vm.isSubmitting ? 'bg-primary' : 'bg-muted'
-            }`}
+            disabled={!vm.canConfirm}
+            loading={vm.isSubmitting}
             testID="route-select-confirm"
-          >
-            {vm.isSubmitting ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Text
-                className={`text-base font-semibold ${
-                  vm.canConfirm
-                    ? 'text-primary-foreground'
-                    : 'text-muted-foreground'
-                }`}
-              >
-                {vm.scheduledPickupAt ? 'Schedule ride' : 'Confirm ride'}
-              </Text>
-            )}
-          </Pressable>
+          />
         </View>
 
         <ScheduleDatetimePicker

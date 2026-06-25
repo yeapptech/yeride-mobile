@@ -63,9 +63,11 @@ export function WalletCardRow(props: WalletCardRowProps) {
             {expiryText !== null ? ` · ${expiryText}` : ''}
           </Text>
           {isDefault ? (
-            <Text className="mt-0.5 text-xs font-medium text-primary">
-              Default
-            </Text>
+            <View className="mt-1 self-start rounded-full bg-honey px-2 py-0.5">
+              <Text className="text-[10px] font-bold uppercase text-honey-foreground">
+                Default
+              </Text>
+            </View>
           ) : null}
         </View>
         {isSetDefaultInFlight ? (
@@ -73,8 +75,6 @@ export function WalletCardRow(props: WalletCardRowProps) {
             size="small"
             testID="wallet-row-set-default-spinner"
           />
-        ) : isDefault ? (
-          <Text className="text-base font-semibold text-primary">✓</Text>
         ) : null}
       </Pressable>
       <Pressable

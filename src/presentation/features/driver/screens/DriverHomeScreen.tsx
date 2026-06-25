@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Map, type MapMarkerProps } from '@presentation/components/map';
 import { PermissionDeniedBanner } from '@presentation/components/permission';
 import { HomeRideSections } from '@presentation/components/trip/HomeRideSections';
+import { Button } from '@presentation/components/ui/Button';
 
 import { DriverRideCardStack } from '../components/DriverRideCardStack';
 import { useDriverHomeViewModel } from '../view-models/useDriverHomeViewModel';
@@ -160,17 +161,12 @@ export default function DriverHomeScreen() {
               <Text className="mt-1 mb-3 text-xs text-muted-foreground">
                 You need an active vehicle before you can accept rides.
               </Text>
-              <Pressable
+              <Button
+                label="Register a vehicle"
                 onPress={vm.onRegisterVehicle}
-                accessibilityRole="button"
                 accessibilityLabel="Register a vehicle"
                 testID="driver-home-register-vehicle"
-                className="items-center rounded-xl bg-primary px-4 py-4"
-              >
-                <Text className="text-base font-semibold text-primary-foreground">
-                  Register a vehicle
-                </Text>
-              </Pressable>
+              />
             </View>
           )}
 
@@ -226,7 +222,7 @@ export default function DriverHomeScreen() {
               accessibilityRole="button"
               accessibilityState={{ disabled: !canToggle }}
               accessibilityLabel={isOnline ? 'Go offline' : 'Go online'}
-              className={`items-center rounded-xl px-4 py-4 ${
+              className={`items-center rounded-2xl px-4 py-4 ${
                 !canToggle ? 'bg-muted' : isOnline ? 'bg-muted' : 'bg-primary'
               }`}
               testID="driver-home-online-toggle"

@@ -6,6 +6,7 @@ import {
 } from '@domain/entities/PaymentFailure';
 import type { Ride } from '@domain/entities/Ride';
 import { BottomSheetHeader } from '@presentation/components/trip/BottomSheetHeader';
+import { Button } from '@presentation/components/ui/Button';
 
 /**
  * Status view for `payment_failed`.
@@ -157,28 +158,18 @@ export function PaymentFailedView({
       {/* Primary CTA — gated on the resolved `cta` discriminator. */}
       <View className="border-t border-border px-4 py-3">
         {copy.cta === 'wallet' && onPressOpenWallet && (
-          <Pressable
+          <Button
+            label="Open Wallet"
             onPress={onPressOpenWallet}
-            accessibilityRole="button"
-            className="items-center rounded-xl bg-primary px-4 py-3"
             testID="payment-failed-open-wallet"
-          >
-            <Text className="text-base font-semibold text-primary-foreground">
-              Open Wallet
-            </Text>
-          </Pressable>
+          />
         )}
         {copy.cta === 'support' && onPressContactSupport && (
-          <Pressable
+          <Button
+            label="Contact support"
             onPress={onPressContactSupport}
-            accessibilityRole="button"
-            className="items-center rounded-xl bg-primary px-4 py-3"
             testID="payment-failed-contact-support-primary"
-          >
-            <Text className="text-base font-semibold text-primary-foreground">
-              Contact support
-            </Text>
-          </Pressable>
+          />
         )}
       </View>
 

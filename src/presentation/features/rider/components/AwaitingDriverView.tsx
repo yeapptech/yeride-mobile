@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Text, useColorScheme, View } from 'react-native';
 
 import type { Ride } from '@domain/entities/Ride';
 import {
@@ -30,6 +30,9 @@ export function AwaitingDriverView({
   cancelDisabled,
 }: AwaitingDriverViewProps) {
   const elapsed = useElapsedSince(ride.createdAt);
+  // Brand-tint the spinner; brown reads on the light cream sheet, cab yellow
+  // on the brown dark surface (neither single color works on both).
+  const isDark = useColorScheme() === 'dark';
 
   return (
     <View>
@@ -50,7 +53,10 @@ export function AwaitingDriverView({
       />
 
       <View className="items-center px-4 py-6">
-        <ActivityIndicator size="large" />
+        <ActivityIndicator
+          size="large"
+          color={isDark ? '#fac23c' : '#644117'}
+        />
         <Text className="mt-3 text-sm text-muted-foreground">
           Hang tight — we're matching you with a nearby driver.
         </Text>

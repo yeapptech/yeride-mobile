@@ -1,7 +1,8 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import type { Ride } from '@domain/entities/Ride';
 import { BottomSheetHeader } from '@presentation/components/trip/BottomSheetHeader';
+import { Button } from '@presentation/components/ui/Button';
 
 /**
  * Status view for `payment_failed`. The Stripe webhook reported a charge
@@ -49,17 +50,12 @@ export function PaymentFailedView({
       </View>
 
       <View className="px-4 pt-4">
-        <Pressable
+        <Button
+          label="Close trip"
           onPress={onClose}
-          accessibilityRole="button"
           accessibilityLabel="Close trip"
-          className="items-center rounded-xl bg-primary px-4 py-4"
           testID="payment-failed-close"
-        >
-          <Text className="text-base font-semibold text-primary-foreground">
-            Close trip
-          </Text>
-        </Pressable>
+        />
       </View>
     </View>
   );

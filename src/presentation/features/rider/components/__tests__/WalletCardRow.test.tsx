@@ -82,7 +82,6 @@ describe('WalletCardRow', () => {
     );
 
     expect(queryByText('Default')).not.toBeNull();
-    expect(queryByText('✓')).not.toBeNull();
   });
 
   it('trash press fires onDelete with the row id', () => {

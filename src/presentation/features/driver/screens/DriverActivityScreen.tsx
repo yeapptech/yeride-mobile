@@ -94,7 +94,7 @@ export default function DriverActivityScreen() {
             testID="driver-activity-error"
             className="flex-1 items-center justify-center p-6"
           >
-            <Text className="text-base font-semibold text-destructive">
+            <Text className="text-base font-semibold text-error">
               Couldn&rsquo;t load your activity
             </Text>
             <Text className="mt-2 text-center text-sm text-muted-foreground">

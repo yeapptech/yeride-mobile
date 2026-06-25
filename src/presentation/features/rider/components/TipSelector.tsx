@@ -160,7 +160,7 @@ export function TipSelector({ state }: { readonly state: TipFlowState }) {
             state.onSubmit();
           }
         }}
-        className={`mt-4 items-center rounded-xl px-4 py-3 ${
+        className={`mt-4 items-center rounded-2xl px-4 py-4 ${
           submitDisabled ? 'bg-muted' : 'bg-primary'
         }`}
       >
