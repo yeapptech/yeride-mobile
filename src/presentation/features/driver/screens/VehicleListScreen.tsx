@@ -11,6 +11,7 @@ import {
 } from 'react-native-safe-area-context';
 
 import type { Vehicle } from '@domain/entities/Vehicle';
+import { Button } from '@presentation/components/ui/Button';
 
 import { DriverVehicleCard } from '../components/DriverVehicleCard';
 import { useVehicleListViewModel } from '../view-models/useVehicleListViewModel';
@@ -131,16 +132,12 @@ function EmptyState({ onAddVehicle }: { readonly onAddVehicle: () => void }) {
       <Text className="mt-1 text-center text-sm text-muted-foreground">
         Register a vehicle to start accepting rides.
       </Text>
-      <Pressable
+      <Button
+        label="Register your first vehicle"
         onPress={onAddVehicle}
-        accessibilityRole="button"
         testID="vehicle-list-empty-cta"
-        className="mt-4 rounded-2xl bg-primary px-6 py-3"
-      >
-        <Text className="text-base font-semibold text-primary-foreground">
-          Register your first vehicle
-        </Text>
-      </Pressable>
+        className="mt-4"
+      />
     </View>
   );
 }

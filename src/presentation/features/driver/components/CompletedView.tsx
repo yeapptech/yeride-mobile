@@ -1,9 +1,10 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import type { Money } from '@domain/entities/Money';
 import type { Ride } from '@domain/entities/Ride';
 import { FareCalculator } from '@domain/services';
 import { BottomSheetHeader } from '@presentation/components/trip/BottomSheetHeader';
+import { Button } from '@presentation/components/ui/Button';
 
 /**
  * Status view for `completed`. The Stripe charge succeeded; the trip is
@@ -64,17 +65,12 @@ export function CompletedView({ ride, onClose }: CompletedViewProps) {
       </View>
 
       <View className="px-4 pt-4">
-        <Pressable
+        <Button
+          label="Close trip"
           onPress={onClose}
-          accessibilityRole="button"
           accessibilityLabel="Close trip"
-          className="items-center rounded-2xl bg-primary px-4 py-4"
           testID="completed-close"
-        >
-          <Text className="text-base font-semibold text-primary-foreground">
-            Close trip
-          </Text>
-        </Pressable>
+        />
       </View>
     </View>
   );

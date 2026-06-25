@@ -5,6 +5,7 @@ import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
 import { Map, type MapMarkerProps } from '@presentation/components/map';
+import { Button } from '@presentation/components/ui/Button';
 import { useCurrentLocation } from '@presentation/hooks';
 import type { DriverStackScreenProps } from '@presentation/navigation/types';
 import { formatMilesAway } from '@presentation/utils/formatDistance';
@@ -186,17 +187,12 @@ function DispatchPanel({
           {goneTitle}
         </Text>
         <Text className="mb-4 text-sm text-muted-foreground">{goneBody}</Text>
-        <Pressable
+        <Button
+          label="Back to home"
           onPress={onDecline}
-          accessibilityRole="button"
           accessibilityLabel="Back to home"
-          className="items-center rounded-2xl bg-primary px-4 py-4"
           testID="driver-dispatch-back-home"
-        >
-          <Text className="text-base font-semibold text-primary-foreground">
-            Back to home
-          </Text>
-        </Pressable>
+        />
       </View>
     );
   }
@@ -264,7 +260,7 @@ function DispatchPanel({
           accessibilityRole="button"
           accessibilityLabel="Decline"
           accessibilityState={{ disabled: accepting }}
-          className={`flex-1 items-center rounded-xl px-4 py-4 ${
+          className={`flex-1 items-center rounded-2xl px-4 py-4 ${
             accepting ? 'bg-muted/50' : 'bg-muted'
           }`}
           testID="driver-dispatch-decline"
@@ -274,25 +270,15 @@ function DispatchPanel({
           </Text>
         </Pressable>
 
-        <Pressable
+        <Button
+          label={acceptLabel(action)}
           onPress={onAccept}
-          disabled={accepting || driverLocation === null}
-          accessibilityRole="button"
+          disabled={driverLocation === null}
+          loading={accepting}
           accessibilityLabel={acceptLabel(action)}
-          accessibilityState={{ disabled: accepting }}
-          className={`flex-1 items-center rounded-xl px-4 py-4 ${
-            accepting ? 'bg-primary/60' : 'bg-primary'
-          }`}
           testID="driver-dispatch-accept"
-        >
-          {accepting ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <Text className="text-base font-semibold text-primary-foreground">
-              {acceptLabel(action)}
-            </Text>
-          )}
-        </Pressable>
+          className="flex-1"
+        />
       </View>
     </View>
   );

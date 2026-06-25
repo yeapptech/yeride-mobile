@@ -4,6 +4,8 @@ import { Controller, useForm } from 'react-hook-form';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { z } from 'zod';
 
+import { Button } from '@presentation/components/ui/Button';
+
 import {
   EMPTY_MANUAL_VALUES,
   type ManualVehicleFormValues,
@@ -290,28 +292,15 @@ export function ManualEntryStep({
         )}
       />
 
-      <Pressable
+      <Button
+        label={isSubmitting ? 'Registering…' : 'Register vehicle'}
         onPress={() => {
           void onPressSubmit();
         }}
         disabled={!isValid || isSubmitting}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !isValid || isSubmitting }}
         testID="manual-submit"
-        className={`mt-4 items-center rounded-2xl px-4 py-3 ${
-          !isValid || isSubmitting ? 'bg-muted' : 'bg-primary'
-        }`}
-      >
-        <Text
-          className={`text-base font-semibold ${
-            !isValid || isSubmitting
-              ? 'text-muted-foreground'
-              : 'text-primary-foreground'
-          }`}
-        >
-          {isSubmitting ? 'Registering…' : 'Register vehicle'}
-        </Text>
-      </Pressable>
+        className="mt-4"
+      />
     </View>
   );
 }

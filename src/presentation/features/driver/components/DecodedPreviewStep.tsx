@@ -1,6 +1,7 @@
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Text, View } from 'react-native';
 
 import type { VinDecodeResult } from '@domain/services';
+import { Button } from '@presentation/components/ui/Button';
 
 interface DecodedPreviewStepProps {
   readonly decoded: VinDecodeResult;
@@ -74,36 +75,21 @@ export function DecodedPreviewStep({
       )}
 
       <View className="mt-4 flex-row gap-2">
-        <Pressable
+        <Button
+          label={isSubmitting ? 'Registering…' : 'Confirm & register'}
           onPress={onConfirm}
           disabled={isSubmitting}
-          accessibilityRole="button"
           accessibilityLabel="Confirm vehicle and register"
-          accessibilityState={{ disabled: isSubmitting }}
           testID="decoded-preview-confirm"
-          className={`flex-1 items-center rounded-2xl px-4 py-3 ${
-            isSubmitting ? 'bg-muted' : 'bg-primary'
-          }`}
-        >
-          <Text
-            className={`text-base font-semibold ${
-              isSubmitting ? 'text-muted-foreground' : 'text-primary-foreground'
-            }`}
-          >
-            {isSubmitting ? 'Registering…' : 'Confirm & register'}
-          </Text>
-        </Pressable>
-        <Pressable
+          className="flex-1"
+        />
+        <Button
+          label="Edit manually"
           onPress={onEditManually}
           disabled={isSubmitting}
-          accessibilityRole="button"
+          variant="secondary"
           testID="decoded-preview-edit-manually"
-          className="items-center rounded-2xl border border-border px-4 py-3"
-        >
-          <Text className="text-base font-medium text-foreground">
-            Edit manually
-          </Text>
-        </Pressable>
+        />
       </View>
     </View>
   );

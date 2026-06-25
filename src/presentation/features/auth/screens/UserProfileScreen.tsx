@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormField } from '@presentation/components/form/FormField';
+import { Button } from '@presentation/components/ui/Button';
 import type { DriverStackNavigation } from '@presentation/navigation/types';
 
 import { useUserProfileViewModel } from '../view-models/useUserProfileViewModel';
@@ -125,20 +126,12 @@ export function UserProfileScreen() {
             <Text className="mb-4 text-error text-sm">{error}</Text>
           )}
 
-          <Pressable
+          <Button
+            label="Save changes"
             onPress={onSubmit}
-            disabled={submitting}
-            className="bg-primary rounded-2xl px-6 py-3 mb-3 active:opacity-70 disabled:opacity-50"
-          >
-            <View className="flex-row items-center justify-center">
-              {submitting && (
-                <ActivityIndicator size="small" color="#000" className="mr-2" />
-              )}
-              <Text className="text-primary-foreground font-semibold">
-                Save changes
-              </Text>
-            </View>
-          </Pressable>
+            loading={submitting}
+            className="mb-3"
+          />
 
           {user.role === 'driver' && (
             <>

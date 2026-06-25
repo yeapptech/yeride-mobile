@@ -1,7 +1,8 @@
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import type { CrashReportingService } from '@domain/services';
+import { Button } from '@presentation/components/ui/Button';
 import { useCrashReporting } from '@presentation/di';
 import { LOG } from '@shared/logger';
 
@@ -188,17 +189,12 @@ function FallbackUI({ error, onReset }: FallbackUIProps) {
           </View>
         ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Try again"
+        <Button
+          label="Try again"
           onPress={onReset}
+          accessibilityLabel="Try again"
           testID="error-boundary-try-again"
-          className="items-center rounded-2xl bg-primary px-4 py-3"
-        >
-          <Text className="text-base font-semibold text-primary-foreground">
-            Try again
-          </Text>
-        </Pressable>
+        />
       </View>
     </View>
   );
