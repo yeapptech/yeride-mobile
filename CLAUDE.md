@@ -46,9 +46,20 @@ pre-accept Google Routes call; the claim is now an atomic
 driver computes + attaches the pickup route afterwards via
 `useAttachPickupDirections` (capped retry); `onAccept` ignores repeat
 taps; and DriverHome sorts available rides nearest-first by live GPS
-Haversine distance. See `docs/PHASE_10_OOB_DRIVER_DISPATCH_FCFS.md`.
-See `docs/PHASE_*.md` for the per-turn record (latest:
-`PHASE_10_TURN_10.md`).
+Haversine distance. See `docs/PHASE_10_OOB_DRIVER_DISPATCH_FCFS.md`. A
+fourth out-of-band effort landed a whole-app **UI redesign** to an
+Uber-familiar look on a new **"Cab Yellow (#F7B731) + UPS Pullman Brown
+(#644117)"** design language: the `global.css` token values were rewritten
+and `card`/`muted`/`border`/`honey` promoted to CSS variables so dark mode
+themes app-wide (brown-based, **no per-screen `dark:` variants**); a shared
+`components/ui/Button` primitive that every CTA now uses; an Uber-familiar
+RiderHome (bottom sheet + "Where to?" + saved places) plus restyled
+rider/driver/auth + secondary screens (date-grouped Activity, honey
+empty-states, branded cards/badges); and cab-yellow map markers. The locked
+spec is `docs/superpowers/specs/2026-06-24-ui-redesign-design-language.md`;
+the **`yeride-design-language` skill** (`.claude/skills/`) codifies it —
+invoke it before any UI work. See `docs/PHASE_*.md` for the per-turn record
+(latest: `PHASE_10_TURN_10.md`).
 
 **Codebase:** the clean-architecture rewrite of YeRide. New project
 at `/Users/papagallo/yeapptech/dev/yeride-mobile/`. Legacy app still
@@ -90,7 +101,7 @@ turn. Latest is `docs/PHASE_10_TURN_10.md`.
 | State              | Zustand v5 (client state) + TanStack Query v5 (server cache)                                                                          |
 | Forms              | React Hook Form + Zod                                                                                                                 |
 | Navigation         | React Navigation 7 (typed param lists)                                                                                                |
-| Styling            | NativeWind 4 + Tailwind 3.4 ("Honey and the Bee" tokens)                                                                              |
+| Styling            | NativeWind 4 + Tailwind 3.4 — "Cab Yellow + UPS Pullman Brown" design language (CSS-var tokens in `global.css`, automatic dark mode)  |
 | Tests              | Jest + jest-expo + @testing-library/react-native                                                                                      |
 | Payments           | `@stripe/stripe-react-native@0.63.0` + Stripe microservice (yeride-stripe-server)                                                     |
 | Background GPS     | `react-native-background-geolocation@5.1.1`                                                                                           |
