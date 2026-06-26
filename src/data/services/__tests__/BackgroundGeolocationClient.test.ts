@@ -76,6 +76,7 @@ const sampleSdkLocation = (
     timestamp: string;
     odometer: number;
     speed: number;
+    heading: number;
     is_moving: boolean;
   }> = {},
 ): unknown => ({
@@ -89,6 +90,7 @@ const sampleSdkLocation = (
     longitude: overrides.longitude ?? -74.006,
     accuracy: 5,
     speed: overrides.speed ?? 12.5,
+    heading: overrides.heading ?? -1,
   },
   battery: { level: 0.8, is_charging: false },
   activity: { type: 'in_vehicle', confidence: 90 },
@@ -331,6 +333,25 @@ describe('BackgroundGeolocationClient', () => {
       sdk.__emitLocation(sampleSdkLocation({ speed: -1 }));
       const event: BgLocationEvent = cb.mock.calls[0][0] as BgLocationEvent;
       expect(event.speed).toBeNull();
+      dispose();
+    });
+
+    it('maps a valid SDK heading through; the negative sentinel → null', () => {
+      const client = makeClient();
+      const cb = jest.fn();
+      const dispose = client.subscribeToLocation(cb);
+
+      sdk.__emitLocation(sampleSdkLocation({ heading: 137.5 }));
+      expect((cb.mock.calls[0][0] as BgLocationEvent).heading).toBe(137.5);
+
+      cb.mockClear();
+      sdk.__emitLocation(
+        sampleSdkLocation({
+          heading: -1,
+          timestamp: '2026-04-30T12:00:05.000Z',
+        }),
+      );
+      expect((cb.mock.calls[0][0] as BgLocationEvent).heading).toBeNull();
       dispose();
     });
   });

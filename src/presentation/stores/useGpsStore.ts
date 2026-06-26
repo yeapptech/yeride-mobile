@@ -44,6 +44,14 @@ interface GpsState {
   readonly currentLocation: Coordinates | null;
   /** Metres per second, or `null` when the SDK hasn't established a fix. */
   readonly currentSpeed: number | null;
+  /**
+   * Direction of travel in degrees (0–360 clockwise from north), or `null`
+   * until the first GPS-sourced heading arrives. HELD across `null` updates
+   * (a stationary fix reports no heading) so the driver car marker keeps its
+   * last bearing instead of snapping back to north. Drives the marker's
+   * `rotation`.
+   */
+  readonly currentHeading: number | null;
   /** Cumulative session distance in metres. Resets when the SDK does. */
   readonly currentOdometerMeters: number;
   /**
@@ -72,7 +80,9 @@ interface GpsState {
 
   /**
    * Adopt a fresh `BgLocationEvent` from the SDK. Decomposes into
-   * `currentLocation` + `currentSpeed` + `currentOdometerMeters`.
+   * `currentLocation` + `currentSpeed` + `currentHeading` +
+   * `currentOdometerMeters`. A `null` heading on the event is ignored (the
+   * previous heading is held) so a stationary fix doesn't reset rotation.
    */
   setLocation: (event: BgLocationEvent) => void;
 
@@ -103,6 +113,7 @@ const INITIAL = {
   permissionStatus: 'undetermined' as BgPermissionStatus,
   currentLocation: null,
   currentSpeed: null,
+  currentHeading: null,
   currentOdometerMeters: 0,
   lastGeofenceEvent: null,
   isInsidePickupGeofence: false,
@@ -114,11 +125,12 @@ export const useGpsStore = create<GpsState>((set) => ({
   setPermissionStatus: (status) => set({ permissionStatus: status }),
 
   setLocation: (event) =>
-    set({
+    set((s) => ({
       currentLocation: event.coords,
       currentSpeed: event.speed,
+      currentHeading: event.heading ?? s.currentHeading,
       currentOdometerMeters: event.odometerMeters,
-    }),
+    })),
 
   setGeofenceEvent: (event) => {
     if (event.identifier === 'pickup') {
@@ -146,6 +158,9 @@ export const useGpsCurrentLocation = (): Coordinates | null =>
 
 export const useGpsCurrentSpeed = (): number | null =>
   useGpsStore((s) => s.currentSpeed);
+
+export const useGpsCurrentHeading = (): number | null =>
+  useGpsStore((s) => s.currentHeading);
 
 export const useGpsCurrentOdometer = (): number =>
   useGpsStore((s) => s.currentOdometerMeters);

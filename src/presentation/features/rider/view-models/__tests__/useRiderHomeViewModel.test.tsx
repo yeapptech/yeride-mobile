@@ -18,6 +18,7 @@ import { ServiceArea } from '@domain/entities/ServiceArea';
 import { ServiceAreaId } from '@domain/entities/ServiceAreaId';
 import { makeRider } from '@domain/entities/User';
 import type { UserId } from '@domain/entities/UserId';
+import { useGpsStore } from '@presentation/stores/useGpsStore';
 import { useServiceAreaStore } from '@presentation/stores/useServiceAreaStore';
 import { useSessionStore } from '@presentation/stores/useSessionStore';
 import { useTripDraftStore } from '@presentation/stores/useTripDraftStore';
@@ -48,6 +49,14 @@ jest.mock('@react-navigation/native', () => ({
 // returns null instead of throwing on simulators that have a seeded
 // GPS point but no fresh fix). Mock both surfaces; the test suite
 // resolves to last-known immediately.
+// Captures every `watchPositionAsync` callback so a test can emit a moving
+// foreground fix and assert `liveLocation` follows it.
+const mockWatchCallbacks: Array<
+  (reading: {
+    coords: { latitude: number; longitude: number; heading?: number | null };
+  }) => void
+> = [];
+
 jest.mock('expo-location', () => ({
   __esModule: true,
   Accuracy: { Balanced: 3, Lowest: 1 },
@@ -60,6 +69,10 @@ jest.mock('expo-location', () => ({
   getCurrentPositionAsync: jest.fn(async () => ({
     coords: { latitude: 25.7617, longitude: -80.1918 },
   })),
+  watchPositionAsync: jest.fn(async (_opts, cb) => {
+    mockWatchCallbacks.push(cb);
+    return { remove: jest.fn() };
+  }),
 }));
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
@@ -242,6 +255,8 @@ describe('useRiderHomeViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockReset.mockClear();
+    mockWatchCallbacks.length = 0;
+    useGpsStore.getState().reset();
     useServiceAreaStore.getState().reset();
     useTripDraftStore.getState().reset();
     useSessionStore.setState({ status: 'initializing', userId: null });
@@ -257,6 +272,56 @@ describe('useRiderHomeViewModel', () => {
     });
     expect(result.current.activeServiceArea?.identifier).toBe('miami');
     expect(result.current.user?.email.value).toBe('rider2@yeapp.tech');
+  });
+
+  it('liveLocation prefers the live BG-geolocation stream, falling back to the foreground read before it emits', async () => {
+    const fortLauderdale = unwrap(Coordinates.create(26.1224, -80.1373));
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    // Before any BG fix: the one-shot foreground read (mocked → Miami)
+    // drives the camera + "you are here" pin.
+    expect(result.current.liveLocation?.latitude).toBeCloseTo(25.7617);
+    expect(result.current.liveLocation?.longitude).toBeCloseTo(-80.1918);
+
+    // A fresh BG fix must win so the map follows the rider as they move.
+    act(() => {
+      useGpsStore.getState().setLocation({
+        coords: fortLauderdale,
+        speed: null,
+        heading: null,
+        odometerMeters: 0,
+        timestampMs: 1,
+        isMoving: true,
+      });
+    });
+    expect(result.current.liveLocation).toBe(fortLauderdale);
+  });
+
+  it('liveLocation follows the foreground watch when the BG stream stays silent (emulator case)', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useRiderHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    await waitFor(() => {
+      expect(mockWatchCallbacks.length).toBeGreaterThan(0);
+    });
+
+    act(() => {
+      mockWatchCallbacks.forEach((cb) =>
+        cb({ coords: { latitude: 26.2, longitude: -80.3, heading: null } }),
+      );
+    });
+
+    expect(result.current.liveLocation?.latitude).toBeCloseTo(26.2);
+    expect(result.current.liveLocation?.longitude).toBeCloseTo(-80.3);
   });
 
   it('writes the resolved active area into the service-area store', async () => {

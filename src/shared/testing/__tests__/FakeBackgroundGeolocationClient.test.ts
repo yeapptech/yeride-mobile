@@ -27,6 +27,7 @@ const sampleLocationEvent = (
 ): BgLocationEvent => ({
   coords: overrides.coords ?? validCoords(),
   speed: overrides.speed ?? 12.5,
+  heading: overrides.heading ?? null,
   odometerMeters: overrides.odometerMeters ?? 1234,
   timestampMs: overrides.timestampMs ?? 1735_000_000_000,
   isMoving: overrides.isMoving ?? true,

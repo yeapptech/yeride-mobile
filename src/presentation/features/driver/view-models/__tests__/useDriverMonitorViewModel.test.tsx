@@ -255,6 +255,7 @@ function bgLocationEvent(odometerMeters: number): BgLocationEvent {
   return {
     coords: DRIVER_LOC,
     speed: null,
+    heading: null,
     odometerMeters,
     timestampMs: ++bgLocationTick,
     isMoving: false,

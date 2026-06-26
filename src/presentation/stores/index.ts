@@ -33,6 +33,7 @@ export {
   usePickupExitWarningVisible,
 } from './useGeofenceUiStore';
 export {
+  useGpsCurrentHeading,
   useGpsCurrentLocation,
   useGpsCurrentOdometer,
   useGpsCurrentSpeed,

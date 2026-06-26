@@ -1,8 +1,24 @@
 import { render } from '@testing-library/react-native';
 
-import { animateToRegionCalls, resetMapMockState } from 'react-native-maps';
+import { Coordinates } from '@domain/entities/Coordinates';
+import {
+  animateToRegionCalls,
+  markerRenders,
+  resetMapMockState,
+} from 'react-native-maps';
 
 import { Map } from '../Map';
+
+function coords(lat: number, lng: number): Coordinates {
+  const r = Coordinates.create(lat, lng);
+  if (!r.ok) throw new Error('test setup: bad coords');
+  return r.value;
+}
+
+// Numeric sentinel — a real `require('./x.png')` resolves to a number, which
+// is a valid `ImageSourcePropType`. Using one here lets us assert the image
+// is forwarded by identity without importing the bundled asset.
+const CAR_IMAGE = 4242;
 
 /**
  * Rendering invariants for the shared `<Map/>` component.
@@ -125,6 +141,64 @@ describe('Map', () => {
       // approxSamePlace dedupe should suppress the animation.
       rerender(<Map {...baseProps} initialRegion={region(26.1, -80.2)} />);
       expect(animateToRegionCalls).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Driver car-image marker. The driver slot renders a rotating car image
+   * (driver "you are here") when `image` is supplied, instead of the
+   * default coloured pin. `rotation` (GPS heading) + `flat` face the car
+   * along the direction of travel.
+   */
+  describe('driver car-image marker', () => {
+    it('renders the car image at the given coordinate with rotation + flat, KEEPING a fallback pinColor', () => {
+      render(
+        <Map
+          {...baseProps}
+          driver={{
+            coordinates: coords(26.1297, -80.2654),
+            title: 'You are here',
+            image: CAR_IMAGE,
+            rotation: 137,
+            flat: true,
+          }}
+        />,
+      );
+      const driver = markerRenders.find((m) => m.image !== undefined);
+      expect(driver).toBeTruthy();
+      expect(driver?.image).toBe(CAR_IMAGE);
+      expect(driver?.rotation).toBe(137);
+      expect(driver?.flat).toBe(true);
+      // pinColor MUST still be present even though the image overrides it —
+      // the native Fabric MarkerManager NPEs on a null pinColor (regression
+      // guard for the on-device crash).
+      expect(driver?.pinColor).toBe('#f7b731');
+      expect(driver?.coordinate).toEqual({
+        latitude: 26.1297,
+        longitude: -80.2654,
+      });
+    });
+
+    it('defaults rotation to 0 and flat to true when an image is given without them', () => {
+      render(
+        <Map
+          {...baseProps}
+          driver={{ coordinates: coords(26.1, -80.2), image: CAR_IMAGE }}
+        />,
+      );
+      const driver = markerRenders.find((m) => m.image !== undefined);
+      expect(driver?.rotation).toBe(0);
+      expect(driver?.flat).toBe(true);
+    });
+
+    it('falls back to the default cab-yellow pin (pinColor, no image) when no image is supplied', () => {
+      render(
+        <Map {...baseProps} driver={{ coordinates: coords(26.1, -80.2) }} />,
+      );
+      const visible = markerRenders.find((m) => m.opacity === 1);
+      expect(visible?.image).toBeUndefined();
+      expect(visible?.pinColor).toBe('#f7b731');
+      expect(visible?.rotation).toBeUndefined();
     });
   });
 });

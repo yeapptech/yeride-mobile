@@ -8,7 +8,11 @@ import type { ServiceArea } from '@domain/entities/ServiceArea';
 import type { User } from '@domain/entities/User';
 import { UserLocation } from '@domain/entities/UserLocation';
 import type { Vehicle } from '@domain/entities/Vehicle';
-import { useCurrentLocation, useOpenSettings } from '@presentation/hooks';
+import {
+  useCurrentLocation,
+  useOpenSettings,
+  useWatchedLocation,
+} from '@presentation/hooks';
 import type {
   LocationPermission,
   UseCurrentLocation,
@@ -28,6 +32,7 @@ import {
   useActiveVehicleId,
   useDriverMode,
   useDriverStatusStore,
+  useGpsCurrentHeading,
   useGpsCurrentLocation,
   useGpsPermissionStatus,
   useServiceAreaStore,
@@ -94,6 +99,12 @@ export interface UseDriverHomeViewModel {
    * distance label updates as the driver moves. `null` until any fix.
    */
   readonly liveDriverLocation: Coordinates | null;
+  /**
+   * Live travel heading in degrees (0–360 clockwise from north), or `null`
+   * until the first GPS-sourced heading. Rotates the driver car marker so it
+   * faces the direction of travel.
+   */
+  readonly liveDriverHeading: number | null;
   readonly inProgressRides: readonly Ride[];
   readonly scheduledRides: readonly Ride[];
   readonly permissionStatus: LocationPermission;
@@ -190,11 +201,33 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     enabled: mode === 'online_idle',
   });
 
-  // Live driver position (BG-geolocation stream while online), falling back
-  // to the one-shot foreground read before the stream emits. Drives the
-  // constantly-updating Haversine distance + nearest-first ordering.
+  // Live foreground watch — follows the OS provider directly (no BG
+  // activity-recognition gate), so the map tracks the driver on the emulator
+  // (route playback) and as a belt-and-braces source on device.
+  const watched = useWatchedLocation(
+    currentLocation.permissionStatus === 'granted',
+  );
+
+  // Read the GPS-store selectors UNCONDITIONALLY — a hook can't sit behind a
+  // `??` short-circuit (it would stop being called once `watched` emits,
+  // changing hook order). The precedence is applied to the resolved values.
+  const gpsLocation = useGpsCurrentLocation();
+  const gpsHeading = useGpsCurrentHeading();
+
+  // Live driver position: prefer the fine-grained foreground watch (10m, no
+  // activity gate), then the BG stream, then the one-shot mount read.
+  // Watch-FIRST is load-bearing: the BG SDK emits a single fix then goes
+  // quiet behind its 200m distanceFilter + activity-recognition gate
+  // (reports "still" on the emulator), so a BG-first order pins the marker
+  // to that stale fix and it never follows. Drives the constantly-updating
+  // Haversine distance + nearest-first ordering AND the car marker / camera.
   const liveDriverLocation =
-    useGpsCurrentLocation() ?? currentLocation.coordinates;
+    watched.coordinates ?? gpsLocation ?? currentLocation.coordinates;
+
+  // Live travel heading — foreground watch preferred, BG stream fallback
+  // (same staleness reasoning as the position above). Both hold their last
+  // bearing across stationary fixes so the car marker doesn't snap to north.
+  const liveDriverHeading = watched.heading ?? gpsHeading;
 
   // Nearest-first ordering by live Haversine distance. Recomputed as the
   // driver moves (cheap for the handful of in-radius rides). Falls back to
@@ -344,6 +377,7 @@ export function useDriverHomeViewModel(): UseDriverHomeViewModel {
     noActiveVehicle,
     availableRides,
     liveDriverLocation,
+    liveDriverHeading,
     inProgressRides,
     scheduledRides,
     permissionStatus: currentLocation.permissionStatus,

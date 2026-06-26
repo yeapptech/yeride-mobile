@@ -525,9 +525,19 @@ export class BackgroundGeolocationClient implements BackgroundGeolocationService
         ? coords.speed
         : null;
 
+    // Heading: degrees clockwise from north. The SDK reports `-1` (and
+    // sometimes omits it) when the fix didn't come from GPS or the device
+    // is stationary — normalise those to `null` so the store can hold the
+    // last known heading rather than snap the car marker to north.
+    const heading =
+      typeof coords.heading === 'number' && coords.heading >= 0
+        ? coords.heading
+        : null;
+
     const event: BgLocationEvent = {
       coords: coordsR.value,
       speed,
+      heading,
       odometerMeters: loc.odometer ?? 0,
       timestampMs: Number.isFinite(ts) ? ts : Date.now(),
       isMoving: Boolean(loc.is_moving),

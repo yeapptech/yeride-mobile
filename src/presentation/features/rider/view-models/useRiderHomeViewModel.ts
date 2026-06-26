@@ -8,7 +8,7 @@ import type { SavedPlace } from '@domain/entities/SavedPlace';
 import type { ServiceArea } from '@domain/entities/ServiceArea';
 import type { User } from '@domain/entities/User';
 import { UserLocation } from '@domain/entities/UserLocation';
-import { useCurrentLocation } from '@presentation/hooks';
+import { useCurrentLocation, useWatchedLocation } from '@presentation/hooks';
 import type {
   LocationPermission,
   UseCurrentLocation,
@@ -21,7 +21,11 @@ import {
   useScheduledRidesSubscription,
   useUpdateLocationMutation,
 } from '@presentation/queries';
-import { useServiceAreaStore, useTripDraftStore } from '@presentation/stores';
+import {
+  useGpsCurrentLocation,
+  useServiceAreaStore,
+  useTripDraftStore,
+} from '@presentation/stores';
 import { LOG } from '@shared/logger';
 
 const logger = LOG.extend('RiderHomeVM');
@@ -57,6 +61,14 @@ export interface UseRiderHomeViewModel {
   readonly status: RiderHomeStatus;
   readonly user: User | null;
   readonly currentLocation: UseCurrentLocation;
+  /**
+   * Live "you are here" coordinate — the BG-geolocation stream, falling back
+   * to the one-shot foreground read before it emits. Drives the map camera +
+   * marker so they follow the rider instead of freezing at the mount-time
+   * fix. (`currentLocation` stays for the service-area lookup + permission /
+   * error banners + the stable Firestore location write.)
+   */
+  readonly liveLocation: Coordinates | null;
   readonly activeServiceArea: ServiceArea | null;
   /** Live list of the rider's in-progress rides (newest-first). */
   readonly inProgressRides: readonly Ride[];
@@ -86,6 +98,26 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
   const setReady = useServiceAreaStore((s) => s.setReady);
   const setActiveArea = useServiceAreaStore((s) => s.setActiveArea);
   const setDropoff = useTripDraftStore((s) => s.setDropoff);
+
+  // Live foreground watch — follows the OS provider directly so the map
+  // tracks the rider on the emulator (route playback) + on device, where the
+  // BG stream's activity-recognition gate may keep it stationary.
+  const watched = useWatchedLocation(
+    currentLocation.permissionStatus === 'granted',
+  );
+
+  // Read the GPS-store selector unconditionally — a hook can't sit behind a
+  // `??` short-circuit (it would stop being called once `watched` emits).
+  const gpsLocation = useGpsCurrentLocation();
+  // Live coordinate for the map camera + "you are here" marker: foreground
+  // watch FIRST (10m, ungated), then the BG stream, then the one-shot read as
+  // the cold-start fallback. Watch-first is required: the BG SDK emits one
+  // fix then goes quiet behind its 200m filter + activity gate (stationary on
+  // the emulator), so a BG-first order would freeze the marker on that stale
+  // fix. Kept separate from the stable `currentLocation` read that keys the
+  // service-area lookup + Firestore write so those don't churn.
+  const liveLocation =
+    watched.coordinates ?? gpsLocation ?? currentLocation.coordinates;
 
   const user = userQuery.data ?? null;
   const activeServiceArea = activeAreaQuery.data ?? null;
@@ -200,6 +232,7 @@ export function useRiderHomeViewModel(): UseRiderHomeViewModel {
     status,
     user,
     currentLocation,
+    liveLocation,
     activeServiceArea,
     inProgressRides,
     scheduledRides,

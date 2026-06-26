@@ -1,7 +1,11 @@
 import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Map, type MapMarkerProps } from '@presentation/components/map';
+import {
+  DRIVER_CAR_MARKER,
+  Map,
+  type MapMarkerProps,
+} from '@presentation/components/map';
 import { PermissionDeniedBanner } from '@presentation/components/permission';
 import { HomeRideSections } from '@presentation/components/trip/HomeRideSections';
 import { Button } from '@presentation/components/ui/Button';
@@ -32,19 +36,27 @@ import { useDriverHomeViewModel } from '../view-models/useDriverHomeViewModel';
 export default function DriverHomeScreen() {
   const vm = useDriverHomeViewModel();
 
-  const initialRegion = vm.currentLocation.coordinates
+  // Camera + marker follow the LIVE GPS coordinate (BG-geolocation stream,
+  // falling back to the one-shot foreground read before it emits) so the
+  // map tracks the driver as they move — not the stale mount-time fix.
+  const initialRegion = vm.liveDriverLocation
     ? {
-        latitude: vm.currentLocation.coordinates.latitude,
-        longitude: vm.currentLocation.coordinates.longitude,
+        latitude: vm.liveDriverLocation.latitude,
+        longitude: vm.liveDriverLocation.longitude,
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
       }
     : null;
 
-  const youAreHereMarker: MapMarkerProps | null = vm.currentLocation.coordinates
+  // Driver "you are here" — a cab-yellow car that rotates to face the
+  // direction of travel (live GPS heading). Rendered via the driver slot.
+  const driverMarker: MapMarkerProps | null = vm.liveDriverLocation
     ? {
-        coordinates: vm.currentLocation.coordinates,
+        coordinates: vm.liveDriverLocation,
         title: 'You are here',
+        image: DRIVER_CAR_MARKER,
+        rotation: vm.liveDriverHeading ?? 0,
+        flat: true,
       }
     : null;
 
@@ -61,9 +73,9 @@ export default function DriverHomeScreen() {
     <View className="flex-1 bg-background">
       <Map
         initialRegion={initialRegion}
-        pickup={youAreHereMarker}
+        pickup={null}
         dropoff={null}
-        driver={null}
+        driver={driverMarker}
         selectedRoute={null}
         pickupRoute={null}
         alternativeRoutes={[]}
