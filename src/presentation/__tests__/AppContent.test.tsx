@@ -329,6 +329,7 @@ describe('AppContent — Phase 7 turn 2 GPS lifecycle', () => {
       useGpsStore.getState().setLocation({
         coords: unwrap(Coordinates.create(25.7617, -80.1918)),
         speed: 5,
+        heading: null,
         odometerMeters: 2000,
         timestampMs: Date.now(),
         isMoving: true,

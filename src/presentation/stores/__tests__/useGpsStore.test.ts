@@ -20,6 +20,7 @@ function locationEvent(
   return {
     coords,
     speed: 12.5,
+    heading: null,
     odometerMeters: 1500,
     timestampMs: 1_700_000_000_000,
     isMoving: true,
@@ -90,6 +91,23 @@ describe('useGpsStore', () => {
     expect(s.currentLocation).toBe(FORT_LAUDERDALE);
     expect(s.currentSpeed).toBe(0);
     expect(s.currentOdometerMeters).toBe(5000);
+  });
+
+  it('starts with a null heading and stores a fresh heading from the event', () => {
+    expect(useGpsStore.getState().currentHeading).toBeNull();
+    useGpsStore.getState().setLocation(locationEvent(MIAMI, { heading: 90 }));
+    expect(useGpsStore.getState().currentHeading).toBe(90);
+  });
+
+  it('setLocation HOLDS the previous heading when the event reports null (stationary fix doesn’t snap the marker to north)', () => {
+    useGpsStore.getState().setLocation(locationEvent(MIAMI, { heading: 137 }));
+    useGpsStore
+      .getState()
+      .setLocation(locationEvent(FORT_LAUDERDALE, { heading: null }));
+    const s = useGpsStore.getState();
+    // Position still advances; heading is retained from the last GPS fix.
+    expect(s.currentLocation).toBe(FORT_LAUDERDALE);
+    expect(s.currentHeading).toBe(137);
   });
 
   it('setGeofenceEvent on a pickup ENTER flips isInsidePickupGeofence true', () => {

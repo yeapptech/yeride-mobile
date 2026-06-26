@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { type ImageSourcePropType, StyleSheet, View } from 'react-native';
 
 import type { Coordinates } from '@domain/entities/Coordinates';
 import MapView, {
@@ -79,6 +79,22 @@ export interface MapMarkerProps {
   /** Tint colour. Default depends on the slot. */
   readonly color?: string;
   readonly title?: string;
+  /**
+   * Custom marker image (driver slot only). When set, the marker renders
+   * this image instead of the default coloured pin — used for the driver
+   * car marker. Ship density variants (`@2x`/`@3x`) so it stays crisp.
+   */
+  readonly image?: ImageSourcePropType;
+  /**
+   * Rotation in degrees clockwise (driver slot only). Pair with `image` +
+   * `flat` to face a marker in the direction of travel (GPS heading).
+   */
+  readonly rotation?: number;
+  /**
+   * When `true`, the marker lies flat on the map and rotates with it (so
+   * `rotation` reads as a compass bearing). Driver car marker uses this.
+   */
+  readonly flat?: boolean;
 }
 
 export interface MapRoute {
@@ -342,7 +358,21 @@ export function Map({
           opacity={driver ? 1 : 0}
           anchor={{ x: 0.5, y: 0.5 }}
           tracksViewChanges={false}
+          // `pinColor` is ALWAYS passed, even when an `image` overrides it
+          // visually: the react-native-maps Fabric MarkerManager NPEs in
+          // `setPinColor(null).intValue()` the moment the prop is omitted
+          // after having been set, crashing the surface. `rotation` / `flat`
+          // are primitive Fabric props that default safely, so they can stay
+          // conditional. The car `image` renders on top of the pin; `flat` +
+          // `rotation` face it along the GPS heading.
           pinColor={driver?.color ?? PIN_DRIVER}
+          {...(driver?.image
+            ? {
+                image: driver.image,
+                rotation: driver.rotation ?? 0,
+                flat: driver.flat ?? true,
+              }
+            : {})}
           {...(driver?.title ? { title: driver.title } : {})}
         />
       </MapView>

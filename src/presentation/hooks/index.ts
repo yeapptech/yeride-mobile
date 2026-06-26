@@ -7,6 +7,7 @@ export {
   type LocationPermission,
   type UseCurrentLocation,
 } from './useCurrentLocation';
+export { useWatchedLocation, type WatchedLocation } from './useWatchedLocation';
 export { useGpsLifecycle, type UseGpsLifecycleArgs } from './useGpsLifecycle';
 export {
   useActiveRideForGeofence,

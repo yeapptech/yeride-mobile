@@ -52,6 +52,15 @@ jest.mock('@react-navigation/native', () => ({
 // returns null instead of throwing on simulators that have a seeded
 // GPS point but no fresh fix). Mock both surfaces; the test suite
 // resolves to last-known immediately.
+// Captures every `watchPositionAsync` callback so tests can emit a moving
+// foreground fix and assert the marker follows. `mock`-prefixed so the hoisted
+// jest.mock factory may reference it.
+const mockWatchCallbacks: Array<
+  (reading: {
+    coords: { latitude: number; longitude: number; heading?: number | null };
+  }) => void
+> = [];
+
 jest.mock('expo-location', () => ({
   __esModule: true,
   Accuracy: { Balanced: 3, Lowest: 1 },
@@ -64,6 +73,10 @@ jest.mock('expo-location', () => ({
   getCurrentPositionAsync: jest.fn(async () => ({
     coords: { latitude: 25.7617, longitude: -80.1918 },
   })),
+  watchPositionAsync: jest.fn(async (_opts, cb) => {
+    mockWatchCallbacks.push(cb);
+    return { remove: jest.fn() };
+  }),
 }));
 
 function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: Error }): T {
@@ -309,6 +322,7 @@ function withTestContainer(opts: {
 describe('useDriverHomeViewModel', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    mockWatchCallbacks.length = 0;
     useServiceAreaStore.getState().reset();
     useDriverStatusStore.getState().reset();
     useGpsStore.getState().reset();
@@ -326,6 +340,115 @@ describe('useDriverHomeViewModel', () => {
     expect(result.current.activeServiceArea?.identifier).toBe('miami');
     expect(result.current.user?.email.value).toBe('driver@yeapp.tech');
     expect(result.current.mode).toBe('offline');
+  });
+
+  it('liveDriverLocation falls back to the foreground read (heading null) before the BG stream emits', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    // No BG-geolocation event seeded → the one-shot foreground read (mocked
+    // expo-location → Miami) drives the marker; no heading yet.
+    expect(result.current.liveDriverLocation?.latitude).toBeCloseTo(25.7617);
+    expect(result.current.liveDriverLocation?.longitude).toBeCloseTo(-80.1918);
+    expect(result.current.liveDriverHeading).toBeNull();
+  });
+
+  it('liveDriverLocation + liveDriverHeading prefer the live BG-geolocation stream over the foreground read', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+
+    // A fresh BG fix (Fort Lauderdale, heading 137°) must win over the
+    // stale mount-time foreground read — this is the marker-follows-GPS fix.
+    act(() => {
+      useGpsStore.getState().setLocation({
+        coords: FORT_LAUDERDALE,
+        speed: 8,
+        heading: 137,
+        odometerMeters: 100,
+        timestampMs: 1,
+        isMoving: true,
+      });
+    });
+
+    expect(result.current.liveDriverLocation).toBe(FORT_LAUDERDALE);
+    expect(result.current.liveDriverHeading).toBe(137);
+  });
+
+  it('liveDriverLocation + liveDriverHeading follow the foreground watch when the BG stream stays silent (emulator case)', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    // The watch registers once permission is granted.
+    await waitFor(() => {
+      expect(mockWatchCallbacks.length).toBeGreaterThan(0);
+    });
+
+    // BG store empty (emulator: SDK stays stationary) → a moving foreground
+    // fix must drive the marker + heading.
+    act(() => {
+      mockWatchCallbacks.forEach((cb) =>
+        cb({ coords: { latitude: 26.2, longitude: -80.3, heading: 215 } }),
+      );
+    });
+
+    expect(result.current.liveDriverLocation?.latitude).toBeCloseTo(26.2);
+    expect(result.current.liveDriverLocation?.longitude).toBeCloseTo(-80.3);
+    expect(result.current.liveDriverHeading).toBe(215);
+  });
+
+  it('keeps following the foreground watch after the BG stream emitted ONE stale fix then went silent (200m filter / activity gate)', async () => {
+    const setup = await setupSeededState();
+    const { result } = renderHook(() => useDriverHomeViewModel(), {
+      wrapper: withTestContainer(setup),
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('ready');
+    });
+    await waitFor(() => {
+      expect(mockWatchCallbacks.length).toBeGreaterThan(0);
+    });
+
+    // The BG SDK delivers a single initial fix on start(), then goes quiet
+    // behind its 200m distanceFilter + activity-recognition gate (reports
+    // "still" on the emulator; only jumps every 200m on device). This value
+    // is non-null but FROZEN.
+    act(() => {
+      useGpsStore.getState().setLocation({
+        coords: FORT_LAUDERDALE,
+        speed: 8,
+        heading: 137,
+        odometerMeters: 100,
+        timestampMs: 1,
+        isMoving: true,
+      });
+    });
+
+    // The driver keeps moving; the foreground watch advances every ~10m.
+    act(() => {
+      mockWatchCallbacks.forEach((cb) =>
+        cb({ coords: { latitude: 26.2, longitude: -80.3, heading: 215 } }),
+      );
+    });
+
+    // The marker must FOLLOW the live watch, not stay pinned to the stale BG
+    // fix. (Regression: a non-null-but-frozen BG value used to shadow the
+    // fresher watch via `useGpsCurrentLocation() ?? watched.coordinates`.)
+    expect(result.current.liveDriverLocation?.latitude).toBeCloseTo(26.2);
+    expect(result.current.liveDriverLocation?.longitude).toBeCloseTo(-80.3);
+    expect(result.current.liveDriverHeading).toBe(215);
   });
 
   it('starts offline; available-rides subscription stays empty', async () => {

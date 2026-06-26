@@ -8,17 +8,22 @@ import type { CancellationReason } from '@domain/entities/CancellationReason';
 import { RideId } from '@domain/entities/RideId';
 import { ChatModal } from '@presentation/components/chat/ChatModal';
 import {
+  DRIVER_CAR_MARKER,
   Map,
   type MapMarkerProps,
   type MapRoute,
 } from '@presentation/components/map';
 import { DriverCancelReasonSheet } from '@presentation/components/trip/DriverCancelReasonSheet';
-import { useCurrentLocation } from '@presentation/hooks';
+import { useCurrentLocation, useWatchedLocation } from '@presentation/hooks';
 import type {
   DriverStackNavigation,
   DriverStackScreenProps,
 } from '@presentation/navigation/types';
 import { useCurrentUserQuery } from '@presentation/queries';
+import {
+  useGpsCurrentHeading,
+  useGpsCurrentLocation,
+} from '@presentation/stores';
 
 import { AtPickupView } from '../components/AtPickupView';
 import { CompletedView } from '../components/CompletedView';
@@ -85,6 +90,22 @@ export default function DriverMonitorScreen({
 
 function DriverMonitorContent({ rideId }: { rideId: RideId }) {
   const currentLocation = useCurrentLocation();
+  const watched = useWatchedLocation(
+    currentLocation.permissionStatus === 'granted',
+  );
+  // Read the GPS-store selectors unconditionally — a hook can't sit behind a
+  // `??` short-circuit (it would stop being called once `watched` emits).
+  const gpsLocation = useGpsCurrentLocation();
+  const gpsHeading = useGpsCurrentHeading();
+  // Live driver coordinate + heading: foreground watch FIRST (10m, ungated),
+  // then the BG stream, then the one-shot cold-start read — so the car marker
+  // tracks + rotates with the driver. Watch-first is required: the BG SDK
+  // emits one fix then goes quiet behind its 200m filter + activity gate
+  // (stationary on the emulator), so a BG-first order freezes the marker on
+  // that stale fix instead of following.
+  const liveLocation =
+    watched.coordinates ?? gpsLocation ?? currentLocation.coordinates;
+  const liveHeading = watched.heading ?? gpsHeading;
   const navigation = useNavigation<DriverStackNavigation>();
   const userQuery = useCurrentUserQuery();
   // Push the SDK NavigationController into our adapter as soon as
@@ -137,10 +158,10 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
       }
-    : currentLocation.coordinates
+    : liveLocation
       ? {
-          latitude: currentLocation.coordinates.latitude,
-          longitude: currentLocation.coordinates.longitude,
+          latitude: liveLocation.latitude,
+          longitude: liveLocation.longitude,
           latitudeDelta: 0.05,
           longitudeDelta: 0.05,
         }
@@ -160,8 +181,14 @@ function DriverMonitorContent({ rideId }: { rideId: RideId }) {
       }
     : null;
 
-  const driverMarker: MapMarkerProps | null = currentLocation.coordinates
-    ? { coordinates: currentLocation.coordinates, title: 'You' }
+  const driverMarker: MapMarkerProps | null = liveLocation
+    ? {
+        coordinates: liveLocation,
+        title: 'You',
+        image: DRIVER_CAR_MARKER,
+        rotation: liveHeading ?? 0,
+        flat: true,
+      }
     : null;
 
   // Driver → pickup polyline only while dispatched (en-route OR at-pickup

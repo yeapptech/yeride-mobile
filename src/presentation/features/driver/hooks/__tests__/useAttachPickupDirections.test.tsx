@@ -141,6 +141,7 @@ function locationEvent(coords: Coordinates = DRIVER_LOC): BgLocationEvent {
   return {
     coords,
     speed: null,
+    heading: null,
     odometerMeters: 0,
     timestampMs: 0,
     isMoving: true,

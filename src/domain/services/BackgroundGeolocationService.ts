@@ -82,6 +82,12 @@ export interface BgLocationEvent {
   readonly coords: Coordinates;
   /** Speed in meters per second, or `null` if unavailable. */
   readonly speed: number | null;
+  /**
+   * Direction of travel in degrees clockwise from true north (0–360), or
+   * `null` when the SDK can't report it (no GPS fix / stationary — it
+   * reports `-1` in that case). Used to rotate the driver car marker.
+   */
+  readonly heading: number | null;
   /** Cumulative distance traveled this session, in meters. */
   readonly odometerMeters: number;
   /** Device system time at recording, as `Date.getTime()` ms. */

@@ -20,7 +20,7 @@
  */
 
 import type { ComponentType, ReactNode, RefObject } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
+import type { ImageSourcePropType, StyleProp, ViewStyle } from 'react-native';
 
 export interface LatLng {
   latitude: number;
@@ -72,6 +72,12 @@ export interface MarkerProps {
   opacity?: number;
   anchor?: { x: number; y: number };
   tracksViewChanges?: boolean;
+  /** Custom marker image (driver car marker). */
+  image?: ImageSourcePropType;
+  /** Rotation in degrees clockwise; pair with `flat` for a heading bearing. */
+  rotation?: number;
+  /** Lie flat on the map so `rotation` reads as a compass bearing. */
+  flat?: boolean;
   children?: ReactNode;
 }
 
@@ -123,6 +129,23 @@ export const animateToRegionCalls: Array<{
 }>;
 
 /**
- * Truncates `animateToRegionCalls` to length 0. Call from `beforeEach`.
+ * Per-render capture of every `<Marker>`'s props (one entry per marker per
+ * render). Tests assert a slot's coordinate / image / rotation — e.g. the
+ * driver car marker tracks the live GPS coordinate + heading. Reset via
+ * `resetMapMockState()`.
+ */
+export const markerRenders: Array<{
+  coordinate?: LatLng;
+  opacity?: number;
+  pinColor?: string;
+  rotation?: number;
+  flat?: boolean;
+  image?: unknown;
+  title?: string;
+}>;
+
+/**
+ * Truncates `animateToRegionCalls` + `markerRenders` to length 0. Call from
+ * `beforeEach`.
  */
 export function resetMapMockState(): void;

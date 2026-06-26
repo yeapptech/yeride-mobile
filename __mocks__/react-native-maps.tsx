@@ -51,8 +51,16 @@ type PolylineProps = {
   }>;
 };
 
+type LatLng = { latitude: number; longitude: number };
+
 type MarkerProps = {
+  readonly coordinate?: LatLng;
   readonly opacity?: number;
+  readonly pinColor?: string;
+  readonly rotation?: number;
+  readonly flat?: boolean;
+  readonly image?: unknown;
+  readonly title?: string;
   readonly children?: React.ReactNode;
 };
 
@@ -79,8 +87,27 @@ export const animateToRegionCalls: Array<{
   durationMs?: number;
 }> = [];
 
+/**
+ * Module-level capture of every `<Marker>` render's props (one entry per
+ * marker per render). Tests assert that a slot received the right
+ * coordinate / image / rotation — e.g. the driver car marker tracks the
+ * live GPS coordinate + heading. Filter by `image` to isolate the driver
+ * car marker, or by `opacity` to find the visible slot. Reset via
+ * `resetMapMockState()` in `beforeEach`.
+ */
+export const markerRenders: Array<{
+  coordinate?: LatLng;
+  opacity?: number;
+  pinColor?: string;
+  rotation?: number;
+  flat?: boolean;
+  image?: unknown;
+  title?: string;
+}> = [];
+
 export function resetMapMockState(): void {
   animateToRegionCalls.length = 0;
+  markerRenders.length = 0;
 }
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(
@@ -109,8 +136,25 @@ export const Polyline = ({ coordinates }: PolylineProps) => (
   <View testID={`map-polyline-len-${(coordinates ?? []).length}`} />
 );
 
-export const Marker = ({ opacity }: MarkerProps) => (
-  <View testID={`map-marker-opacity-${opacity ?? 1}`} />
-);
+export const Marker = ({
+  coordinate,
+  opacity,
+  pinColor,
+  rotation,
+  flat,
+  image,
+  title,
+}: MarkerProps) => {
+  markerRenders.push({
+    ...(coordinate ? { coordinate } : {}),
+    ...(opacity === undefined ? {} : { opacity }),
+    ...(pinColor === undefined ? {} : { pinColor }),
+    ...(rotation === undefined ? {} : { rotation }),
+    ...(flat === undefined ? {} : { flat }),
+    ...(image === undefined ? {} : { image }),
+    ...(title === undefined ? {} : { title }),
+  });
+  return <View testID={`map-marker-opacity-${opacity ?? 1}`} />;
+};
 
 export default MapView;

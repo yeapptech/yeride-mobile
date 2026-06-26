@@ -38,18 +38,21 @@ export default function RiderHomeScreen() {
 
   const greeting = timeOfDayGreeting();
 
-  const initialRegion = vm.currentLocation.coordinates
+  // Camera + "you are here" pin follow the LIVE GPS coordinate (BG stream,
+  // foreground read as the cold-start fallback) so the map tracks the rider
+  // instead of freezing at the mount-time fix.
+  const initialRegion = vm.liveLocation
     ? {
-        latitude: vm.currentLocation.coordinates.latitude,
-        longitude: vm.currentLocation.coordinates.longitude,
+        latitude: vm.liveLocation.latitude,
+        longitude: vm.liveLocation.longitude,
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
       }
     : null;
 
-  const youAreHereMarker: MapMarkerProps | null = vm.currentLocation.coordinates
+  const youAreHereMarker: MapMarkerProps | null = vm.liveLocation
     ? {
-        coordinates: vm.currentLocation.coordinates,
+        coordinates: vm.liveLocation,
         title: 'You are here',
       }
     : null;

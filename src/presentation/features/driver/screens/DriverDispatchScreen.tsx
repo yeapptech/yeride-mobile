@@ -4,10 +4,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Coordinates } from '@domain/entities/Coordinates';
 import type { Ride } from '@domain/entities/Ride';
 import { RideId } from '@domain/entities/RideId';
-import { Map, type MapMarkerProps } from '@presentation/components/map';
+import {
+  DRIVER_CAR_MARKER,
+  Map,
+  type MapMarkerProps,
+} from '@presentation/components/map';
 import { Button } from '@presentation/components/ui/Button';
-import { useCurrentLocation } from '@presentation/hooks';
+import { useCurrentLocation, useWatchedLocation } from '@presentation/hooks';
 import type { DriverStackScreenProps } from '@presentation/navigation/types';
+import {
+  useGpsCurrentHeading,
+  useGpsCurrentLocation,
+} from '@presentation/stores';
 import { formatMilesAway } from '@presentation/utils/formatDistance';
 
 import { useDriverDispatchViewModel } from '../view-models/useDriverDispatchViewModel';
@@ -64,10 +72,31 @@ export default function DriverDispatchScreen({
 
 function DriverDispatchInner({ rideId }: { rideId: RideId }) {
   const currentLocation = useCurrentLocation();
+  // VM keys its subscriptions on the STABLE foreground read — don't pass the
+  // live coordinate here or the dispatch subscription would churn on every
+  // GPS tick. The live coordinate below only drives display (marker +
+  // camera + "X mi away").
   const vm = useDriverDispatchViewModel({
     rideId,
     driverLocation: currentLocation.coordinates,
   });
+
+  // Live driver coordinate + heading: foreground watch FIRST (10m, ungated),
+  // then the BG stream, then the one-shot cold-start read — so the car marker
+  // tracks + rotates with the driver. Watch-first is required: the BG SDK
+  // emits one fix then goes quiet behind its 200m filter + activity gate
+  // (stationary on the emulator), so a BG-first order freezes the marker on
+  // that stale fix. The VM arg above stays on the stable one-shot read.
+  const watched = useWatchedLocation(
+    currentLocation.permissionStatus === 'granted',
+  );
+  // Read the GPS-store selectors unconditionally — a hook can't sit behind a
+  // `??` short-circuit (it would stop being called once `watched` emits).
+  const gpsLocation = useGpsCurrentLocation();
+  const gpsHeading = useGpsCurrentHeading();
+  const liveLocation =
+    watched.coordinates ?? gpsLocation ?? currentLocation.coordinates;
+  const liveHeading = watched.heading ?? gpsHeading;
 
   const initialRegion = vm.ride
     ? {
@@ -76,10 +105,10 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
       }
-    : currentLocation.coordinates
+    : liveLocation
       ? {
-          latitude: currentLocation.coordinates.latitude,
-          longitude: currentLocation.coordinates.longitude,
+          latitude: liveLocation.latitude,
+          longitude: liveLocation.longitude,
           latitudeDelta: 0.05,
           longitudeDelta: 0.05,
         }
@@ -92,20 +121,21 @@ function DriverDispatchInner({ rideId }: { rideId: RideId }) {
       }
     : null;
 
-  const driverMarker: MapMarkerProps | null = currentLocation.coordinates
+  const driverMarker: MapMarkerProps | null = liveLocation
     ? {
-        coordinates: currentLocation.coordinates,
+        coordinates: liveLocation,
         title: 'You',
+        image: DRIVER_CAR_MARKER,
+        rotation: liveHeading ?? 0,
+        flat: true,
       }
     : null;
 
   // Haversine "X mi away" to pickup — no Google call. The driver→pickup
   // route + polyline are computed AFTER the claim, in DriverMonitor.
   const pickupDistanceText =
-    currentLocation.coordinates && vm.ride
-      ? formatMilesAway(
-          currentLocation.coordinates.distanceTo(vm.ride.pickup.location),
-        )
+    liveLocation && vm.ride
+      ? formatMilesAway(liveLocation.distanceTo(vm.ride.pickup.location))
       : null;
 
   return (

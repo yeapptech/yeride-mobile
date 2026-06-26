@@ -79,13 +79,14 @@ export function useCurrentLocation(): UseCurrentLocation {
       // `maxAge: 2 minutes` — we'd previously left this uncapped, which
       // burned us on the Android emulator after sessions where the OS's
       // FusedLocationProvider had a stale fix from a prior trip's
-      // dropoff cached. With the BG-geolocation native init skipped in
-      // `__DEV__` (tslocationmanager:4.1.5 priority workaround) there's
-      // no background stream to correct the stale read, so the map sat
-      // on the old coordinate indefinitely. A 2-minute cap still
-      // satisfies the simulator-seeded-once case (a fresh SET LOCATION
-      // is well under 2 min old when the app boots) and falls through
-      // to a live `getCurrentPositionAsync` call otherwise.
+      // dropoff cached. The BG-geolocation stream never wakes on the
+      // emulator (its activity-recognition gate reports "still" during
+      // route playback), so there's no background stream to correct the
+      // stale read and the map sat on the old coordinate indefinitely.
+      // A 2-minute cap still satisfies the simulator-seeded-once case (a
+      // fresh SET LOCATION is well under 2 min old when the app boots)
+      // and falls through to a live `getCurrentPositionAsync` call
+      // otherwise.
       //
       // `requiredAccuracy: 200m` — a freshly-seeded simulator fix is
       // exact; a stale cached fix from a different geographic area

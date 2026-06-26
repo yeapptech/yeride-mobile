@@ -32,6 +32,7 @@ function locationEvent(overrides?: Partial<BgLocationEvent>): BgLocationEvent {
   return {
     coords: MIAMI,
     speed: 12.5,
+    heading: null,
     odometerMeters: 1500,
     timestampMs: 1_700_000_000_000,
     isMoving: true,
